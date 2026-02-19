@@ -28,30 +28,29 @@
 
 ## Phase 1 — Infrastructure (get everything running empty)
 
-- [ ] Write `docker-compose.yml` with:
+- [x] Write `docker-compose.yml` with:
   - All 4 PostgreSQL DBs (`seats-db`, `users-db`, `orders-db`, `events-db`) with healthchecks
   - RabbitMQ (`rabbitmq:3-management`) with healthcheck
   - Service stubs for all 5 microservices + Kong
   - Named volumes for each database (`seats_data`, `users_data`, `orders_data`, `events_data`)
   - All `depends_on` with `condition: service_healthy` so services only start after deps are ready
   - See `INSTRUCTIONS.md` Section 4 for full example YAML
-- [ ] Write `docker-compose.dev.yml` with:
+- [x] Write `docker-compose.dev.yml` with:
   - Volume mounts for each service's `src/` directory (hot-reload without rebuild)
   - `FLASK_DEBUG: "1"` and `FLASK_ENV: development` per service
-- [ ] Write `rabbitmq/definitions.json` with:
+- [x] Write `rabbitmq/definitions.json` with:
   - `seat.hold.exchange` (direct, durable)
   - `seat.hold.queue` with `x-message-ttl: 300000` and `x-dead-letter-exchange: seat.release.exchange`
   - `seat.release.exchange` (direct, durable) — the Dead Letter Exchange
   - `seat.release.queue` (durable) — consumed by Inventory Service
   - Bindings: `seat.hold.exchange → seat.hold.queue`, `seat.release.exchange → seat.release.queue`
-  - See `INSTRUCTIONS.md` Section 8 for the exact JSON
-- [ ] Write `rabbitmq/rabbitmq.conf` to load definitions on startup:
+- [x] Write `rabbitmq/rabbitmq.conf` to load definitions on startup:
   - `load_definitions = /etc/rabbitmq/definitions.json`
-- [ ] Add a minimal `Dockerfile` to each service folder (can use a generic Flask or gRPC base image)
-- [ ] Run `docker compose up --build` and confirm all containers start without errors
-- [ ] Confirm RabbitMQ management UI is reachable at `localhost:15672` (default: guest/guest)
-- [ ] Confirm all 4 Postgres instances are reachable (e.g., `psql -h localhost -p <port> -U <user>`)
-- [ ] Confirm all health checks pass (`docker compose ps` shows `healthy` for every service)
+- [x] Add a minimal `Dockerfile` to each service folder (curl added for healthchecks)
+- [x] Run `docker compose up --build` — all 11 containers started healthy ✅
+- [x] Confirm RabbitMQ management UI is reachable at `localhost:15672` (default: guest/guest)
+- [x] Confirm all 4 Postgres instances are reachable on ports 5433-5436
+- [x] Confirm all health checks pass (`docker compose ps` shows `healthy` for all services)
 - [ ] Verify `docker-compose.dev.yml` works: run with both files, edit a source file and confirm Flask auto-restarts
 
 ---

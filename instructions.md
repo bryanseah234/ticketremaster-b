@@ -884,6 +884,12 @@ def main():
 
 Called exclusively from `user-service/src/services/otp_service.py`. All requests use `Content-Type: application/json`.
 
+**Authentication:** Include the API key in an HTTP header on every request:
+
+```
+X-Contacts-Key: <SMU_API_KEY from env>
+```
+
 #### POST /SendOTP
 
 Triggers an OTP SMS to the user's mobile number via Twilio. Returns a `VerificationSid` which **must** be stored temporarily (e.g., in-memory or Redis) and passed to `/VerifyOTP` to complete verification.
