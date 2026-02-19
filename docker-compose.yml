@@ -1,0 +1,203 @@
+services:
+
+  # ── Databases ──────────────────────────────────────────────
+  seats-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: seats_db
+      POSTGRES_USER: inventory_user
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASS}
+    ports:
+      - "5433:5432"
+    volumes:
+      - seats_data:/var/lib/postgresql/data
+      - ./inventory-service/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory_user -d seats_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  users-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: users_db
+      POSTGRES_USER: user_svc_user
+      POSTGRES_PASSWORD: ${USER_DB_PASS}
+    ports:
+      - "5434:5432"
+    volumes:
+      - users_data:/var/lib/postgresql/data
+      - ./user-service/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user_svc_user -d users_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orders-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: orders_db
+      POSTGRES_USER: order_svc_user
+      POSTGRES_PASSWORD: ${ORDER_DB_PASS}
+    ports:
+      - "5435:5432"
+    volumes:
+      - orders_data:/var/lib/postgresql/data
+      - ./order-service/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order_svc_user -d orders_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  events-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: events_db
+      POSTGRES_USER: event_svc_user
+      POSTGRES_PASSWORD: ${EVENT_DB_PASS}
+    ports:
+      - "5436:5432"
+    volumes:
+      - events_data:/var/lib/postgresql/data
+      - ./event-service/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U event_svc_user -d events_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Messaging ──────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── Microservices ───────────────────────────────────────────
+  inventory-service:
+    build: ./inventory-service
+    depends_on:
+      seats-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DB_HOST: seats-db
+      DB_NAME: seats_db
+      DB_USER: inventory_user
+      DB_PASS: ${INVENTORY_DB_PASS}
+      RABBITMQ_HOST: rabbitmq
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  user-service:
+    build: ./user-service
+    depends_on:
+      users-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: users-db
+      DB_NAME: users_db
+      DB_USER: user_svc_user
+      DB_PASS: ${USER_DB_PASS}
+      STRIPE_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      SMU_API_URL: ${SMU_API_URL}
+      SMU_API_KEY: ${SMU_API_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  order-service:
+    build: ./order-service
+    depends_on:
+      orders-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: orders-db
+      DB_NAME: orders_db
+      DB_USER: order_svc_user
+      DB_PASS: ${ORDER_DB_PASS}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  event-service:
+    build: ./event-service
+    depends_on:
+      events-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: events-db
+      DB_NAME: events_db
+      DB_USER: event_svc_user
+      DB_PASS: ${EVENT_DB_PASS}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  orchestrator-service:
+    build: ./orchestrator-service
+    depends_on:
+      inventory-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      event-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      INVENTORY_SERVICE_URL: inventory-service:50051
+      USER_SERVICE_URL: http://user-service:5000
+      ORDER_SERVICE_URL: http://order-service:5001
+      EVENT_SERVICE_URL: http://event-service:5002
+      RABBITMQ_HOST: rabbitmq
+      JWT_SECRET: ${JWT_SECRET}
+      QR_ENCRYPTION_KEY: ${QR_ENCRYPTION_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  api-gateway:
+    build: ./api-gateway
+    depends_on:
+      orchestrator-service:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    environment:
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_DATABASE: "off"
+
+volumes:
+  seats_data:
+  users_data:
+  orders_data:
+  events_data:

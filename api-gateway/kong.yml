@@ -1,8 +1,14 @@
 # Kong Declarative Configuration — DB-less mode
-# Phase 8: Define routes, JWT plugin, CORS plugin, rate limiting
-# See TASKS.md Phase 8 and INSTRUCTIONS.md Section 11 for details.
+# Minimal config for Phase 1: passthrough to Orchestrator
+# Phase 8: Add JWT plugin, CORS plugin, rate limiting, full route definitions
 
 _format_version: "3.0"
 
-services: []
-  # Phase 8: Add orchestrator-service upstream and routes here
+services:
+  - name: orchestrator
+    url: http://orchestrator-service:5003
+    routes:
+      - name: orchestrator-health
+        paths:
+          - /health
+        strip_path: false

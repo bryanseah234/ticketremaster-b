@@ -6,6 +6,27 @@ See INSTRUCTIONS.md Section 8 for the startup pattern.
 """
 
 import threading
+from flask import Flask, jsonify
+from datetime import datetime, timezone
+
+
+def create_health_app():
+    """Minimal Flask app for Docker health checks on port 8080."""
+    app = Flask(__name__)
+
+    @app.route("/health")
+    def health():
+        return jsonify({
+            "status": "healthy",
+            "service": "inventory-service",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "checks": {
+                "database": "not_configured",
+                "rabbitmq": "not_configured",
+            },
+        })
+
+    return app
 
 
 def main():
@@ -21,10 +42,9 @@ def main():
     # )
     # consumer_thread.start()
 
-    # Phase 6: Start HTTP health endpoint on port 8080
-    # grpc_server.wait_for_termination()
-
-    print("Inventory Service started (placeholder)")
+    # Start HTTP health endpoint on port 8080
+    health_app = create_health_app()
+    health_app.run(host="0.0.0.0", port=8080, debug=False)
 
 
 if __name__ == "__main__":
