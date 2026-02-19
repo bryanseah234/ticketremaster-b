@@ -56,3 +56,4 @@ desktop.ini
 *.log
 *.bak
 *.tmp
+.env
