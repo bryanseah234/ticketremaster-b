@@ -109,6 +109,8 @@ services:
     depends_on:
       users-db:
         condition: service_healthy
+    ports:
+      - "5000:5000"
     environment:
       DB_HOST: users-db
       DB_NAME: users_db

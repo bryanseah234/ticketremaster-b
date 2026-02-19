@@ -111,52 +111,52 @@
 
 ## Phase 4 — User Service
 
-- [ ] Scaffold Flask app in `user-service/src/app.py`
-- [ ] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `bcrypt`, `stripe`, `psycopg2-binary`, `sqlalchemy`, `requests`
-- [ ] Connect to `users_db` via env vars
-- [ ] Implement `POST /api/auth/register` 🔓 Public:
+- [x] Scaffold Flask app in `user-service/src/app.py`
+- [x] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `bcrypt`, `stripe`, `psycopg2-binary`, `sqlalchemy`, `requests`
+- [x] Connect to `users_db` via env vars
+- [x] Implement `POST /api/auth/register` 🔓 Public:
   - Hash password with bcrypt
   - Return `user_id` on success
   - Return `EMAIL_ALREADY_EXISTS` (409) if email taken
   - Validate email format, phone format, password length ≥ 8
-- [ ] Implement `POST /api/auth/login` 🔓 Public:
+- [x] Implement `POST /api/auth/login` 🔓 Public:
   - Verify bcrypt hash
   - Issue `access_token` (15min TTL) and `refresh_token` (7 days TTL) via Flask-JWT-Extended
   - Return `user_id`, `email`, `credit_balance` in response body
-- [ ] Implement `POST /api/auth/refresh`:
+- [x] Implement `POST /api/auth/refresh`:
   - Accept `refresh_token` in `Authorization: Bearer` header
   - Return new `access_token`
-- [ ] Implement `POST /api/auth/logout`:
+- [x] Implement `POST /api/auth/logout`:
   - Add JWT to blocklist (in-memory or Redis)
-- [ ] Implement `GET /users/{user_id}`:
+- [x] Implement `GET /users/{user_id}`:
   - Return full user profile (exclude `password_hash`)
   - Return `USER_NOT_FOUND` (404) if not found
-- [ ] Implement `GET /users/{user_id}/risk`:
+- [x] Implement `GET /users/{user_id}/risk`:
   - Returns `{"is_flagged": bool}` — used by Orchestrator to decide if OTP is required
-- [ ] Implement `POST /credits/deduct {user_id, amount}`:
+- [x] Implement `POST /credits/deduct {user_id, amount}`:
   - `SELECT FOR UPDATE` on user row to prevent race conditions
   - Check `credit_balance >= amount`, deduct atomically
   - Return `INSUFFICIENT_CREDITS` (402) if insufficient
-- [ ] Implement `POST /credits/refund {user_id, amount}`:
+- [x] Implement `POST /credits/refund {user_id, amount}`:
   - Add back credits — called by Orchestrator during compensation flows
-- [ ] Implement `POST /credits/transfer {from_user_id, to_user_id, amount}`:
+- [x] Implement `POST /credits/transfer {from_user_id, to_user_id, amount}`:
   - Atomic credit swap in a single DB transaction — used in P2P transfer
-- [ ] Implement `POST /otp/send {user_id}`:
+- [x] Implement `POST /otp/send {user_id}`:
   - Looks up user's `phone` from DB
   - Calls SMU API `POST /SendOTP {Mobile: phone}` — returns `{VerificationSid, Success, ErrorMessage}`
   - **Store `VerificationSid`** — persist on the related transfer/order record or in a short-TTL Redis key keyed by `user_id`; required for verification
   - Return error if `Success == false`
-- [ ] Implement `POST /otp/verify {user_id, otp_code}`:
+- [x] Implement `POST /otp/verify {user_id, otp_code}`:
   - Retrieve stored `VerificationSid` for this user/context
   - Calls SMU API `POST /VerifyOTP {VerificationSid, Code: otp_code}` — returns `{Success, Status, ErrorMessage}`
   - Treat `Status == "approved"` as verified; `Status == "pending"` as wrong code; `Status == "expired"` as expired
   - Track retry count; after 3 failures return `OTP_MAX_RETRIES`
-- [ ] Implement Stripe webhook `POST /api/webhooks/stripe` 🔓 Public:
+- [x] Implement Stripe webhook `POST /api/webhooks/stripe` 🔓 Public:
   - Validate Stripe signature using `STRIPE_WEBHOOK_SECRET`
   - On `payment.succeeded`: add credits to user's `credit_balance`
-- [ ] Implement `GET /health` — check DB connectivity
-- [ ] Add Flasgger docstrings to all endpoints
-- [ ] Write `Dockerfile` and test all endpoints end-to-end
+- [x] Implement `GET /health` — check DB connectivity
+- [x] Add Flasgger docstrings to all endpoints
+- [x] Write `Dockerfile` and test all endpoints end-to-end
 
 ---
 
