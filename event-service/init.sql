@@ -1,0 +1,4 @@
+-- Event Service — events_db schema
+-- Phase 2: Create venues and events tables here.
+-- See INSTRUCTIONS.md Section 3 (events_db) for full schema.
+-- Include seed data for 1 venue + 1-2 events.

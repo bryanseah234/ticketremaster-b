@@ -132,6 +132,10 @@ ticketremaster-b/
 │   │   └── services/event_service.py
 │   └── Dockerfile
 │
+├── outsystems/                     # OutSystems Gatekeeper App integration
+│   ├── README.md                   # Import guide for OutSystems team
+│   └── verification-api-swagger.json  # Swagger 2.0 spec (importable)
+│
 ├── rabbitmq/
 │   ├── definitions.json            # DLX queues, TTL config
 │   └── rabbitmq.conf
@@ -614,6 +618,8 @@ Either the seller (current ticket owner) or the buyer can initiate a transfer. B
 ## 7. Scenario 3 — Ticket Verification (QR Scan)
 
 Staff scans a QR via OutSystems Gatekeeper App. QR codes contain an encrypted payload with a **60-second valid timestamp** to prevent screenshot sharing. Every scan (pass or fail) is written to `entry_logs`.
+
+> **OutSystems Integration:** A ready-to-import Swagger 2.0 spec and step-by-step guide are in the [`outsystems/`](outsystems/) folder. See [`outsystems/README.md`](outsystems/README.md) for import instructions.
 
 ### Verification Flow
 

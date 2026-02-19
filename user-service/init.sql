@@ -1,0 +1,3 @@
+-- User Service — users_db schema
+-- Phase 2: Create users table here.
+-- See INSTRUCTIONS.md Section 3 (users_db) for full schema.

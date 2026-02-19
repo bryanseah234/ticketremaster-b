@@ -1,0 +1,95 @@
+// Inventory Service — gRPC service definition
+// Phase 6: Implement all RPCs and generate Python stubs.
+// See TASKS.md Phase 6 for full RPC list.
+
+syntax = "proto3";
+
+package inventory;
+
+service InventoryService {
+  // Phase 6: ReserveSeat — SELECT FOR UPDATE NOWAIT, status → HELD
+  rpc ReserveSeat (ReserveSeatRequest) returns (ReserveSeatResponse);
+
+  // Phase 6: ConfirmSeat — status → SOLD, set owner_user_id
+  rpc ConfirmSeat (ConfirmSeatRequest) returns (ConfirmSeatResponse);
+
+  // Phase 6: ReleaseSeat — status → AVAILABLE, clear hold fields
+  rpc ReleaseSeat (ReleaseSeatRequest) returns (ReleaseSeatResponse);
+
+  // Phase 6: UpdateOwner — P2P transfer ownership change
+  rpc UpdateOwner (UpdateOwnerRequest) returns (UpdateOwnerResponse);
+
+  // Phase 6: VerifyTicket — read-only check for verification flow
+  rpc VerifyTicket (VerifyTicketRequest) returns (VerifyTicketResponse);
+
+  // Phase 6: MarkCheckedIn — status → CHECKED_IN, write entry_log
+  rpc MarkCheckedIn (MarkCheckedInRequest) returns (MarkCheckedInResponse);
+
+  // Phase 6: GetSeatOwner — ownership check for transfer validation
+  rpc GetSeatOwner (GetSeatOwnerRequest) returns (GetSeatOwnerResponse);
+}
+
+// Phase 6: Define all message types below
+message ReserveSeatRequest {
+  string seat_id = 1;
+  string user_id = 2;
+}
+
+message ReserveSeatResponse {
+  bool success = 1;
+  string held_until = 2;
+}
+
+message ConfirmSeatRequest {
+  string seat_id = 1;
+  string user_id = 2;
+}
+
+message ConfirmSeatResponse {
+  bool success = 1;
+  string qr_code_hash = 2;
+}
+
+message ReleaseSeatRequest {
+  string seat_id = 1;
+}
+
+message ReleaseSeatResponse {
+  bool success = 1;
+}
+
+message UpdateOwnerRequest {
+  string seat_id = 1;
+  string new_owner_id = 2;
+}
+
+message UpdateOwnerResponse {
+  bool success = 1;
+}
+
+message VerifyTicketRequest {
+  string seat_id = 1;
+}
+
+message VerifyTicketResponse {
+  string status = 1;
+  string owner_user_id = 2;
+  string event_id = 3;
+}
+
+message MarkCheckedInRequest {
+  string seat_id = 1;
+}
+
+message MarkCheckedInResponse {
+  bool success = 1;
+}
+
+message GetSeatOwnerRequest {
+  string seat_id = 1;
+}
+
+message GetSeatOwnerResponse {
+  string owner_user_id = 1;
+  string status = 2;
+}

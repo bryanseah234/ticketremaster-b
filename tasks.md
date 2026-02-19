@@ -8,21 +8,21 @@
 
 ## Phase 0 — Project Setup
 
-- [ ] Create repo, initialise git
-- [ ] Copy folder structure from `INSTRUCTIONS.md` Section 2 — create all empty directories
+- [x] Create repo, initialise git
+- [x] Copy folder structure from `INSTRUCTIONS.md` Section 2 — create all empty directories
   - `api-gateway/`, `orchestrator-service/src/routes/`, `orchestrator-service/src/orchestrators/`
   - `inventory-service/src/proto/`, `inventory-service/src/models/`, `inventory-service/src/services/`, `inventory-service/src/consumers/`
   - `user-service/src/models/`, `user-service/src/services/`
   - `order-service/src/models/`, `order-service/src/services/`
   - `event-service/src/models/`, `event-service/src/services/`
   - `rabbitmq/`
-- [ ] Create `.env` from `.env.example` and fill in **local** placeholder values
+- [x] Create `.env` from `.env.example` and fill in **local** placeholder values
   - Fill all `*_DB_PASS` values with dev-safe passwords
   - Set `JWT_SECRET` to any long random string
   - Set `QR_ENCRYPTION_KEY` to exactly 32 characters/bytes
   - Set `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` to Stripe test keys
   - Set `SMU_API_URL` and `SMU_API_KEY` from your lab environment
-- [ ] Write a root-level `README.md` with setup instructions (✅ already done — verify it stays up to date)
+- [x] Write a root-level `README.md` with setup instructions (✅ already done — verify it stays up to date)
 
 ---
 

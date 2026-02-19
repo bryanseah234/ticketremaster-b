@@ -1,0 +1,86 @@
+{
+    "rabbit_version": "3.13.0",
+    "rabbitmq_version": "3.13.0",
+    "vhosts": [
+        {
+            "name": "/"
+        }
+    ],
+    "users": [
+        {
+            "name": "guest",
+            "password_hash": "guest",
+            "hashing_algorithm": "rabbit_password_hashing_sha256",
+            "tags": [
+                "administrator"
+            ]
+        }
+    ],
+    "permissions": [
+        {
+            "user": "guest",
+            "vhost": "/",
+            "configure": ".*",
+            "write": ".*",
+            "read": ".*"
+        }
+    ],
+    "exchanges": [
+        {
+            "name": "seat.hold.exchange",
+            "vhost": "/",
+            "type": "direct",
+            "durable": true,
+            "auto_delete": false,
+            "internal": false,
+            "arguments": {}
+        },
+        {
+            "name": "seat.release.exchange",
+            "vhost": "/",
+            "type": "direct",
+            "durable": true,
+            "auto_delete": false,
+            "internal": false,
+            "arguments": {}
+        }
+    ],
+    "queues": [
+        {
+            "name": "seat.hold.queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {
+                "x-message-ttl": 300000,
+                "x-dead-letter-exchange": "seat.release.exchange",
+                "x-dead-letter-routing-key": "seat.release"
+            }
+        },
+        {
+            "name": "seat.release.queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {}
+        }
+    ],
+    "bindings": [
+        {
+            "source": "seat.hold.exchange",
+            "vhost": "/",
+            "destination": "seat.hold.queue",
+            "destination_type": "queue",
+            "routing_key": "seat.hold",
+            "arguments": {}
+        },
+        {
+            "source": "seat.release.exchange",
+            "vhost": "/",
+            "destination": "seat.release.queue",
+            "destination_type": "queue",
+            "routing_key": "seat.release",
+            "arguments": {}
+        }
+    ]
+}

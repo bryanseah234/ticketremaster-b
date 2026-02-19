@@ -1,0 +1,212 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "title": "TicketRemaster — Verification API",
+        "description": "Ticket verification endpoint for the OutSystems Gatekeeper Scanner App. Import this spec via Service Studio → Consume REST API → Import from Spec.",
+        "version": "1.0.0",
+        "contact": {
+            "name": "TicketRemaster Backend Team"
+        }
+    },
+    "host": "localhost:8000",
+    "basePath": "/api",
+    "schemes": [
+        "http"
+    ],
+    "consumes": [
+        "application/json"
+    ],
+    "produces": [
+        "application/json"
+    ],
+    "securityDefinitions": {
+        "BearerAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "Staff JWT token. Format: 'Bearer <access_token>'"
+        }
+    },
+    "paths": {
+        "/verify": {
+            "post": {
+                "tags": [
+                    "Verification"
+                ],
+                "summary": "Verify ticket QR code at venue entry",
+                "description": "Staff scans a QR code using the Barcode Plugin. The scanned payload is sent here for cryptographic verification, ownership check, hall matching, and duplicate-entry detection. Every scan — pass or fail — is logged to entry_logs.",
+                "operationId": "verifyTicket",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/VerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Scan processed. Check 'data.result' for the outcome — SUCCESS means valid entry, any other value is a rejection with a display message.",
+                        "schema": {
+                            "$ref": "#/definitions/VerifySuccessResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "QR payload could not be decrypted (tampered or wrong key)",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        },
+                        "examples": {
+                            "application/json": {
+                                "success": false,
+                                "error_code": "QR_INVALID",
+                                "message": "QR payload failed decryption or integrity check."
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid staff JWT token",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        },
+                        "examples": {
+                            "application/json": {
+                                "success": false,
+                                "error_code": "UNAUTHORIZED",
+                                "message": "Missing or invalid JWT token."
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "A downstream service is unreachable — retry the scan",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        },
+                        "examples": {
+                            "application/json": {
+                                "success": false,
+                                "error_code": "SERVICE_UNAVAILABLE",
+                                "message": "A downstream service is unreachable. Please retry."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "VerifyRequest": {
+            "type": "object",
+            "required": [
+                "qr_payload",
+                "hall_id",
+                "staff_id"
+            ],
+            "properties": {
+                "qr_payload": {
+                    "type": "string",
+                    "description": "The raw string scanned from the QR code by the Barcode Plugin. This is a base64-encoded AES-256-GCM encrypted payload.",
+                    "example": "dGhpcyBpcyBhIGJhc2U2NCBlbmNvZGVkIGV4YW1wbGU="
+                },
+                "hall_id": {
+                    "type": "string",
+                    "description": "The hall ID where the staff member is currently stationed. Used for wrong-hall detection.",
+                    "example": "HALL-A"
+                },
+                "staff_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "UUID of the staff member performing the scan. Logged for audit.",
+                    "example": "c3d4e5f6-7890-1234-abcd-ef0123456789"
+                }
+            }
+        },
+        "VerifySuccessResponse": {
+            "type": "object",
+            "properties": {
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "data": {
+                    "$ref": "#/definitions/VerifyResultData"
+                }
+            }
+        },
+        "VerifyResultData": {
+            "type": "object",
+            "description": "The scan result. 'result' determines the outcome. On SUCCESS, additional seat info is included.",
+            "required": [
+                "result",
+                "message"
+            ],
+            "properties": {
+                "result": {
+                    "type": "string",
+                    "enum": [
+                        "SUCCESS",
+                        "DUPLICATE",
+                        "UNPAID",
+                        "NOT_FOUND",
+                        "WRONG_HALL",
+                        "EXPIRED"
+                    ],
+                    "description": "Scan outcome. SUCCESS = valid entry. All other values are rejections.",
+                    "example": "SUCCESS"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Human-readable message to display to the staff member.",
+                    "example": "✅ Valid ticket. Welcome!"
+                },
+                "seat_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Seat identifier. Present on SUCCESS.",
+                    "example": "s1s2s3s4-e5e6-f7f8-g9g0-h1h2h3h4h5h6"
+                },
+                "row_number": {
+                    "type": "string",
+                    "description": "Seat row. Present on SUCCESS.",
+                    "example": "A"
+                },
+                "seat_number": {
+                    "type": "integer",
+                    "description": "Seat number within the row. Present on SUCCESS.",
+                    "example": 12
+                },
+                "owner_name": {
+                    "type": "string",
+                    "description": "Name of the ticket owner. Present on SUCCESS.",
+                    "example": "John Doe"
+                }
+            }
+        },
+        "ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "success": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "error_code": {
+                    "type": "string",
+                    "description": "Machine-readable error code.",
+                    "example": "QR_INVALID"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Human-readable error description.",
+                    "example": "QR payload failed decryption or integrity check."
+                }
+            }
+        }
+    }
+}

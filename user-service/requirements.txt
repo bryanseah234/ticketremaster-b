@@ -1,0 +1,9 @@
+flask==3.1.0
+flask-jwt-extended==4.7.1
+flasgger==0.9.7.1
+bcrypt==4.2.1
+stripe==11.4.1
+psycopg2-binary==2.9.10
+sqlalchemy==2.0.36
+requests==2.32.3
+gunicorn==23.0.0

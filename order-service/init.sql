@@ -1,0 +1,4 @@
+-- Order Service — orders_db schema
+-- Phase 2: Create orders and transfers tables here.
+-- See INSTRUCTIONS.md Section 3 (orders_db) for full schema.
+-- Don't forget the partial unique index for one active transfer per seat.

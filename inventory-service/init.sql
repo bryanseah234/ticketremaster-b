@@ -1,0 +1,3 @@
+-- Inventory Service — seats_db schema
+-- Phase 2: Create seats and entry_logs tables here.
+-- See INSTRUCTIONS.md Section 3 (seats_db) for full schema.
