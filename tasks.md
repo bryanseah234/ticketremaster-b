@@ -89,23 +89,23 @@
 
 ## Phase 3 — Event Service (simplest, start here)
 
-- [ ] Scaffold Flask app in `event-service/src/app.py`
-- [ ] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `psycopg2-binary`, `sqlalchemy`
-- [ ] Connect to `events_db` via SQLAlchemy or psycopg2 using env vars `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`
-- [ ] Implement `GET /events`:
+- [x] Scaffold Flask app in `event-service/src/app.py`
+- [x] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `psycopg2-binary`, `sqlalchemy`
+- [x] Connect to `events_db` via SQLAlchemy or psycopg2 using env vars `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`
+- [x] Implement `GET /events`:
   - Returns list of events with nested venue info
   - Supports `?page=` and `?per_page=` query params (default 20, max 100)
   - Uses standard success response format from `API.md` Section 2
-- [ ] Implement `GET /events/{event_id}`:
+- [x] Implement `GET /events/{event_id}`:
   - Returns event including `hall_id`, `venue_id`, pricing tiers, and a `seats` list showing availability
   - Returns `EVENT_NOT_FOUND` (404) if not found
   - Returns `INVALID_UUID` (400) if UUID is malformed
-- [ ] Implement `GET /health`:
+- [x] Implement `GET /health`:
   - Checks DB connectivity
   - Returns `{"status": "healthy", ...}` on 200, `{"status": "unhealthy", ...}` on 503
-- [ ] Add Flasgger docstrings to all endpoints
-- [ ] Write a production-ready `Dockerfile` and confirm service runs in Docker
-- [ ] Test with curl or Swagger UI at `localhost:5002/apidocs/`
+- [x] Add Flasgger docstrings to all endpoints
+- [x] Write a production-ready `Dockerfile` and confirm service runs in Docker
+- [x] Test with curl or Swagger UI at `localhost:5002/apidocs/`
 
 ---
 
