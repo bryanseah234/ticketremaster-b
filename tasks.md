@@ -1,5 +1,7 @@
 # TicketRemaster — Implementation Tasks
 >
+> **⚠️ ATTENTION AI AGENTS:** Read `INSTRUCTIONS.md` Section 15 (Development Guidelines) before starting.
+>
 > Work through these in order. Each phase builds on the previous one.
 > Cross-reference `INSTRUCTIONS.md` for schemas, flow details, and configuration.
 > Cross-reference `API.md` for request/response contracts and error codes.
@@ -57,31 +59,31 @@
 
 ## Phase 2 — Database Setup
 
-- [ ] **seats_db**: Write `inventory-service/init.sql`:
+- [x] **seats_db**: Write `inventory-service/init.sql`:
   - `seats` table — all columns from `INSTRUCTIONS.md` Section 3 (`seat_id UUID PK`, `event_id`, `owner_user_id`, `status ENUM(AVAILABLE/HELD/SOLD/CHECKED_IN)`, `held_by_user_id`, `held_until`, `qr_code_hash`, `price_paid`, `row_number`, `seat_number`, `created_at`, `updated_at`)
   - `entry_logs` table — `log_id`, `seat_id FK`, `scanned_at`, `scanned_by_staff_id`, `result ENUM`, `hall_id_presented`, `hall_id_expected`
   - Use `CREATE TABLE IF NOT EXISTS` throughout
-- [ ] **users_db**: Write `user-service/init.sql`:
+- [x] **users_db**: Write `user-service/init.sql`:
   - `users` table — `user_id`, `email UNIQUE`, `phone`, `password_hash`, `credit_balance NUMERIC(10,2)`, `two_fa_secret`, `is_flagged BOOLEAN`, `created_at`
-- [ ] **orders_db**: Write `order-service/init.sql`:
+- [x] **orders_db**: Write `order-service/init.sql`:
   - `orders` table — `order_id`, `user_id`, `seat_id`, `event_id`, `status ENUM(PENDING/CONFIRMED/FAILED/REFUNDED)`, `credits_charged`, `verification_sid TEXT NULL` (for high-risk purchase OTP — cleared after verification), `created_at`, `confirmed_at`
   - `transfers` table — `transfer_id`, `seat_id`, `seller_user_id`, `buyer_user_id`, `initiated_by ENUM(SELLER/BUYER)`, `status ENUM(INITIATED/PENDING_OTP/COMPLETED/DISPUTED/REVERSED)`, `seller_otp_verified`, `buyer_otp_verified`, `seller_verification_sid TEXT NULL`, `buyer_verification_sid TEXT NULL` (both cleared after verification), `credits_amount`, `dispute_reason`, `created_at`, `completed_at`
   - Partial unique index: `CREATE UNIQUE INDEX idx_one_active_transfer_per_seat ON transfers (seat_id) WHERE status IN ('INITIATED', 'PENDING_OTP');`
-- [ ] **events_db**: Write `event-service/init.sql`:
+- [x] **events_db**: Write `event-service/init.sql`:
   - `venues` table — `venue_id`, `name`, `address`, `total_halls`, `created_at`
   - `events` table — `event_id`, `name`, `venue_id FK`, `hall_id`, `event_date`, `total_seats`, `pricing_tiers JSONB`
   - See `INSTRUCTIONS.md` Section 14 for the example seed SQL
-- [ ] Mount init SQL files in `docker-compose.yml` via `/docker-entrypoint-initdb.d/init.sql` for each DB
-- [ ] Seed `events_db`:
+- [x] Mount init SQL files in `docker-compose.yml` via `/docker-entrypoint-initdb.d/init.sql` for each DB
+- [x] Seed `events_db`:
   - 1 venue: Singapore Indoor Stadium (use a fixed UUID so other seeds can reference it)
   - 1–2 events linked to that venue with pricing tiers (use fixed UUIDs)
-- [ ] Seed `seats_db`:
+- [x] Seed `seats_db`:
   - 20+ seats linked to the seeded event's UUID, rows A–D, all status `AVAILABLE`
   - Use `INSERT ... ON CONFLICT DO NOTHING` for idempotency
-- [ ] Seed `users_db`:
+- [x] Seed `users_db`:
   - 2 test users: one normal (with credits), one with `is_flagged = true` (with credits)
   - Use `bcrypt`-hashed passwords in seed data
-- [ ] Verify clean start: `docker compose down -v && docker compose up --build` — tables created, seeds populated
+- [x] Verify clean start: `docker compose down -v && docker compose up --build` — tables created, seeds populated
 
 ---
 

@@ -146,6 +146,8 @@ services:
     depends_on:
       events-db:
         condition: service_healthy
+    ports:
+      - "5002:5002"
     environment:
       DB_HOST: events-db
       DB_NAME: events_db

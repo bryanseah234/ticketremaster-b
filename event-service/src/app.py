@@ -1,31 +1,42 @@
-"""
-Event Service — Flask application
-Handles event listing and detail with seat availability.
-Phase 3: Implement all endpoints (simplest service, start here).
-"""
-
-from flask import Flask, jsonify
-from datetime import datetime, timezone
-
+from flask import Flask
+from flasgger import Swagger
+from src.extensions import db
+from src.models import Venue, Event
+from src.routes import event_bp
+import os
 
 def create_app():
     app = Flask(__name__)
-
-    # --- Health check ---------------------------------------------------
-    @app.route("/health")
-    def health():
-        return jsonify({
-            "status": "healthy",
-            "service": "event-service",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "checks": {
-                "database": "not_configured",
-            },
-        })
-
+    
+    # Configuration
+    app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASS']}@{os.environ['DB_HOST']}/{os.environ['DB_NAME']}"
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # Initialize Extensions
+    db.init_app(app)
+    
+    # Initialize Swagger
+    swagger_config = {
+        "headers": [],
+        "specs": [
+            {
+                "endpoint": 'apispec_1',
+                "route": '/apispec_1.json',
+                "rule_filter": lambda rule: True,  # all in
+                "model_filter": lambda tag: True,  # all in
+            }
+        ],
+        "static_url_path": "/flasgger_static",
+        "swagger_ui": True,
+        "specs_route": "/apidocs/"
+    }
+    Swagger(app, config=swagger_config)
+    
+    # Register Blueprints
+    app.register_blueprint(event_bp)
+    
     return app
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     app = create_app()
-    app.run(host="0.0.0.0", port=5002, debug=True)
+    app.run(host='0.0.0.0', port=5002)

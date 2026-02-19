@@ -1462,3 +1462,15 @@ curl -X POST http://localhost:8000/api/auth/login \
 ### End-to-End Scenarios
 
 Refer to `TASKS.md` Phase 9 for a full checklist of scenarios to test manually or automate.
+
+---
+
+## 15. Development Guidelines for AI Agents
+
+**Critical Rules for AI Coding Assistants:**
+
+1. **Follow the Plan:** Strictly follow the sequence defined in `TASKS.md`. Do not skip phases unless explicitly instructed.
+2. **No Random Artifacts:** Do **NOT** create random markdown files (e.g., `audit.md`, `plan.md`, `notes.md`) in the source code repository. Keep the repository clean.
+    - If you must create documentation, use the designated artifact system or update existing files like `walkthrough.md`.
+3. **Update TASKS.md:** You **MUST** update `TASKS.md` immediately after completing a task or phase. Mark items as `[x]` to maintain an accurate progress log for the user and future agents.
+4. **Clean Code:** Remove debug prints and temporary comments before finishing a task.
