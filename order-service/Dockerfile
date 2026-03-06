@@ -9,6 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 
+ENV PYTHONPATH=/app/src
+
 EXPOSE 5001
 
 CMD ["python", "-m", "src.app"]
