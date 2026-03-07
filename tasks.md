@@ -218,17 +218,17 @@
 
 ## Phase 7 — Orchestrator Service
 
-- [ ] Scaffold Flask app in `orchestrator-service/src/app.py`
-- [ ] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `grpcio`, `grpcio-tools`, `pika`, `cryptography`, `httpx`, `requests`
-- [ ] Set up gRPC client stub to connect to `inventory-service:50051`
-- [ ] Set up HTTP clients (httpx or requests) for User, Order, and Event services using env vars
-- [ ] Set up RabbitMQ publisher connection (publish to `seat.hold.exchange`)
-- [ ] Implement structured JSON logging middleware:
+- [x] Scaffold Flask app in `orchestrator-service/src/app.py`
+- [x] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `grpcio`, `grpcio-tools`, `pika`, `cryptography`, `httpx`, `requests`
+- [x] Set up gRPC client stub to connect to `inventory-service:50051`
+- [x] Set up HTTP clients (httpx or requests) for User, Order, and Event services using env vars
+- [x] Set up RabbitMQ publisher connection (publish to `seat.hold.exchange`)
+- [x] Implement structured JSON logging middleware:
   - Generate a `correlation_id` (UUID) per request
   - Attach to `X-Correlation-ID` HTTP header for downstream REST calls
   - Attach to `correlation-id` gRPC metadata for downstream gRPC calls
   - Include in every log line — see `INSTRUCTIONS.md` Section 13 for the `JSONFormatter` code
-- [ ] Implement QR code util in `utils/qr_util.py`:
+- [x] Implement QR code util in `utils/qr_util.py`:
   - `generate_qr(seat_id, user_id, hall_id)` → AES-256-GCM encrypted base64 string
   - `decrypt_qr(payload)` → decoded JSON dict or raise error
   - Use `QR_ENCRYPTION_KEY` from env (32 bytes), random 12-byte IV per generation
@@ -237,13 +237,13 @@
 
 ### Scenario 1 — Purchase Flow
 
-- [ ] Implement `POST /api/reserve` in `purchase_routes.py`:
+- [x] Implement `POST /api/reserve` in `purchase_routes.py`:
   - Call Inventory gRPC `ReserveSeat(seat_id, user_id)`
   - Handle `NOWAIT` lock failure → return `SEAT_UNAVAILABLE` (409) — no compensation needed
   - On success: publish TTL message `{seat_id, user_id, order_id, reserved_at}` to `seat.hold.exchange`
   - If RabbitMQ publish fails: call `ReleaseSeat` gRPC to undo hold, return `INTERNAL_ERROR`
   - Return `{order_id, seat_id, status: "HELD", held_until, ttl_seconds}` on success
-- [ ] Implement `POST /api/pay` in `purchase_routes.py`:
+- [x] Implement `POST /api/pay` in `purchase_routes.py`:
   - Check `user.is_flagged` via User Svc `GET /users/{user_id}/risk` — if true, return `OTP_REQUIRED` (428)
   - Check seat is still `HELD` — if TTL expired, return `HOLD_EXPIRED` (410)
   - Call User Svc `POST /credits/deduct {user_id, amount}`
@@ -255,14 +255,14 @@
   - Generate QR code with `generate_qr(seat_id, user_id, hall_id)`
   - Return `{order_id, seat_id, status: "CONFIRMED", credits_charged, remaining_balance, qr_payload}`
   - **Compensation matrix:** see `INSTRUCTIONS.md` Section 5
-- [ ] Implement `POST /api/verify-otp` — verify OTP for high-risk users:
+- [x] Implement `POST /api/verify-otp` — verify OTP for high-risk users:
   - Accepts `{user_id, otp_code, context, reference_id}`
   - Calls User Svc `POST /otp/verify`
   - On success: mark OTP as verified for the given `context` (purchase / transfer)
 
 ### Scenario 2 — P2P Transfer
 
-- [ ] Implement `POST /api/transfer/initiate` in `transfer_routes.py`:
+- [x] Implement `POST /api/transfer/initiate` in `transfer_routes.py`:
   - Validate: seller owns seat (`GetSeatOwner`), seat status is `SOLD`
   - Validate: no pending transfer for this seat (query Order Svc)
   - Block self-transfer: return `SELF_TRANSFER` (400) if `seller_user_id == buyer_user_id`
@@ -271,7 +271,7 @@
   - Trigger OTP for both seller and buyer via User Svc `POST /otp/send` for each user
   - Update transfer → `PENDING_OTP`
   - Return `{transfer_id, seat_id, status: "PENDING_OTP"}`
-- [ ] Implement `POST /api/transfer/confirm` in `transfer_routes.py`:
+- [x] Implement `POST /api/transfer/confirm` in `transfer_routes.py`:
   - Verify both OTPs via User Svc `POST /otp/verify` for seller and buyer
   - On OTP failure: allow retries up to 3 — after 3 failures, update transfer → `FAILED`
   - Execute atomic swap:
@@ -280,15 +280,15 @@
     3. Order Svc `PATCH /transfers/{transfer_id}` → `COMPLETED`
   - Generate new QR code for the new owner (buyer's `user_id`)
   - Return `{transfer_id, status: "COMPLETED", new_owner_user_id, credits_transferred}`
-- [ ] Implement `POST /api/transfer/dispute`:
+- [x] Implement `POST /api/transfer/dispute`:
   - Delegate to Order Svc `POST /transfers/{transfer_id}/dispute`
   - Only seller or buyer can dispute — check JWT user_id
-- [ ] Implement `POST /api/transfer/reverse`:
+- [x] Implement `POST /api/transfer/reverse`:
   - Reverse: `UpdateOwner` back to seller + credit reversal + Order Svc `reverse`
 
 ### Scenario 3 — QR Verification
 
-- [ ] Implement `POST /api/verify` in `verification_routes.py`:
+- [x] Implement `POST /api/verify` in `verification_routes.py`:
   - Decrypt QR payload using `decrypt_qr(qr_payload)` — return `QR_INVALID` (400) if fails
   - Validate timestamp: `NOW - generated_at <= 60 seconds` — return (result: `EXPIRED`) if stale
   - Fan out **parallel** calls to 3 services:
@@ -302,12 +302,12 @@
 
 ### Ticket Endpoints
 
-- [ ] Implement `GET /api/tickets`:
+- [x] Implement `GET /api/tickets`:
   - Read JWT to get `user_id`
   - Query Inventory service for all seats where `owner_user_id == user_id` (add a gRPC RPC or HTTP query)
   - For each seat, fan out to Event Service to get event name / date
   - Return list with nested `event` object, `row_number`, `seat_number`, `status`, `price_paid`, `purchased_at`
-- [ ] Implement `GET /api/tickets/{seat_id}/qr`:
+- [x] Implement `GET /api/tickets/{seat_id}/qr`:
   - Verify JWT user_id == `seat.owner_user_id` — else `NOT_SEAT_OWNER` (403)
   - Verify seat is `SOLD` — else `SEAT_UNAVAILABLE` (409)
   - Generate fresh QR with current timestamp via `generate_qr(seat_id, user_id, hall_id)`
@@ -315,19 +315,19 @@
 
 ### Credit Endpoints
 
-- [ ] Implement `GET /api/credits/balance`:
+- [x] Implement `GET /api/credits/balance`:
   - Reads JWT user_id, calls User Svc `GET /users/{user_id}`, return `credit_balance`
-- [ ] Implement `POST /api/credits/topup {amount}`:
+- [x] Implement `POST /api/credits/topup {amount}`:
   - Call User Svc to create Stripe Payment Intent
   - Return `{client_secret, amount, currency}` for frontend Stripe.js to complete
 
 ### Orchestrator Health
 
-- [ ] Implement `GET /health`:
+- [x] Implement `GET /health`:
   - Ping all 4 downstream services (Inventory, User, Order, Event) and RabbitMQ
   - Return `{"status": "healthy/unhealthy", "checks": {...}}`
-- [ ] Add Flasgger docstrings to all public endpoints
-- [ ] Write `Dockerfile` and confirm service starts cleanly
+- [x] Add Flasgger docstrings to all public endpoints
+- [x] Write `Dockerfile` and confirm service starts cleanly
 
 ---
 
