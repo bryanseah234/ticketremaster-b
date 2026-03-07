@@ -333,24 +333,24 @@
 
 ## Phase 8 — API Gateway (Kong)
 
-- [ ] Write `api-gateway/kong.yml` (declarative DB-less mode) with:
+- [x] Write `api-gateway/kong.yml` (declarative DB-less mode) with:
   - Routes for all Orchestrator public endpoints pointing to `http://orchestrator-service:5003`
   - Route for `GET /api/events` and `GET /api/events/{event_id}` — these should be public (no JWT)
   - Route for `POST /api/auth/*` — public (no JWT)
   - Route for `POST /api/webhooks/stripe` — public (no JWT), but uses Stripe signature
   - All other routes — JWT required
-- [ ] Add Kong JWT plugin config:
+- [x] Add Kong JWT plugin config:
   - Validate JWT via `JWT_SECRET`, extract `sub` claim as user_id
   - See `INSTRUCTIONS.md` Section 11 for plugin YAML
-- [ ] Add Kong CORS plugin config:
+- [x] Add Kong CORS plugin config:
   - Allow origins: `localhost:3000` (dev) + production domain
   - Allow methods: GET, POST, PATCH, DELETE, OPTIONS
   - Allow headers: `Authorization`, `Content-Type`
   - `credentials: true`
-- [ ] Add rate limiting plugin to protect against surge traffic (e.g., 100 req/min per consumer)
-- [ ] Write `api-gateway/Dockerfile` (or use `image: kong:3.6` directly)
-- [ ] Test that requests through `localhost:8000` correctly reach the Orchestrator
-- [ ] Verify JWT is rejected without a valid token on protected routes
+- [x] Add rate limiting plugin to protect against surge traffic (e.g., 100 req/min per consumer)
+- [x] Write `api-gateway/Dockerfile` (or use `image: kong:3.6` directly)
+- [x] Test that requests through `localhost:8000` correctly reach the Orchestrator
+- [x] Verify JWT is rejected without a valid token on protected routes
 
 ---
 

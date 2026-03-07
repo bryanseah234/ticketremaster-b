@@ -1,10 +1,26 @@
-# Kong Declarative Configuration — DB-less mode
-# Minimal config for Phase 1: passthrough to Orchestrator
-# Phase 8: Add JWT plugin, CORS plugin, rate limiting, full route definitions
-
 _format_version: "3.0"
 
 services:
+  - name: user-service
+    url: http://user-service:5000
+    routes:
+      - name: public-auth
+        paths:
+          - /api/auth
+        strip_path: false
+      - name: public-stripe-webhook
+        paths:
+          - /api/webhooks/stripe
+        strip_path: false
+
+  - name: event-service
+    url: http://event-service:5002
+    routes:
+      - name: public-events
+        paths:
+          - /api/events
+        strip_path: false
+
   - name: orchestrator
     url: http://orchestrator-service:5003
     routes:
@@ -12,3 +28,34 @@ services:
         paths:
           - /health
         strip_path: false
+      - name: protected-api
+        paths:
+          - /api
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: sub
+              secret_is_base64: false
+
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "http://localhost:3000"
+        - "https://yourdomain.com"
+      methods:
+        - GET
+        - POST
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Authorization
+        - Content-Type
+      credentials: true
+      max_age: 3600
+  - name: rate-limiting
+    config:
+      minute: 100
+      policy: local

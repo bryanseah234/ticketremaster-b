@@ -33,7 +33,7 @@ def create_app():
     Swagger(app, config=swagger_config)
     
     # Register Blueprints
-    app.register_blueprint(event_bp)
+    app.register_blueprint(event_bp, url_prefix="/api")
     
     return app
 

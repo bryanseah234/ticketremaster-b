@@ -54,7 +54,9 @@ def handle_payment_succeeded(payment_intent):
         print("Error: No user_id in payment intent metadata")
         return
         
-    amount_dollars = Decimal(amount_cents) / 100
+    amount_dollars = Decimal(str(payment_intent.get('metadata', {}).get('topup_amount'))) \
+                     if payment_intent.get('metadata', {}).get('topup_amount') \
+                     else Decimal(amount_cents) / 100
     
     try:
         user = User.query.get(user_id)

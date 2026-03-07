@@ -54,28 +54,22 @@ def send_otp():
         return jsonify({'error': 'User has no phone number'}), 400
         
     # Call SMU API
-    # payload = {'Mobile': user.phone}
-    # headers = {'api-key': SMU_API_KEY} # Adjust based on actual SMU API docs
+    payload = {'Mobile': user.phone}
+    headers = {'X-Contacts-Key': SMU_API_KEY}
     
-    # Mocking the interaction for now as we might not have actual connectivity or credentials in this environment
-    # In a real scenario:
-    # try:
-    #     resp = requests.post(f"{SMU_API_URL}/SendOTP", json=payload, headers=headers)
-    #     resp_data = resp.json()
-    #     if not resp_data.get('Success'):
-    #         return jsonify({'error': resp_data.get('ErrorMessage')}), 500
-    #     sid = resp_data.get('VerificationSid')
-    # except Exception as e:
-    #     return jsonify({'error': str(e)}), 500
-    
-    # MOCK RESPONSE
-    fake_sid = str(uuid.uuid4())
-    print(f"DEBUG: Generated Mock VerificationSid {fake_sid} for User {user_id}")
+    try:
+        resp = requests.post(f"{SMU_API_URL}/SendOTP", json=payload, headers=headers)
+        resp_data = resp.json()
+        if not resp_data.get('Success'):
+            return jsonify({'error': resp_data.get('ErrorMessage') or 'Failed to send OTP'}), 500
+        sid = resp_data.get('VerificationSid')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
     
     # Store SID mapped to User ID (simplification)
-    verification_store[user_id] = fake_sid
+    verification_store[user_id] = sid
     
-    return jsonify({'message': 'OTP sent successfully', 'verification_sid': fake_sid}), 200
+    return jsonify({'message': 'OTP sent successfully', 'verification_sid': sid}), 200
 
 @otp_bp.route('/verify', methods=['POST'])
 def verify_otp():
@@ -117,15 +111,17 @@ def verify_otp():
         return jsonify({'error': 'No pending OTP verification found for this user'}), 400
         
     # Call SMU API to verify
-    # payload = {'VerificationSid': sid, 'Code': otp_code}
-    # ... request logic ...
+    payload = {'VerificationSid': sid, 'Code': otp_code}
+    headers = {'X-Contacts-Key': SMU_API_KEY}
     
-    # MOCK LOGIC
-    # For testing, let's say '123456' is always the correct code, or any 6 digit code works if we just want to test flow
-    if otp_code == '123456':
-        # Success
-        # Clean up store? Maybe keep it for a bit or rely on overwrite.
-        # verification_store.pop(user_id, None) # Optional cleanup
-        return jsonify({'message': 'OTP verified successfully'}), 200
-    else:
-        return jsonify({'error': 'Invalid OTP code'}), 400
+    try:
+        resp = requests.post(f"{SMU_API_URL}/VerifyOTP", json=payload, headers=headers)
+        resp_data = resp.json()
+        if resp_data.get('Success'):
+            # Success
+            verification_store.pop(user_id, None) 
+            return jsonify({'message': 'OTP verified successfully'}), 200
+        else:
+            return jsonify({'error': resp_data.get('ErrorMessage') or 'Invalid OTP code'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
