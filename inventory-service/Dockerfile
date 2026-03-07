@@ -10,6 +10,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY init.sql ./init.sql
 
+# Generate gRPC stubs from proto file
+RUN python -m grpc_tools.protoc \
+    -I src/proto \
+    --python_out=src/proto \
+    --grpc_python_out=src/proto \
+    src/proto/inventory.proto
+
+# Fix the import in generated grpc stub (uses absolute import by default)
+RUN sed -i 's/import inventory_pb2/from src.proto import inventory_pb2/' src/proto/inventory_pb2_grpc.py
+
 EXPOSE 50051
 EXPOSE 8080
 

@@ -12,14 +12,19 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Seed Data
--- Password hash for 'password123' (bcrypt)
--- User 1: Normal user
+-- ═══════════════════════════════════════════════════════════════
+-- Seed Data — See SEED_DATA.md at project root for full reference
+-- ═══════════════════════════════════════════════════════════════
+-- PLAINTEXT PASSWORD (for both users): password123
+-- OTP MOCK CODE: 123456
+-- ═══════════════════════════════════════════════════════════════
+
+-- User 1: Normal user (not flagged, $1000 credits)
 INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged) VALUES
-('41414141-4141-4141-4141-414141414141', 'user1@example.com', '+6591234567', '$2b$12$lzV.N8qX.p1.q1.q1.q1.u1', 1000.00, FALSE)
+('41414141-4141-4141-4141-414141414141', 'user1@example.com', '+6591234567', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 1000.00, FALSE)
 ON CONFLICT (email) DO NOTHING;
 
--- User 2: Flagged user (high risk)
+-- User 2: High-risk / Flagged user ($500 credits, triggers OTP flow)
 INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged) VALUES
-('42424242-4242-4242-4242-424242424242', 'user2@example.com', '+6598765432', '$2b$12$lzV.N8qX.p1.q1.q1.q1.u2', 500.00, TRUE)
+('42424242-4242-4242-4242-424242424242', 'user2@example.com', '+6598765432', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 500.00, TRUE)
 ON CONFLICT (email) DO NOTHING;

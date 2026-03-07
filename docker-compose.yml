@@ -17,6 +17,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   users-db:
     image: postgres:16
@@ -34,6 +35,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   orders-db:
     image: postgres:16
@@ -51,6 +53,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   events-db:
     image: postgres:16
@@ -68,13 +71,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   # ── Messaging ──────────────────────────────────────────────
   rabbitmq:
-    image: rabbitmq:3-management
+    build: ./rabbitmq
+    hostname: rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
@@ -83,6 +91,7 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
+      start_period: 30s
 
   # ── Microservices ───────────────────────────────────────────
   inventory-service:
@@ -98,11 +107,13 @@ services:
       DB_USER: inventory_user
       DB_PASS: ${INVENTORY_DB_PASS}
       RABBITMQ_HOST: rabbitmq
+      ORDER_SERVICE_URL: http://order-service:5001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 15s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 45s
 
   user-service:
     build: ./user-service
@@ -126,6 +137,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
   order-service:
     build: ./order-service
@@ -142,6 +154,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
   event-service:
     build: ./event-service
@@ -160,6 +173,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
   orchestrator-service:
     build: ./orchestrator-service
@@ -171,8 +185,6 @@ services:
       order-service:
         condition: service_healthy
       event-service:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
     environment:
       INVENTORY_SERVICE_URL: inventory-service:50051
@@ -187,6 +199,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
   api-gateway:
     build: ./api-gateway
@@ -205,3 +218,4 @@ volumes:
   users_data:
   orders_data:
   events_data:
+

@@ -162,35 +162,35 @@
 
 ## Phase 5 — Order Service
 
-- [ ] Scaffold Flask app in `order-service/src/app.py`
-- [ ] Add to `requirements.txt`: `flask`, `flasgger`, `psycopg2-binary`, `sqlalchemy`
-- [ ] Connect to `orders_db` via env vars
-- [ ] Implement `POST /orders {user_id, seat_id, event_id, credits_charged}`:
+- [x] Scaffold Flask app in `order-service/src/app.py`
+- [x] Add to `requirements.txt`: `flask`, `flasgger`, `psycopg2-binary`, `sqlalchemy`
+- [x] Connect to `orders_db` via env vars
+- [x] Implement `POST /orders {user_id, seat_id, event_id, credits_charged}`:
   - Create order record with status `PENDING`
   - Return `order_id`
-- [ ] Implement `PATCH /orders/{order_id} {status}`:
+- [x] Implement `PATCH /orders/{order_id} {status}`:
   - Update status to `CONFIRMED`, `FAILED`, or `REFUNDED`
   - Return `ORDER_NOT_FOUND` (404) if not found
-- [ ] Implement `GET /orders?seat_id=`:
+- [x] Implement `GET /orders?seat_id=`:
   - Fetch order by `seat_id` — used in Scenario 3 verification to confirm `CONFIRMED` order exists
-- [ ] Implement `POST /transfers {seat_id, seller_user_id, buyer_user_id, initiated_by, credits_amount}`:
+- [x] Implement `POST /transfers {seat_id, seller_user_id, buyer_user_id, initiated_by, credits_amount}`:
   - Create transfer record with status `INITIATED`
   - Return `transfer_id`
-- [ ] Implement `PATCH /transfers/{transfer_id} {status, seller_otp_verified?, buyer_otp_verified?}`:
+- [x] Implement `PATCH /transfers/{transfer_id} {status, seller_otp_verified?, buyer_otp_verified?}`:
   - Update transfer through its lifecycle states
-- [ ] Implement `POST /transfers/{transfer_id}/dispute {reason}`:
+- [x] Implement `POST /transfers/{transfer_id}/dispute {reason}`:
   - Set status → `DISPUTED`, store `dispute_reason`
-- [ ] Implement `POST /transfers/{transfer_id}/reverse`:
+- [x] Implement `POST /transfers/{transfer_id}/reverse`:
   - Set status → `REVERSED`
-- [ ] Implement `GET /health` — check DB connectivity
-- [ ] Add Flasgger docstrings to all endpoints
-- [ ] Write `Dockerfile` and test all endpoints
+- [x] Implement `GET /health` — check DB connectivity
+- [x] Add Flasgger docstrings to all endpoints
+- [x] Write `Dockerfile` and test all endpoints
 
 ---
 
 ## Phase 6 — Inventory Service (gRPC)
 
-- [ ] Define `inventory-service/src/proto/inventory.proto` with the following RPCs:
+- [x] Define `inventory-service/src/proto/inventory.proto` with the following RPCs:
   - `ReserveSeat(seat_id, user_id)` → `{success, held_until}` — sets status `HELD`
   - `ConfirmSeat(seat_id, user_id)` → `{success}` — sets status `SOLD`, `owner_user_id`
   - `ReleaseSeat(seat_id)` → `{success}` — sets status `AVAILABLE`, clears held fields
@@ -198,21 +198,21 @@
   - `VerifyTicket(seat_id)` → `{status, owner_user_id, event_id}` — read-only
   - `MarkCheckedIn(seat_id)` → `{success}` — sets status `CHECKED_IN`, writes `entry_log`
   - `GetSeatOwner(seat_id)` → `{owner_user_id, status}` — ownership check
-- [ ] Generate Python gRPC stubs from `.proto` using `grpc_tools.protoc`
-- [ ] Implement `lock_service.py` — `ReserveSeat` using `SELECT FOR UPDATE NOWAIT`
+- [x] Generate Python gRPC stubs from `.proto` using `grpc_tools.protoc`
+- [x] Implement `lock_service.py` — `ReserveSeat` using `SELECT FOR UPDATE NOWAIT`
   - On lock failure (another user holds the row): raise gRPC error → Orchestrator returns `SEAT_UNAVAILABLE`
-- [ ] Implement `ownership_service.py` — `UpdateOwner`, `ConfirmSeat`
-- [ ] Implement `verification_service.py` — `VerifyTicket`, `MarkCheckedIn` (writes `entry_logs`)
-- [ ] Implement `ReleaseSeat` — sets `status = AVAILABLE`, clears `held_by_user_id`, `held_until`
-- [ ] Implement `seat_release_consumer.py`:
+- [x] Implement `ownership_service.py` — `UpdateOwner`, `ConfirmSeat`
+- [x] Implement `verification_service.py` — `VerifyTicket`, `MarkCheckedIn` (writes `entry_logs`)
+- [x] Implement `ReleaseSeat` — sets `status = AVAILABLE`, clears `held_by_user_id`, `held_until`
+- [x] Implement `seat_release_consumer.py`:
   - Listens to `seat.release.queue` via `pika`
   - On message: call `ReleaseSeat(seat_id)` and update the pending order to `FAILED` via HTTP call to Order Service
   - Use `basic_ack` on success, `basic_nack(requeue=True)` on failure
   - See `INSTRUCTIONS.md` Section 8 for full consumer code
-- [ ] Start consumer in a separate **daemon thread** alongside the gRPC server in `main.py`
-- [ ] Implement HTTP sidecar health endpoint `GET /health` on port 8080:
+- [x] Start consumer in a separate **daemon thread** alongside the gRPC server in `main.py`
+- [x] Implement HTTP sidecar health endpoint `GET /health` on port 8080:
   - Check `seats_db` connectivity and RabbitMQ connectivity
-- [ ] Write `Dockerfile` and test gRPC calls with `grpcurl` or a Python test script
+- [x] Write `Dockerfile` and test gRPC calls with `grpcurl` or a Python test script
 
 ---
 

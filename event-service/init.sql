@@ -23,8 +23,11 @@ CREATE TABLE IF NOT EXISTS events (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Seed Data
--- 1 Venue: Singapore Indoor Stadium
+-- ═══════════════════════════════════════════════════════════════
+-- Seed Data — See SEED_DATA.md at project root for full reference
+-- ═══════════════════════════════════════════════════════════════
+-- Venue UUID: a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1
+-- Event UUID: e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1
 INSERT INTO venues (venue_id, name, address, total_halls) VALUES
 ('a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1', 'Singapore Indoor Stadium', '2 Stadium Walk, Singapore 397691', 1)
 ON CONFLICT (venue_id) DO NOTHING;
