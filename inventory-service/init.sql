@@ -2,7 +2,7 @@
 
 -- Enum Types
 DO $$ BEGIN
-    CREATE TYPE seat_status AS ENUM ('AVAILABLE', 'HELD', 'SOLD', 'CHECKED_IN');
+    CREATE TYPE seat_status AS ENUM ('AVAILABLE', 'HELD', 'SOLD', 'CHECKED_IN', 'LISTED');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;

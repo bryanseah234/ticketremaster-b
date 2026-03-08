@@ -179,6 +179,27 @@ class InventoryServiceServicer(inventory_pb2_grpc.InventoryServiceServicer):
                 
         return response
 
+    def ListSeat(self, request, context):
+        logger.info(f"ListSeat: seat_id={request.seat_id}, seller_user_id={request.seller_user_id}")
+        with get_session() as session:
+            success, error = ownership_service.list_seat(
+                session, request.seat_id, request.seller_user_id
+            )
+
+        if not success:
+            if error == "SEAT_NOT_FOUND":
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("Seat not found")
+            elif error == "SEAT_NOT_SOLD":
+                context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                context.set_details("Seat is not in SOLD state")
+            elif error == "NOT_SEAT_OWNER":
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details("You do not own this seat")
+            return inventory_pb2.ListSeatResponse(success=False)
+
+        return inventory_pb2.ListSeatResponse(success=True)
+
 
 def create_grpc_server(port=50051):
     """Create and configure the gRPC server."""

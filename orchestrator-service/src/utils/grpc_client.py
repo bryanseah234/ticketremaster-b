@@ -47,4 +47,8 @@ class InventoryClient:
         req = inventory_pb2.GetSeatOwnerRequest(seat_id=seat_id)
         return self.stub.GetSeatOwner(req, metadata=get_grpc_metadata())
 
+    def list_seat(self, seat_id: str, seller_user_id: str):
+        req = inventory_pb2.ListSeatRequest(seat_id=seat_id, seller_user_id=seller_user_id)
+        return self.stub.ListSeat(req, metadata=get_grpc_metadata())
+
 inventory_client = InventoryClient()

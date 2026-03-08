@@ -3,11 +3,103 @@ import os
 
 from flask import Blueprint, request, jsonify
 from src.models.user import User
+from src.models.transaction import CreditTransaction
 from src.extensions import db
 from decimal import Decimal
 import uuid
 
 credits_bp = Blueprint('credits', __name__)
+
+# ... (existing routes)
+
+@credits_bp.route('/escrow/hold', methods=['POST'])
+def escrow_hold():
+    """
+    Deduct credits from buyer and hold in escrow (PENDING transaction)
+    """
+    data = request.get_json()
+    user_id = data.get('user_id')
+    amount = data.get('amount')
+    reference_id = data.get('reference_id') # listing_id
+    description = data.get('description', 'Escrow hold for marketplace purchase')
+
+    if not user_id or amount is None or amount <= 0:
+        return jsonify({'error': 'Invalid input'}), 400
+
+    try:
+        user = User.query.with_for_update().get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        if user.credit_balance < Decimal(amount):
+            return jsonify({'error': 'Insufficient credits'}), 402
+
+        # 1. Deduct from balance
+        user.credit_balance -= Decimal(amount)
+
+        # 2. Record Transaction
+        txn = CreditTransaction(
+            user_id=user_id,
+            amount=amount,
+            type='ESCROW_HOLD',
+            status='PENDING',
+            reference_id=reference_id,
+            description=description
+        )
+        db.session.add(txn)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Credits held in escrow',
+            'transaction_id': str(txn.transaction_id),
+            'remaining_balance': float(user.credit_balance)
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@credits_bp.route('/escrow/release', methods=['POST'])
+def escrow_release():
+    """
+    Release held credits to the seller
+    """
+    data = request.get_json()
+    transaction_id = data.get('transaction_id')
+    seller_user_id = data.get('seller_user_id')
+
+    if not transaction_id or not seller_user_id:
+        return jsonify({'error': 'Missing transaction_id or seller_user_id'}), 400
+
+    try:
+        txn = CreditTransaction.query.with_for_update().get(transaction_id)
+        if not txn:
+            return jsonify({'error': 'Transaction not found'}), 404
+        
+        if txn.type != 'ESCROW_HOLD' or txn.status != 'PENDING':
+            return jsonify({'error': 'Invalid transaction state for release'}), 400
+
+        seller = User.query.with_for_update().get(seller_user_id)
+        if not seller:
+            return jsonify({'error': 'Seller not found'}), 404
+
+        # 1. Update Seller Balance
+        seller.credit_balance += txn.amount
+
+        # 2. Update Transaction Status
+        txn.status = 'COMPLETED'
+        
+        # 3. Create a secondary transaction record for the seller?
+        # For simplicity, we just complete the first one and maybe add a second one later.
+        
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Credits released to seller',
+            'seller_new_balance': float(seller.credit_balance)
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 

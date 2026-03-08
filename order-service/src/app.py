@@ -26,6 +26,12 @@ from services.transfer_service import (
     dispute_transfer,
     reverse_transfer,
 )
+from services.marketplace_service import (
+    create_listing,
+    get_listing_by_id,
+    get_listings,
+    update_listing_status,
+)
 
 load_dotenv()
 
@@ -509,8 +515,154 @@ def create_app():
 
         return jsonify(transfer.to_dict()), 200
 
-    return app
+    # ════════════════════════════════════════════════════════════════════════
+    # MARKETPLACE LISTING ROUTES
+    # ════════════════════════════════════════════════════════════════════════
 
+    @app.route("/marketplace/listings", methods=["POST"])
+    def create_listing_route():
+        """
+        Create a new marketplace listing.
+        ---
+        tags:
+          - Marketplace
+        parameters:
+          - in: body
+            name: body
+            required: true
+            schema:
+              required: [seat_id, seller_user_id, asking_price]
+              properties:
+                seat_id:
+                  type: string
+                seller_user_id:
+                  type: string
+                asking_price:
+                  type: number
+        responses:
+          201:
+            description: Listing created
+          400:
+            description: Error creating listing
+        """
+        data = request.get_json()
+        required = ["seat_id", "seller_user_id", "asking_price"]
+        missing = [f for f in required if not data.get(f)]
+        if missing:
+            return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+        listing, error = create_listing(
+            seat_id=data["seat_id"],
+            seller_user_id=data["seller_user_id"],
+            asking_price=data["asking_price"]
+        )
+        if error:
+            return jsonify({"error": error}), 400
+
+        return jsonify(listing.to_dict()), 201
+
+    @app.route("/marketplace/listings", methods=["GET"])
+    def query_listings_route():
+        """
+        Query marketplace listings.
+        ---
+        tags:
+          - Marketplace
+        parameters:
+          - in: query
+            name: status
+            type: string
+            description: Filter by status (e.g. ACTIVE)
+          - in: query
+            name: seller_user_id
+            type: string
+          - in: query
+            name: seat_id
+            type: string
+        responses:
+          200:
+            description: List of listings
+        """
+        status = request.args.get("status")
+        seller_user_id = request.args.get("seller_user_id")
+        seat_id = request.args.get("seat_id")
+
+        listings = get_listings(
+            status=status,
+            seller_user_id=seller_user_id,
+            seat_id=seat_id
+        )
+        return jsonify([L.to_dict() for L in listings]), 200
+
+    @app.route("/marketplace/listings/<listing_id>", methods=["GET"])
+    def get_listing_route(listing_id):
+        """
+        Get a marketplace listing by ID.
+        ---
+        tags:
+          - Marketplace
+        parameters:
+          - in: path
+            name: listing_id
+            type: string
+            required: true
+        responses:
+          200:
+            description: Listing found
+        """
+        listing = get_listing_by_id(listing_id)
+        if not listing:
+            return jsonify({"error": "Listing not found"}), 404
+        return jsonify(listing.to_dict()), 200
+
+    @app.route("/marketplace/listings/<listing_id>/status", methods=["PATCH"])
+    def update_listing_status_route(listing_id):
+        """
+        Update listing status.
+        ---
+        tags:
+          - Marketplace
+        parameters:
+          - in: path
+            name: listing_id
+            type: string
+            required: true
+          - in: body
+            name: body
+            required: true
+            schema:
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [PENDING_TRANSFER, COMPLETED, ACTIVE, CANCELLED]
+        responses:
+          200:
+            description: Status updated
+          400:
+            description: Error
+        """
+        data = request.get_json()
+        new_status = data.get("status")
+        buyer_user_id = data.get("buyer_user_id")
+        transaction_id = data.get("transaction_id")
+
+        if not new_status:
+            return jsonify({"error": "Missing field: status"}), 400
+        
+        listing, error = update_listing_status(
+            listing_id, 
+            new_status, 
+            buyer_user_id=buyer_user_id,
+            escrow_transaction_id=transaction_id
+        )
+        if error:
+            status_code = 404 if "not found" in error else 400
+            return jsonify({"error": error}), status_code
+        
+        return jsonify(listing.to_dict()), 200
+
+    return app
 
 if __name__ == "__main__":
     app = create_app()

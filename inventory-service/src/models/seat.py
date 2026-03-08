@@ -16,7 +16,7 @@ class Seat(Base):
     event_id = Column(UUID(as_uuid=True), nullable=False)
     owner_user_id = Column(UUID(as_uuid=True), nullable=True)
     status = Column(
-        SAEnum("AVAILABLE", "HELD", "SOLD", "CHECKED_IN", name="seat_status", create_type=False),
+        SAEnum("AVAILABLE", "HELD", "SOLD", "CHECKED_IN", "LISTED", name="seat_status", create_type=False),
         nullable=False,
         default="AVAILABLE",
     )

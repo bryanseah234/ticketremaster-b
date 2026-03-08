@@ -33,6 +33,9 @@ service InventoryService {
 
   // Admin Features: GetEventSeatsInfo — Aggregate info for dashboard
   rpc GetEventSeatsInfo (GetEventSeatsInfoRequest) returns (GetEventSeatsInfoResponse);
+
+  // Marketplace: ListSeat — status → LISTED
+  rpc ListSeat (ListSeatRequest) returns (ListSeatResponse);
 }
 
 // Phase 6: Define all message types below
@@ -124,4 +127,13 @@ message SeatInfo {
 
 message GetEventSeatsInfoResponse {
   repeated SeatInfo seats = 1;
+}
+
+message ListSeatRequest {
+  string seat_id = 1;
+  string seller_user_id = 2;
+}
+
+message ListSeatResponse {
+  bool success = 1;
 }

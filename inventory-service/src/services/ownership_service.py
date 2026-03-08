@@ -62,3 +62,25 @@ def get_seat_owner(session, seat_id):
 
     owner_id = str(seat.owner_user_id) if seat.owner_user_id else ""
     return owner_id, seat.status, None
+
+
+def list_seat(session, seat_id, seller_user_id):
+    """
+    Mark a seat as LISTED for resale.
+    Only succeeds if seat status is SOLD and seller_user_id matches owner.
+    """
+    seat = session.query(Seat).filter(Seat.seat_id == seat_id).first()
+
+    if seat is None:
+        return False, "SEAT_NOT_FOUND"
+
+    if seat.status != "SOLD":
+        return False, "SEAT_NOT_SOLD"
+
+    if str(seat.owner_user_id) != str(seller_user_id):
+        return False, "NOT_SEAT_OWNER"
+
+    seat.status = "LISTED"
+    seat.updated_at = datetime.now(timezone.utc)
+
+    return True, None

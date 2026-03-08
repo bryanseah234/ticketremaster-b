@@ -16,7 +16,9 @@ For local development, use: `http://localhost:8000/api`
 
 ---
 
-## Pages & Routes
+## Pages & Routes (Required for Frontend Developers / Agents)
+
+Your frontend must implement these core views.
 
 ### Public (no login required)
 
@@ -40,7 +42,8 @@ For local development, use: `http://localhost:8000/api`
 | 10 | **Transfer Initiate** | `/tickets/:seatId/transfer` | Enter buyer email/ID, credit amount. Starts OTP flow for both parties. |
 | 11 | **Transfer Confirm** | `/transfer/:transferId` | Both parties enter OTP codes. On success → shows "Transfer Complete". |
 | 12 | **Credit Top-up** | `/credits/topup` | Enter amount → Stripe Checkout / Stripe Elements. Shows current balance. |
-| 13 | **Profile** | `/profile` | View email, phone, credit balance. Flagged status (read-only). |
+| 13 | **Profile & Favourites** | `/profile` | View email, phone, credit balance. Flagged status (read-only). |
+| 13.5| **Marketplace** | `/marketplace` | Browse tickets listed for resale. **Must include:**<br/>1. "How the Resale Marketplace Works" (Browse, Review, Purchase)<br/>2. "Why Buy From Our Marketplace" (Verified Sellers, Buyer Guarantee side-panel). |
 
 ### Administrator (Requires JWT with `is_admin` claim)
 
@@ -81,6 +84,11 @@ For local development, use: `http://localhost:8000/api`
 | Load events | `GET /events?page=1&per_page=20` | Query params | `data[]` → EventCard props. `pagination.total_pages` → pagination controls |
 
 **Error handling:** No special errors — just show empty state if `data` is empty.
+
+> **Globe UI & Locations Note:**
+> When the frontend calls `GET /events` to populate the Event Listing page, the backend automatically attaches the `venue` object to every single event in the array.
+> Your frontend agent can simply extract the `venue.address` and `venue.name` from that payload, and use those precise strings to pin the locations on your Globe UI.
+> Since we want to optimize network requests, we intentionally do not have a standalone `/venues` API. Extracting it from the event list is a standard approach that saves a network call!
 
 ---
 
@@ -310,20 +318,50 @@ if (result.paymentIntent.status === 'succeeded') {
 
 ---
 
-### 13. Profile (`/profile`) 🔒
+---
 
-**UI:** Read-only display of user info, credit balance, flagged status. Logout button.
+### 12.5. Marketplace (`/marketplace`) 🔒
+
+**UI:** A dedicated page to browse resold tickets from other users.
+**Required Sections:**
+
+1. **Hero/Header:** A clear title.
+2. **Value Prop ("Why Buy From Our Marketplace?"):** A checklist showing "Verified Sellers & Ratings", "100% Buyer Protection", "Mobile Tickets Instant Delivery", "Best Price Guarantee", "No Hidden Fees", and "24/7 Customer Support", alongside a colored "Buy Confidence" guarantee card.
+3. **How it Works:** A 3-step graphic (1: Browse Listings, 2: Review Details, 3: Purchase Safely).
+4. **Resale Listings Grid/List:** A view showing available reseller tickets. Each card must clearly state the event name, date, row/seat number, and the seller's asking price.
+
+> **Terminology Note (Ticket vs. Seat):**
+> In this system, **a "Ticket" and a "Seat" are the exact same thing**. A user who buys 4 tickets actually owns 4 distinct "Seats" in the database (each with its own unique `seat_id`). If they want to resell all 4, they must list each `seat_id` individually on the marketplace. There is no concept of a "batch ticket".
+
+---
+
+### 13. Profile & Favourites (`/profile`) 🔒
+
+**UI:** Read-only display of user info, credit balance, flagged status. Logout button. Also a section showing "Favourited Events".
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
 | Load balance | `GET /credits/balance` | — | `data.credit_balance` |
 | Logout | `POST /auth/logout` | — | Clear Pinia store + localStorage → redirect to `/login` |
 
+> **Note on "Favourites":** The backend database **does not** have a column to save favourited events.
+> For the frontend, you must implement this feature entirely locally using `localStorage` or `sessionStorage` (e.g., using VueUse's `useLocalStorage`). When a user clicks the "Heart" icon on an event, save the `event_id` to an array in their browser.
+
 ---
 
 ### 14. Admin Functions 🔒 (Requires `is_admin: true`)
 
-**UI:** Separate dashboard component for users with elevated privileges. Allows tracking performance of ticket sales and inventory.
+**UI:** Separate dashboard component for users with elevated privileges.
+
+**What an Admin CAN do:**
+
+- **Create Events:** Admins can bulk-provision thousands of seats instantly. An Event requires a Venue. The "location" is handled via the nested `venue` object (which requires a `name` and `address`).
+- **View Live Dashboards:** Admins can see real-time un-cached data of how many seats are `SOLD`, `HELD` (in cart), and `AVAILABLE`.
+
+**What an Admin CANNOT do:**
+
+- Admins cannot manually reserve or transfer seats on behalf of a user.
+- Admins cannot delete an event once tickets are sold (immutable ledger).
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
@@ -339,6 +377,7 @@ Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `
 
 | Action | API Call | When |
 |---|---|---|
+| Navigation Links | — | Links to Home, Events, **Marketplace**, My Tickets, Profile |
 | Check auth state | — | Read from Pinia `authStore.isLoggedIn` |
 | Show credit balance | `GET /credits/balance` | On login, on route change (debounced) |
 | Refresh token | `POST /auth/refresh` | Axios interceptor handles this automatically on 401 |

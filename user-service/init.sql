@@ -14,6 +14,26 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Marketplace Escrow Support
+DO $$ BEGIN
+    CREATE TYPE transaction_type AS ENUM ('DEPOSIT', 'WITHDRAWAL', 'TRANSFER', 'ESCROW_HOLD', 'ESCROW_RELEASE', 'REFUND');
+    CREATE TYPE transaction_status AS ENUM ('PENDING', 'COMPLETED', 'FAILED', 'CANCELLED');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS credits_transactions (
+    transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(user_id),
+    amount NUMERIC(10, 2) NOT NULL,
+    type transaction_type NOT NULL,
+    status transaction_status NOT NULL DEFAULT 'PENDING',
+    reference_id UUID, -- order_id, listing_id, or transfer_id
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ═══════════════════════════════════════════════════════════════
 -- Seed Data — See SEED_DATA.md at project root for full reference
 -- ═══════════════════════════════════════════════════════════════

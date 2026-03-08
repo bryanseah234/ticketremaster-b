@@ -77,12 +77,14 @@ def create_app():
     from src.routes.verification_routes import verification_bp
     from src.routes.ticket_routes import ticket_bp
     from src.routes.admin_routes import admin_bp
+    from src.routes.marketplace_routes import marketplace_bp
     
     app.register_blueprint(purchase_bp, url_prefix='/api')
     app.register_blueprint(transfer_bp, url_prefix='/api')
     app.register_blueprint(verification_bp, url_prefix='/api')
     app.register_blueprint(ticket_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
+    app.register_blueprint(marketplace_bp, url_prefix='/api')
 
     return app
 
