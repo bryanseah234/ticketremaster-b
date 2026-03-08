@@ -16,8 +16,8 @@ def register():
     ...
     """
     data = request.get_json()
-    if not data or not data.get('email') or not data.get('password'):
-        return jsonify({'error': 'Missing email or password'}), 400
+    if not data or not data.get('email') or not data.get('password') or not data.get('phone'):
+        return jsonify({'error': 'Missing email, phone, or password'}), 400
 
     # Validation
     email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
@@ -43,7 +43,24 @@ def register():
         db.session.rollback()
         return jsonify({'error': 'Database error', 'details': str(e)}), 500
 
-    return jsonify({'message': 'User registered successfully', 'user_id': str(new_user.user_id)}), 201
+    import requests
+    try:
+        from src.routes.otp import SMU_API_URL, SMU_API_KEY, verification_store
+        payload = {'Mobile': new_user.phone}
+        headers = {'X-Contacts-Key': SMU_API_KEY}
+        resp = requests.post(f"{SMU_API_URL}/SendOTP", json=payload, headers=headers)
+        resp_data = resp.json()
+        if resp_data.get('Success'):
+            verification_store[str(new_user.user_id)] = resp_data.get('VerificationSid')
+            return jsonify({
+                'message': 'OTP sent to phone',
+                'status': 'PENDING_VERIFICATION',
+                'user_id': str(new_user.user_id)
+            }), 201
+        else:
+            return jsonify({'error': 'Failed to send OTP upon registration', 'details': resp_data.get('ErrorMessage')}), 500
+    except Exception as e:
+        return jsonify({'error': 'Error contacting SMS gateway', 'details': str(e)}), 500
 
 
 
@@ -81,10 +98,20 @@ def login():
     user = User.query.filter_by(email=data['email']).first()
     
     if user and user.check_password(data['password']):
+        if not user.is_verified:
+            return jsonify({'error': 'UNVERIFIED_ACCOUNT', 'message': 'Please verify your phone number before logging in.'}), 403
         # Create tokens
         # Identity can be user_id
-        access_token = create_access_token(identity=str(user.user_id), expires_delta=datetime.timedelta(minutes=15))
-        refresh_token = create_refresh_token(identity=str(user.user_id), expires_delta=datetime.timedelta(days=7))
+        access_token = create_access_token(
+            identity=str(user.user_id), 
+            expires_delta=datetime.timedelta(minutes=15),
+            additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
+        )
+        refresh_token = create_refresh_token(
+            identity=str(user.user_id), 
+            expires_delta=datetime.timedelta(days=7),
+            additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
+        )
         
         return jsonify({
             'message': 'Login successful',
@@ -112,7 +139,12 @@ def refresh():
         description: Invalid refresh token
     """
     current_user_id = get_jwt_identity()
-    new_access_token = create_access_token(identity=current_user_id, expires_delta=datetime.timedelta(minutes=15))
+    user = User.query.get(current_user_id)
+    new_access_token = create_access_token(
+        identity=current_user_id, 
+        expires_delta=datetime.timedelta(minutes=15),
+        additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin if user else False}
+    )
     return jsonify({'access_token': new_access_token}), 200
 
 @auth_bp.route('/logout', methods=['POST'])
@@ -136,3 +168,62 @@ def logout():
     BLOCKLIST.add(jti)
     
     return jsonify({'message': 'Logout successful'}), 200
+
+@auth_bp.route('/verify-registration', methods=['POST'])
+def verify_registration():
+    """
+    Verify OTP sent during registration
+    """
+    data = request.get_json()
+    user_id = data.get('user_id')
+    otp_code = data.get('otp_code')
+    
+    if not user_id or not otp_code:
+        return jsonify({'error': 'Missing user_id or otp_code'}), 400
+        
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+        
+    try:
+        from src.routes.otp import SMU_API_URL, SMU_API_KEY, verification_store
+        import requests
+        
+        sid = verification_store.get(str(user_id))
+        if not sid:
+            return jsonify({'error': 'No pending OTP verification found for this user'}), 400
+            
+        payload = {'VerificationSid': sid, 'Code': otp_code}
+        headers = {'X-Contacts-Key': SMU_API_KEY}
+        
+        resp = requests.post(f"{SMU_API_URL}/VerifyOTP", json=payload, headers=headers)
+        resp_data = resp.json()
+        if resp_data.get('Success'):
+            verification_store.pop(str(user_id), None)
+            
+            # verify user
+            user.is_verified = True
+            db.session.commit()
+            
+            # auto-login
+            access_token = create_access_token(
+                identity=str(user.user_id), 
+                expires_delta=datetime.timedelta(minutes=15),
+                additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
+            )
+            refresh_token = create_refresh_token(
+                identity=str(user.user_id), 
+                expires_delta=datetime.timedelta(days=7),
+                additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
+            )
+            
+            return jsonify({
+                'message': 'Registration verified successfully. Logged in.',
+                'access_token': access_token,
+                'refresh_token': refresh_token,
+                'user': user.to_dict()
+            }), 200
+        else:
+            return jsonify({'error': resp_data.get('ErrorMessage') or 'Invalid OTP code'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

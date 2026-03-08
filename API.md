@@ -16,9 +16,10 @@
 8. [Verification Endpoint (Scenario 3)](#8-verification-endpoint-scenario-3)
 9. [Credit & Payment Endpoints](#9-credit--payment-endpoints)
 10. [Ticket Endpoints](#10-ticket-endpoints)
-11. [Health Check Endpoints](#11-health-check-endpoints)
-12. [Internal Service APIs](#12-internal-service-apis)
-13. [Swagger / Flasgger Integration Plan](#13-swagger--flasgger-integration-plan)
+11. [Admin Endpoints](#11-admin-endpoints)
+12. [Health Check Endpoints](#12-health-check-endpoints)
+13. [Internal Service APIs](#13-internal-service-apis)
+14. [Swagger / Flasgger Integration Plan](#14-swagger--flasgger-integration-plan)
 
 ---
 
@@ -26,7 +27,7 @@
 
 ### Base URL
 
-All public API requests go through **Kong API Gateway**:
+All public API requests go through **Nginx API Gateway**:
 
 | Environment | Base URL |
 |---|---|
@@ -129,6 +130,7 @@ All request and response bodies use `application/json`.
 | `WRONG_HALL` | 400 | Verify | QR hall_id does not match event hall_id |
 | `UNPAID_SEAT` | 402 | Verify | Seat is in HELD state — payment not completed |
 | `EMAIL_ALREADY_EXISTS` | 409 | Register | Email is already registered |
+| `UNVERIFIED_ACCOUNT` | 403 | Login | Account phone number not yet verified with OTP |
 
 ---
 
@@ -155,11 +157,54 @@ Create a new user account.
   "success": true,
   "data": {
     "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-    "email": "user@example.com",
-    "message": "Account created successfully"
+    "status": "PENDING_VERIFICATION",
+    "message": "OTP sent to phone"
   }
 }
 ```
+
+---
+
+### 🔓 `POST /api/auth/verify-registration`
+
+Verify the SMS OTP sent during registration.
+
+**Request Body:**
+
+```json
+{
+  "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "otp_code": "123456"
+}
+```
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Registration verified successfully. Logged in.",
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+    "user": {
+      "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "email": "user@example.com",
+      "phone": "+6591234567",
+      "credit_balance": 0.00,
+      "is_verified": true
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Scenario | Error Code | HTTP |
+|---|---|---|
+| Invalid OTP or no pending verification | `BAD_REQUEST` | 400 |
+| User not found | `NOT_FOUND` | 404 |
+| Missing user_id or otp_code | `VALIDATION_ERROR` | 400 |
 
 **Error Responses:**
 
@@ -211,6 +256,7 @@ Authenticate and receive JWT tokens.
 |---|---|---|
 | Invalid credentials | `UNAUTHORIZED` | 401 |
 | Missing email or password | `VALIDATION_ERROR` | 400 |
+| Account not verified | `UNVERIFIED_ACCOUNT` | 403 |
 
 ---
 
@@ -915,7 +961,86 @@ Each microservice exposes a `GET /health` endpoint. These are used by Docker `he
 
 ## 12. Internal Service APIs
 
-> These endpoints are **not** exposed through Kong. They are called internally by the Orchestrator.
+> These endpoints are **not** exposed through Nginx. They are called internally by the Orchestrator or other services.
+
+---
+
+## 11. Admin Endpoints
+
+Admin endpoints are located on the Orchestrator Service and require an Admin JWT (`is_admin: true`).
+
+### `POST /api/admin/events`
+
+Create a new event and provision all seats across multiple microservices.
+
+**Request Body:**
+
+```json
+{
+  "name": "Admin Test Event",
+  "venue": {
+    "name": "Singapore Indoor Stadium",
+    "address": "2 Stadium Walk",
+    "total_halls": 1
+  },
+  "hall_id": "HALL-A",
+  "event_date": "2026-10-10T19:00:00Z",
+  "total_seats": 500,
+  "pricing_tiers": {
+    "CAT1": 200,
+    "CAT2": 100
+  }
+}
+```
+
+**Success Response (201):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "event_id": "a1b2c3d4-...",
+    "seats_created": 500,
+    "message": "Event and seats successfully provisioned"
+  }
+}
+```
+
+---
+
+### `GET /api/admin/events/{event_id}/dashboard`
+
+Aggregates stats for an event (seats sold, revenue, signed up users).
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "event_id": "a1b2c3d4-...",
+    "name": "Admin Test Event",
+    "stats": {
+      "total_seats": 500,
+      "seats_sold": 150,
+      "revenue": 30000.00
+    },
+    "attendees": [
+      {
+        "user_id": "f47ac10b-...",
+        "email": "customer@example.com",
+        "seat_id": "s1s2s3s4-...",
+        "row_number": "A",
+        "seat_number": 1
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 12. Health Check Endpoints
 
 ### 12.1 Inventory Service (gRPC)
 

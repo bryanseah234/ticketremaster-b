@@ -1,3 +1,6 @@
+import stripe
+import os
+
 from flask import Blueprint, request, jsonify
 from src.models.user import User
 from src.extensions import db
@@ -6,10 +9,12 @@ import uuid
 
 credits_bp = Blueprint('credits', __name__)
 
+stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
+
 @credits_bp.route('/topup', methods=['POST'])
 def topup_credits():
     """
-    Top-up user credits (Mock Stripe)
+    Top-up user credits (Stripe PaymentIntent)
     ---
     tags:
       - Credits
@@ -29,7 +34,7 @@ def topup_credits():
               type: number
     responses:
       200:
-        description: Top-up successful
+        description: PaymentIntent created
       404:
         description: User not found
       400:
@@ -46,16 +51,22 @@ def topup_credits():
     if not user:
         return jsonify({'error': 'User not found'}), 404
         
-    # Simulate Stripe payment success here
-    # In real world, we'd verify a stripe token/intent
-    
-    user.credit_balance = (user.credit_balance or 0) + Decimal(amount)
-    
     try:
-        db.session.commit()
-        return jsonify({'message': 'Top-up successful', 'new_balance': float(user.credit_balance)}), 200
+        # Create a PaymentIntent with the order amount (in cents) and currency
+        intent = stripe.PaymentIntent.create(
+            amount=int(Decimal(amount) * 100),
+            currency='sgd',
+            metadata={'user_id': user_id, 'topup_amount': float(amount)},
+            automatic_payment_methods={
+                'enabled': True,
+            },
+        )
+        return jsonify({
+            'message': 'PaymentIntent created',
+            'client_secret': intent.client_secret,
+            'amount': amount
+        }), 200
     except Exception as e:
-        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @credits_bp.route('/deduct', methods=['POST'])

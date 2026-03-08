@@ -1,14 +1,99 @@
-# Kong Declarative Configuration — DB-less mode
-# Minimal config for Phase 1: passthrough to Orchestrator
-# Phase 8: Add JWT plugin, CORS plugin, rate limiting, full route definitions
-
 _format_version: "3.0"
 
+_transform: true
+
+# ── GLOBAL PLUGINS ──────────────────────────────
+plugins:
+  # Rate limiting per IP to protect the entire API
+  - name: rate-limiting
+    config:
+      minute: 50
+      policy: local
+  # Bot detection checks headers (User-Agent) against a database of known scraper bots
+  - name: bot-detection
+    config:
+      deny:
+        - python-requests
+        - curl
+        - wget
+  # CORS Configuration strictly tied to frontend origins
+  - name: cors
+    config:
+      origins:
+        - http://localhost:3000
+        - http://127.0.0.1:3000
+        - https://ticketremaster.hong-yi.me
+        - https://ticketremaster.vercel.app
+        - http://ticketremaster.hong-yi.me
+      methods:
+        - GET
+        - POST
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Authorization
+        - Content-Type
+        - X-Correlation-ID
+      credentials: true
+      max_age: 3600
+
+# ── SERVICES & ROUTES ───────────────────────
 services:
-  - name: orchestrator
+  - name: user-service
+    url: http://user-service:5000
+    routes:
+      - name: auth-register-route
+        paths:
+          - /api/auth/register
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 5 # Strict throttle: 5 registrations per IP per minute
+              policy: local
+      - name: auth-route
+        paths:
+          - /api/auth
+        strip_path: false
+      - name: stripe-webhook-route
+        paths:
+          - /api/webhooks/stripe
+        strip_path: false
+
+  - name: event-service
+    url: http://event-service:5002
+    routes:
+      - name: event-route
+        paths:
+          - /api/events
+        strip_path: false
+
+  - name: orchestrator-service
     url: http://orchestrator-service:5003
     routes:
-      - name: orchestrator-health
+      - name: health-route
         paths:
           - /health
         strip_path: false
+      - name: catchall-api-route
+        paths:
+          - /api
+        strip_path: false
+        plugins:
+          # API Key validation for protected ticket routes like /reserve
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+
+# ── CONSUMERS (API Key Setup) ───────────────────────
+consumers:
+  - username: frontend_app
+    keyauth_credentials:
+      - key: "tk_front_123456789"
+  - username: partner_app
+    keyauth_credentials:
+      - key: "tk_partner_abcdefg"

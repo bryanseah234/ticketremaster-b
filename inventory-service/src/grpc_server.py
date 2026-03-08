@@ -10,7 +10,7 @@ import logging
 from src.proto import inventory_pb2
 from src.proto import inventory_pb2_grpc
 from src.db import get_session
-from src.services import lock_service, ownership_service, verification_service
+from src.services import lock_service, ownership_service, verification_service, admin_service
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,35 @@ class InventoryServiceServicer(inventory_pb2_grpc.InventoryServiceServicer):
             owner_user_id=owner_user_id or "",
             status=status or "",
         )
+
+    def CreateSeats(self, request, context):
+        logger.info(f"CreateSeats: event_id={request.event_id}, total_seats={request.total_seats}")
+        with get_session() as session:
+            success, seats_created, error = admin_service.create_seats(
+                session, request.event_id, request.total_seats
+            )
+            
+        return inventory_pb2.CreateSeatsResponse(
+            success=success,
+            seats_created=seats_created if success else 0
+        )
+
+    def GetEventSeatsInfo(self, request, context):
+        logger.info(f"GetEventSeatsInfo: event_id={request.event_id}")
+        response = inventory_pb2.GetEventSeatsInfoResponse()
+        with get_session() as session:
+            seats, error = admin_service.get_event_seats_info(session, request.event_id)
+            
+            if not error and seats:
+                for seat in seats:
+                    seat_info = response.seats.add()
+                    seat_info.seat_id = str(seat.seat_id)
+                    seat_info.row_number = seat.row_number
+                    seat_info.seat_number = seat.seat_number
+                    seat_info.status = seat.status
+                    seat_info.owner_user_id = str(seat.owner_user_id) if seat.owner_user_id else ""
+                
+        return response
 
 
 def create_grpc_server(port=50051):

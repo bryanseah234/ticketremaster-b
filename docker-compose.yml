@@ -202,7 +202,7 @@ services:
       start_period: 30s
 
   api-gateway:
-    build: ./api-gateway
+    image: kong:latest
     depends_on:
       orchestrator-service:
         condition: service_healthy
@@ -210,8 +210,15 @@ services:
       - "8000:8000"
       - "8001:8001"
     environment:
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    volumes:
+      - ./api-gateway/kong.yml:/etc/kong/kong.yml
 
 volumes:
   seats_data:

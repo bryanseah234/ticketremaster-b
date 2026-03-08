@@ -331,26 +331,18 @@
 
 ---
 
-## Phase 8 — API Gateway (Kong)
+## Phase 8 — API Gateway (Nginx)
 
-- [ ] Write `api-gateway/kong.yml` (declarative DB-less mode) with:
-  - Routes for all Orchestrator public endpoints pointing to `http://orchestrator-service:5003`
-  - Route for `GET /api/events` and `GET /api/events/{event_id}` — these should be public (no JWT)
-  - Route for `POST /api/auth/*` — public (no JWT)
-  - Route for `POST /api/webhooks/stripe` — public (no JWT), but uses Stripe signature
-  - All other routes — JWT required
-- [ ] Add Kong JWT plugin config:
-  - Validate JWT via `JWT_SECRET`, extract `sub` claim as user_id
-  - See `INSTRUCTIONS.md` Section 11 for plugin YAML
-- [ ] Add Kong CORS plugin config:
-  - Allow origins: `localhost:3000` (dev) + production domain
-  - Allow methods: GET, POST, PATCH, DELETE, OPTIONS
-  - Allow headers: `Authorization`, `Content-Type`
-  - `credentials: true`
-- [ ] Add rate limiting plugin to protect against surge traffic (e.g., 100 req/min per consumer)
-- [ ] Write `api-gateway/Dockerfile` (or use `image: kong:3.6` directly)
+- [ ] Write `api-gateway/nginx.conf` with:
+  - Reverse proxy routes for all Orchestrator endpoints pointing to `http://orchestrator-service:5003`
+  - Adjust CORS headers in Nginx to allow `localhost:3000`
+  - Rate limiting zone configured to protect against surge traffic (e.g., 100 req/min per IP)
+- [ ] Modify `docker-compose.yml` to use `nginx:alpine` instead of Kong
+- [ ] Implement JWT Validation in Orchestrator:
+  - Refactor Orchestrator Service to use `flask-jwt-extended` `@jwt_required()` since Nginx won't validate JWTs inherently (unlike Kong)
+  - Ensure public routes (`/api/auth/*`, `/api/events`, stripe webhooks) remain un-decorated
 - [ ] Test that requests through `localhost:8000` correctly reach the Orchestrator
-- [ ] Verify JWT is rejected without a valid token on protected routes
+- [ ] Verify JWT is rejected by Orchestrator without a valid token on protected routes
 
 ---
 
@@ -365,57 +357,68 @@
 
 ### Setup
 
-- [ ] Register 2 test users via API: a normal user and explicitly mark one `is_flagged = true` in DB
-- [ ] Top up credits for both users (either via Stripe test mode or direct DB update for testing)
+- [x] Register 2 test users via API: a normal user and explicitly mark one `is_flagged = true` in DB
+- [x] Top up credits for both users (either via Stripe test mode or direct DB update for testing)
 
 ### Scenario 1 — Purchase
 
-- [ ] Test happy path: reserve → pay → confirm booking (verify seat becomes `SOLD` in DB)
-- [ ] Test seat lock contention: two concurrent users reserve same seat → second gets `SEAT_UNAVAILABLE`
-- [ ] Test abandonment: reserve → wait for TTL (5 min) → confirm seat returns to `AVAILABLE` via DLX
-- [ ] Test high-risk user: reserve → pay → receive `OTP_REQUIRED` → verify OTP → complete pay
-- [ ] Test insufficient credits: reserve with user who has < event price → pay → `INSUFFICIENT_CREDITS`
-- [ ] Test compensation: mock `ConfirmSeat` gRPC failure → verify credits are refunded and order is `FAILED`
-- [ ] Test hold expired: reserve, wait for TTL, then call `/api/pay` → `HOLD_EXPIRED`
+- [x] Test happy path: reserve → pay → confirm booking (verify seat becomes `SOLD` in DB)
+- [x] Test seat lock contention: two concurrent users reserve same seat → second gets `SEAT_UNAVAILABLE`
+- [x] Test abandonment: reserve → wait for TTL (5 min) → confirm seat returns to `AVAILABLE` via DLX
+- [x] Test high-risk user: reserve → pay → receive `OTP_REQUIRED` → verify OTP → complete pay
+- [x] Test insufficient credits: reserve with user who has < event price → pay → `INSUFFICIENT_CREDITS`
+- [x] Test compensation: mock `ConfirmSeat` gRPC failure → verify credits are refunded and order is `FAILED`
+- [x] Test hold expired: reserve, wait for TTL, then call `/api/pay` → `HOLD_EXPIRED`
 
 ### Scenario 2 — Transfer
 
-- [ ] Test success path: User A owns seat → initiate → both submit OTPs → confirm → verify ownership & credits changed
-- [ ] Test seller-initiated vs. buyer-initiated transfer (both should work)
-- [ ] Test OTP failure: submit wrong OTP → transfer stays `PENDING_OTP`
-- [ ] Test max OTP retries (3 failures) → transfer auto-cancelled → status `FAILED`
-- [ ] Test duplicate transfer: start second transfer for same seat while one is `PENDING_OTP` → `TRANSFER_IN_PROGRESS`
-- [ ] Test self-transfer → `SELF_TRANSFER`
-- [ ] Test dispute: complete transfer → call `/dispute` → status `DISPUTED`
-- [ ] Test reverse: dispute a transfer → call `/reverse` → ownership and credits restored
-- [ ] Test QR invalidation: after transfer, old owner's QR should be rejected (user_id mismatch) on verify
+- [x] Test success path: User A owns seat → initiate → both submit OTPs → confirm → verify ownership & credits changed
+- [x] Test seller-initiated vs. buyer-initiated transfer (both should work)
+- [x] Test OTP failure: submit wrong OTP → transfer stays `PENDING_OTP`
+- [x] Test max OTP retries (3 failures) → transfer auto-cancelled → status `FAILED`
+- [x] Test duplicate transfer: start second transfer for same seat while one is `PENDING_OTP` → `TRANSFER_IN_PROGRESS`
+- [x] Test self-transfer → `SELF_TRANSFER`
+- [x] Test dispute: complete transfer → call `/dispute` → status `DISPUTED`
+- [x] Test reverse: dispute a transfer → call `/reverse` → ownership and credits restored
+- [x] Test QR invalidation: after transfer, old owner's QR should be rejected (user_id mismatch) on verify
 
 ### Scenario 3 — Verification
 
-- [ ] Test valid scan → result `SUCCESS`, seat becomes `CHECKED_IN` in DB, `entry_log` written
-- [ ] Test duplicate scan with same QR → result `DUPLICATE` (200, not error)
-- [ ] Test scan of `HELD` seat (payment not completed) → result `UNPAID`
-- [ ] Test non-existent seat_id in QR → result `NOT_FOUND`
-- [ ] Test wrong hall (QR `hall_id` ≠ event `hall_id`) → result `WRONG_HALL`
-- [ ] Test expired QR: generate QR, wait >60 seconds, scan → result `EXPIRED`
-- [ ] Test old owner's QR after transfer → rejected (user_id mismatch)
+- [x] Test valid scan → result `SUCCESS`, seat becomes `CHECKED_IN` in DB, `entry_log` written
+- [x] Test duplicate scan with same QR → result `DUPLICATE` (200, not error)
+- [x] Test scan of `HELD` seat (payment not completed) → result `UNPAID`
+- [x] Test non-existent seat_id in QR → result `NOT_FOUND`
+- [x] Test wrong hall (QR `hall_id` ≠ event `hall_id`) → result `WRONG_HALL`
+- [x] Test expired QR: generate QR, wait >60 seconds, scan → result `EXPIRED`
+- [x] Test old owner's QR after transfer → rejected (user_id mismatch)
 
 ---
 
 ## Phase 10 — Polish
 
-- [ ] Add standard error response format (`{"success": false, "error_code": ..., "message": ...}`) to every service — see `API.md` Section 2
-- [ ] Add request validation using Pydantic or manual checks (reject malformed UUIDs, missing fields, negative amounts)
-- [ ] Add structured JSON logging with correlation IDs to every service — see `INSTRUCTIONS.md` Section 13
-- [ ] Complete all Flasgger/Swagger docstrings for every endpoint; verify Swagger UI loads at each service port
-- [ ] Set up shared Postman workspace:
+- [x] Add standard error response format (`{"success": false, "error_code": ..., "message": ...}`) to every service — see `API.md` Section 2
+- [x] Add request validation using Pydantic or manual checks (reject malformed UUIDs, missing fields, negative amounts)
+- [x] Add structured JSON logging with correlation IDs to every service — see `INSTRUCTIONS.md` Section 13
+- [x] Complete all Flasgger/Swagger docstrings for every endpoint; verify Swagger UI loads at each service port
+- [x] Set up shared Postman workspace:
   - Create workspace `TicketRemaster` with collections per scenario (Auth, Purchase, Transfer, Verification)
   - Set collection variable `baseUrl` and auto-capture `accessToken` after login
   - Export collection to `postman/TicketRemaster.postman_collection.json` and commit to repo
   - See `INSTRUCTIONS.md` Section 15 for setup details
-- [ ] Write `.github/workflows/ci.yml`:
+- [x] Write `.github/workflows/ci.yml`:
   - Trigger on push and PR to `main`
   - Steps: `flake8` lint, `black --check`, run `pytest` (per service)
-- [ ] Update root `README.md` with final setup, run, and testing instructions
-- [ ] Do a full clean run: `docker compose down -v && docker compose up --build` — confirm everything builds from scratch with no errors
-- [ ] Verify CI pipeline passes on GitHub (check Actions tab on PR)
+- [x] Update root `README.md` with final setup, run, and testing instructions
+- [x] Do a full clean run: `docker compose down -v && docker compose up --build` — confirm everything builds from scratch with no errors
+- [x] Verify CI pipeline passes on GitHub (check Actions tab on PR)
+
+---
+
+## Phase 11 — Admin Features
+
+- [ ] Add `is_admin` BOOLEAN to `users` table in `users_db`
+- [ ] Implement `POST /events` in Event Service to create Venues and Events
+- [ ] Implement `CreateSeats` gRPC RPC in Inventory Service to bulk create seats for a new event
+- [ ] Implement `POST /api/admin/events` in Orchestrator to coordinate event and seat creation
+- [ ] Implement `GET /api/admin/events/{event_id}/dashboard` in Orchestrator to fetch aggregated stats (seats sold, revenue, signed up users)
+- [ ] Validate Admin roles using `jwt_required()` claims or custom decorators in Orchestrator
