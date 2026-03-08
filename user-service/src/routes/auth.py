@@ -83,8 +83,16 @@ def login():
     if user and user.check_password(data['password']):
         # Create tokens
         # Identity can be user_id
-        access_token = create_access_token(identity=str(user.user_id), expires_delta=datetime.timedelta(minutes=15))
-        refresh_token = create_refresh_token(identity=str(user.user_id), expires_delta=datetime.timedelta(days=7))
+        access_token = create_access_token(
+            identity=str(user.user_id), 
+            expires_delta=datetime.timedelta(minutes=15),
+            additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
+        )
+        refresh_token = create_refresh_token(
+            identity=str(user.user_id), 
+            expires_delta=datetime.timedelta(days=7),
+            additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
+        )
         
         return jsonify({
             'message': 'Login successful',
@@ -112,7 +120,12 @@ def refresh():
         description: Invalid refresh token
     """
     current_user_id = get_jwt_identity()
-    new_access_token = create_access_token(identity=current_user_id, expires_delta=datetime.timedelta(minutes=15))
+    user = User.query.get(current_user_id)
+    new_access_token = create_access_token(
+        identity=current_user_id, 
+        expires_delta=datetime.timedelta(minutes=15),
+        additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin if user else False}
+    )
     return jsonify({'access_token': new_access_token}), 200
 
 @auth_bp.route('/logout', methods=['POST'])

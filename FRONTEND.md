@@ -1,7 +1,18 @@
-# TicketRemaster — Frontend Blueprint
+# TicketRemaster — Frontend Blueprint & Integration Guide
 
-> Vue 3 SPA that talks exclusively to the backend via Kong API Gateway (`localhost:8000`).
+> Vue 3 SPA that talks natively to the backend via Nginx API Gateway.
 > Staff verification uses OutSystems (separate app — see `outsystems/README.md`).
+
+---
+
+## Environment & Base URL
+
+Your frontend is deployed at `https://ticketremaster.hong-yi.me` (or `ticketremaster.vercel.app`). The API Gateway is configured to accept CORS requests from these origins.
+
+All API requests **must** prefix the paths shown below with your production server's API URL (e.g., `https://your-api-domain.com/api`).
+For local development, use: `http://localhost:8000/api`
+
+> **Do not communicate directly with microservices (port 5000, 5002, etc.). Always go through the gateway on port 8000.**
 
 ---
 
@@ -24,11 +35,18 @@
 | 6 | **Seat Selection** | `/events/:eventId/seats` | Interactive seat map. Click seat → reserve (5 min hold). |
 | 7 | **Checkout** | `/checkout/:orderId` | Shows held seat, price, credit balance. Pay button. OTP modal if high-risk. |
 | 8 | **My Tickets** | `/tickets` | List of owned tickets with event name, date, row/seat. Each has "Show QR" button. |
-| 9 | **Ticket Detail / QR** | `/tickets/:seatId` | Full-screen QR code that auto-refreshes every 50 seconds. Countdown timer. |
-| 10 | **Transfer Initiate** | `/tickets/:seatId/transfer` | Enter buyer email/ID, set credit amount. Starts OTP flow for both parties. |
+| 9 | **Ticket Detail / QR** | `/tickets/:seatId` | Full-screen QR code auto-refreshes every 50 seconds. Countdown timer. |
+| 10 | **Transfer Initiate** | `/tickets/:seatId/transfer` | Enter buyer email/ID, credit amount. Starts OTP flow for both parties. |
 | 11 | **Transfer Confirm** | `/transfer/:transferId` | Both parties enter OTP codes. On success → shows "Transfer Complete". |
 | 12 | **Credit Top-up** | `/credits/topup` | Enter amount → Stripe Checkout / Stripe Elements. Shows current balance. |
 | 13 | **Profile** | `/profile` | View email, phone, credit balance. Flagged status (read-only). |
+
+### Administrator (Requires JWT with `is_admin` claim)
+
+| # | Page | Route | Purpose |
+|---|---|---|---|
+| 14 | **Admin Event Create** | `/admin/events/new` | Form to create a new event (name, venue, pricing) and automatically bulk-provision seats. |
+| 15 | **Admin Event Dashboard** | `/admin/events/:eventId/dashboard` | Real-time overview of ticket inventory, seats available, and gross sales. |
 
 ### Staff (OutSystems — separate app)
 
@@ -40,10 +58,8 @@
 
 ## Page Details & API Integration
 
-> Base URL for all calls: `http://localhost:8000` (Kong gateway)
+> Base URL for all calls: `http://localhost:8000/api` (or production Nginx URL)
 > All authenticated endpoints need header: `Authorization: Bearer <access_token>`
-
----
 
 ### 1. Landing / Home (`/`)
 
@@ -51,7 +67,7 @@
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Load featured events | `GET /api/events?per_page=4` | — | `data[].event_id`, `name`, `event_date`, `venue.name`, `pricing_tiers` |
+| Load featured events | `GET /events?per_page=4` | — | `data[].event_id`, `name`, `event_date`, `venue.name`, `pricing_tiers` |
 
 ---
 
@@ -61,7 +77,7 @@
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Load events | `GET /api/events?page=1&per_page=20` | Query params | `data[]` → EventCard props. `pagination.total_pages` → pagination controls |
+| Load events | `GET /events?page=1&per_page=20` | Query params | `data[]` → EventCard props. `pagination.total_pages` → pagination controls |
 
 **Error handling:** No special errors — just show empty state if `data` is empty.
 
@@ -73,7 +89,7 @@
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Load event + seats | `GET /api/events/{event_id}` | Path param | `data.name`, `event_date`, `venue`, `pricing_tiers`, `seats[]` (status, row, seat_number, category, price) |
+| Load event + seats | `GET /events/{event_id}` | Path param | `data.name`, `event_date`, `venue`, `pricing_tiers`, `seats[]` (status, row, seat_number, category, price) |
 
 **Seat grid colors:** Map `seats[].status` → color:
 
@@ -91,7 +107,7 @@
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Submit login | `POST /api/auth/login` | `{ "email": "...", "password": "..." }` | `data.access_token` → store in Pinia, `data.refresh_token` → localStorage, `data.user` → store user info |
+| Submit login | `POST /auth/login` | `{ "email": "...", "password": "..." }` | `data.access_token` → store in Pinia, `data.refresh_token` → localStorage, `data.user` → store user info |
 
 **On success:** Redirect to `/events` (or previous page).
 **Errors:**
@@ -107,13 +123,13 @@
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Submit register | `POST /api/auth/register` | `{ "email": "...", "phone": "+65...", "password": "..." }` | `data.user_id`, `data.message` |
+| Submit register | `POST /auth/register` | `{ "email": "...", "phone": "+65...", "password": "..." }` | `data.user_id`, `data.message` |
 
-**On success:** Auto-login by calling `POST /api/auth/login` immediately, then redirect to `/events`.
+**On success:** Auto-login by calling `POST /auth/login` immediately, then redirect to `/events`.
 **Errors:**
 
 - `EMAIL_ALREADY_EXISTS` (409) → "This email is already registered"
-- `VALIDATION_ERROR` (400) → inline field errors (email format, phone format, password too short)
+- `VALIDATION_ERROR` (400) → inline field errors
 
 ---
 
@@ -123,8 +139,8 @@
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Load seats | `GET /api/events/{event_id}` | Path param | `data.seats[]` → render grid |
-| Reserve seat (click) | `POST /api/reserve` | `{ "seat_id": "...", "user_id": "..." }` | `data.order_id` (save for checkout), `data.held_until`, `data.ttl_seconds` → start countdown |
+| Load seats | `GET /events/{event_id}` | Path param | `data.seats[]` → render grid |
+| Reserve seat (click) | `POST /reserve` | `{ "seat_id": "...", "user_id": "..." }` | `data.order_id` (save for checkout), `data.held_until`, `data.ttl_seconds` → start countdown |
 
 **On reserve success:** Start 5-minute countdown → show "Proceed to Checkout" button → navigate to `/checkout/:orderId`.
 **Errors:**
@@ -141,14 +157,14 @@
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Load balance | `GET /api/credits/balance` | — | `data.credit_balance` → display |
-| Pay | `POST /api/pay` | `{ "order_id": "..." }` | `data.status` → if `CONFIRMED`, show success! `data.credits_charged`, `data.remaining_balance` |
-| OTP verify (if flagged) | `POST /api/verify-otp` | `{ "user_id": "...", "otp_code": "123456", "context": "purchase", "reference_id": "<order_id>" }` | `data.verified` → if true, call `/api/pay` again |
+| Load balance | `GET /credits/balance` | — | `data.credit_balance` → display |
+| Pay | `POST /pay` | `{ "order_id": "..." }` | `data.status` → if `CONFIRMED`, show success! `data.credits_charged`, `data.remaining_balance` |
+| OTP verify (if flagged) | `POST /verify-otp` | `{ "user_id": "...", "otp_code": "123456", "context": "purchase", "reference_id": "<order_id>" }` | `data.verified` → if true, call `/pay` again |
 
 **Flow:**
 
-1. User clicks "Pay" → call `POST /api/pay`
-2. If response is `OTP_REQUIRED` (428): show OTP modal → user enters 6-digit code → call `POST /api/verify-otp` → on success, call `POST /api/pay` again
+1. User clicks "Pay" → call `POST /pay`
+2. If response is `OTP_REQUIRED` (428): show OTP modal → user enters 6-digit code → call `POST /verify-otp` → on success, call `POST /pay` again
 3. If response is `CONFIRMED`: show success → "View Ticket" button → navigate to `/tickets`
 
 **Errors:**
@@ -166,7 +182,7 @@
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Load tickets | `GET /api/tickets` | — | `data[]` → each ticket: `seat_id`, `event.name`, `event.event_date`, `row_number`, `seat_number`, `status` |
+| Load tickets | `GET /tickets` | — | `data[]` → each ticket: `seat_id`, `event.name`, `event.event_date`, `row_number`, `seat_number`, `status` |
 
 **Card actions:**
 
@@ -181,18 +197,18 @@
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Get QR (on load + every 50s) | `GET /api/tickets/{seat_id}/qr` | Path param | `data.qr_payload` → render as QR image, `data.ttl_seconds` → start countdown |
+| Get QR (on load + every 50s) | `GET /tickets/{seat_id}/qr` | Path param | `data.qr_payload` → render as QR image, `data.ttl_seconds` → start countdown |
 
 **Implementation:**
 
 ```js
 // In setup()
-const { data } = await api.get(`/api/tickets/${seatId}/qr`)
+const { data } = await api.get(`/tickets/${seatId}/qr`)
 qrPayload.value = data.data.qr_payload
 
 // Auto-refresh every 50 seconds
 useIntervalFn(async () => {
-  const { data } = await api.get(`/api/tickets/${seatId}/qr`)
+  const { data } = await api.get(`/tickets/${seatId}/qr`)
   qrPayload.value = data.data.qr_payload
   countdown.value = 50
 }, 50000)
@@ -211,7 +227,7 @@ useIntervalFn(async () => {
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Submit transfer | `POST /api/transfer/initiate` | `{ "seat_id": "...", "seller_user_id": "...", "buyer_user_id": "...", "credits_amount": 300.00 }` | `data.transfer_id` (save for confirm page), `data.status` ("PENDING_OTP") |
+| Submit transfer | `POST /transfer/initiate` | `{ "seat_id": "...", "seller_user_id": "...", "buyer_user_id": "...", "credits_amount": 300.00 }` | `data.transfer_id` (save for confirm page), `data.status` ("PENDING_OTP") |
 
 **On success:** Navigate to `/transfer/:transferId`.
 **Errors:**
@@ -230,7 +246,7 @@ useIntervalFn(async () => {
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Submit OTPs | `POST /api/transfer/confirm` | `{ "transfer_id": "...", "seller_otp": "123456", "buyer_otp": "654321" }` | `data.status` ("COMPLETED"), `data.new_owner_user_id`, `data.credits_transferred` |
+| Submit OTPs | `POST /transfer/confirm` | `{ "transfer_id": "...", "seller_otp": "123456", "buyer_otp": "654321" }` | `data.status` ("COMPLETED"), `data.new_owner_user_id`, `data.credits_transferred` |
 
 **On success:** Show "Transfer complete! Ticket now belongs to [buyer]" → "Back to My Tickets" button.
 **Errors:**
@@ -248,9 +264,9 @@ useIntervalFn(async () => {
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Load balance | `GET /api/credits/balance` | — | `data.credit_balance` |
-| Create payment | `POST /api/credits/topup` | `{ "amount": 100.00 }` | `data.client_secret` → pass to Stripe.js `confirmCardPayment()` |
-| After Stripe success | `GET /api/credits/balance` | — | Refresh `data.credit_balance` display |
+| Load balance | `GET /credits/balance` | — | `data.credit_balance` |
+| Create payment | `POST /credits/topup` | `{ "amount": 100.00 }` | `data.client_secret` → pass to Stripe.js `confirmCardPayment()` |
+| After Stripe success | `GET /credits/balance` | — | Refresh `data.credit_balance` display |
 
 **Stripe.js flow:**
 
@@ -258,7 +274,7 @@ useIntervalFn(async () => {
 import { loadStripe } from '@stripe/stripe-js'
 
 const stripe = await loadStripe('pk_test_...')
-const { data } = await api.post('/api/credits/topup', { amount: 100 })
+const { data } = await api.post('/credits/topup', { amount: 100 })
 
 // Use Stripe Elements to collect card → confirmCardPayment
 const result = await stripe.confirmCardPayment(data.data.client_secret, {
@@ -283,8 +299,22 @@ if (result.paymentIntent.status === 'succeeded') {
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Load balance | `GET /api/credits/balance` | — | `data.credit_balance` |
-| Logout | `POST /api/auth/logout` | — | Clear Pinia store + localStorage → redirect to `/login` |
+| Load balance | `GET /credits/balance` | — | `data.credit_balance` |
+| Logout | `POST /auth/logout` | — | Clear Pinia store + localStorage → redirect to `/login` |
+
+---
+
+### 14. Admin Functions 🔒 (Requires `is_admin: true`)
+
+**UI:** Separate dashboard component for users with elevated privileges. Allows tracking performance of ticket sales and inventory.
+
+| Action | API Call | Request Body | Response fields to use |
+|---|---|---|---|
+| Admin Event Create | `POST /admin/events` | `{ "name": "...", "venue": {"name": "Test Venue", "address": "123 Test St", "total_halls": 2}, "hall_id": "HALL-1", "event_date": "2026-12-31T20:00:00", "total_seats": 250, "pricing_tiers": {"CAT1": 100} }` | `data.event_id`, `data.seats_created` |
+| Admin Dashboard | `GET /admin/events/{event_id}/dashboard` | — | `data.seats_sold`, `data.seats_held`, `data.seats_available`, `data.seats_detail[]` |
+
+**Error Handling:**
+Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `FORBIDDEN`).
 
 ---
 
@@ -293,8 +323,8 @@ if (result.paymentIntent.status === 'succeeded') {
 | Action | API Call | When |
 |---|---|---|
 | Check auth state | — | Read from Pinia `authStore.isLoggedIn` |
-| Show credit balance | `GET /api/credits/balance` | On login, on route change (debounced) |
-| Refresh token | `POST /api/auth/refresh` | Axios interceptor handles this automatically on 401 |
+| Show credit balance | `GET /credits/balance` | On login, on route change (debounced) |
+| Refresh token | `POST /auth/refresh` | Axios interceptor handles this automatically on 401 |
 
 ---
 
@@ -302,7 +332,7 @@ if (result.paymentIntent.status === 'succeeded') {
 
 | Trigger | API Call | Request | Action |
 |---|---|---|---|
-| Any API returns 401 | `POST /api/auth/refresh` | Header: `Authorization: Bearer <refresh_token>` | Store new `access_token` → retry original request. If refresh also fails → redirect to `/login` |
+| Any API returns 401 | `POST /auth/refresh` | Header: `Authorization: Bearer <refresh_token>` | Store new `access_token` → retry original request. If refresh also fails → redirect to `/login` |
 
 ---
 
@@ -388,7 +418,7 @@ import { useAuthStore } from '@/stores/auth'
 import router from '@/router'
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api',  // Kong gateway
+  baseURL: 'https://ticketremaster.hong-yi.me/api',  // Nginx API Gateway URL
 })
 
 api.interceptors.request.use((config) => {
@@ -422,7 +452,7 @@ export default api
 
 ## Folder Structure (recommended)
 
-```
+```text
 src/
 ├── api/
 │   └── client.js          # Axios instance + interceptors
@@ -468,6 +498,6 @@ src/
 
 - **Color palette, theme, fonts** — to be added later per team preference (Tailwind makes this easy to swap via `tailwind.config.js`)
 - **OutSystems QR Scanner** — separate app, not part of this Vue SPA (see `outsystems/README.md`)
-- **All API calls go through Kong** at `http://localhost:8000` (dev) or production domain
+- **All API calls go through the Nginx gateway** at `http://localhost:8000/api` (dev) or production domain
 - **No direct service-to-service calls from frontend** — everything goes through the Orchestrator
 - **Tailwind CSS v3 docs** — <https://tailwindcss.com/docs>

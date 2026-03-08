@@ -15,6 +15,7 @@ class User(db.Model):
     # But good to include.
     two_fa_secret = db.Column(db.Text)
     is_flagged = db.Column(db.Boolean, default=False)
+    is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
@@ -30,5 +31,6 @@ class User(db.Model):
             'email': self.email,
             'phone': self.phone,
             'credit_balance': float(self.credit_balance) if self.credit_balance else 0.0,
-            'is_flagged': self.is_flagged
+            'is_flagged': self.is_flagged,
+            'is_admin': self.is_admin
         }

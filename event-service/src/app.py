@@ -35,6 +35,16 @@ def create_app():
     # Register Blueprints
     app.register_blueprint(event_bp, url_prefix="/api")
     
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        try:
+            # Check DB connection
+            from sqlalchemy import text
+            db.session.execute(text('SELECT 1'))
+            return {"status": "healthy", "service": "event-service"}, 200
+        except Exception as e:
+            return {"status": "unhealthy", "error": str(e)}, 503
+
     return app
 
 if __name__ == '__main__':

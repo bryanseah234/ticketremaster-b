@@ -13,13 +13,14 @@
 5. [Scenario 1 — Complete Ticket Purchase Flow](#5-scenario-1--complete-ticket-purchase-flow)
 6. [Scenario 2 — Secure P2P Ticket Transfer](#6-scenario-2--secure-p2p-ticket-transfer)
 7. [Scenario 3 — Ticket Verification (QR Scan)](#7-scenario-3--ticket-verification-qr-scan)
-8. [RabbitMQ Configuration](#8-rabbitmq-configuration)
-9. [External APIs Reference](#9-external-apis-reference)
-10. [Environment Variables](#10-environment-variables)
-11. [Authentication & Authorization](#11-authentication--authorization)
-12. [Concurrency Handling](#12-concurrency-handling)
-13. [Logging & Observability](#13-logging--observability)
-14. [Database Migration & Seeding Strategy](#14-database-migration--seeding-strategy)
+8. [Scenario 4 — Admin Features](#8-scenario-4--admin-features)
+9. [RabbitMQ Configuration](#9-rabbitmq-configuration)
+10. [External APIs Reference](#10-external-apis-reference)
+11. [Environment Variables](#11-environment-variables)
+12. [Authentication & Authorization](#12-authentication--authorization)
+13. [Concurrency Handling](#13-concurrency-handling)
+14. [Logging & Observability](#14-logging--observability)
+15. [Database Migration & Seeding Strategy](#15-database-migration--seeding-strategy)
 
 ---
 
@@ -27,14 +28,14 @@
 
 ### Architecture Pattern
 
-TicketRemaster follows a **microservices architecture** with an **Orchestrator (Saga Manager)** pattern. All external traffic flows through Kong API Gateway into the Orchestrator, which coordinates atomic services. Services communicate via gRPC (performance), REST (standard), and AMQP (async/resilience). Each service owns a dedicated PostgreSQL database — no cross-DB joins.
+TicketRemaster follows a **microservices architecture** with an **Orchestrator (Saga Manager)** pattern. All external traffic flows through Nginx API Gateway into the Orchestrator, which coordinates atomic services. Services communicate via gRPC (performance), REST (standard), and AMQP (async/resilience). Each service owns a dedicated PostgreSQL database — no cross-DB joins.
 
 ### Architecture Layers
 
 | Layer | Component | Role |
 |---|---|---|
 | Client | Vue Web App / OutSystems | Customer UI / Staff QR scanner |
-| Gateway | Kong API Gateway | Auth, rate-limiting, CORS, routing to Orchestrator |
+| Gateway | Nginx API Gateway | Auth (handled by Orchestrator), rate-limiting, CORS, routing |
 | Composite | Orchestrator Service | Saga Manager — coordinates all multi-step flows |
 | Atomic | Inventory Service (gRPC) | Seat states, locks, entry logs — Seats DB |
 | Atomic | User Service (REST) | Profiles, credits, SMU 2FA — Users DB |
@@ -72,7 +73,7 @@ ticketremaster-b/
 ├── CONTRIBUTING.md                 # team conventions
 │
 ├── api-gateway/
-│   ├── kong.yml                    # route definitions
+│   ├── nginx.conf                  # route definitions
 │   └── Dockerfile
 │
 ├── orchestrator-service/
@@ -195,6 +196,7 @@ Each microservice owns a dedicated PostgreSQL instance. No service may directly 
 | credit_balance | NUMERIC(10,2) | Internal credit. Topped up via Stripe |
 | two_fa_secret | TEXT | Stored for TOTP if applicable |
 | is_flagged | BOOLEAN | High-risk flag — triggers mandatory OTP on purchase |
+| is_admin | BOOLEAN | Admin flag for dashboard and event creation |
 | created_at | TIMESTAMP | |
 
 ---
@@ -446,16 +448,13 @@ services:
       retries: 3
 
   api-gateway:
-    image: kong:3.6
+    image: nginx:alpine
     depends_on:
       orchestrator-service:
         condition: service_healthy
     ports: ["8000:8000", "8001:8001"]
     volumes:
-      - ./api-gateway/kong.yml:/etc/kong/kong.yml
-    environment:
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_DATABASE: "off"
+      - ./api-gateway/nginx.conf:/etc/nginx/nginx.conf
 
 volumes:
   seats_data:
@@ -733,7 +732,33 @@ Scenario 3 is a read-heavy flow with only one write operation (`MarkCheckedIn`).
 
 ---
 
-## 8. RabbitMQ Configuration
+## 8. Scenario 4 — Admin Features
+
+Admins need to manage events and trace ticket sales. The Orchestrator exposes admin endpoints that span across Event, Inventory, Order, and User services.
+
+### Event & Seat Creation Flow
+
+When an admin creates an event, the system must create the event record and provision empty seats.
+
+1. Admin calls `POST /api/admin/events` on Orchestrator.
+2. Orchestrator calls Event Service `POST /events` to create the event and venue.
+3. Orchestrator calls Inventory Service gRPC `CreateSeats` to bulk insert `AVAILABLE` seats.
+4. Returns success to Admin.
+
+### Admin Dashboard (Aggregation)
+
+To view an event's progress and sales:
+
+1. Admin calls `GET /api/admin/events/{event_id}/dashboard` on Orchestrator.
+2. Orchestrator calls Event Service to get event details.
+3. Orchestrator calls Inventory Service to get seat mapping and statuses.
+4. Orchestrator calls Order Service to aggregate total credits charged.
+5. Orchestrator calls User Service (bulk API) to fetch emails of users who bought tickets.
+6. Combines data and returns consolidated dashboard JSON.
+
+---
+
+## 9. RabbitMQ Configuration
 
 RabbitMQ handles the async seat auto-release (Scenario 1 abandonment). The DLX pattern ensures held seats are always released even if the Orchestrator crashes.
 
@@ -1100,7 +1125,7 @@ pip install flask-jwt-extended
 ### Token Lifecycle
 
 ```
-User                    User Service                  Kong Gateway
+User                    User Service                 Nginx Gateway
   │                         │                              │
   │── POST /auth/login ────→│                              │
   │                         │── validate credentials       │
@@ -1121,17 +1146,15 @@ User                    User Service                  Kong Gateway
   │←── {new access} ───────│                              │
 ```
 
-### Kong JWT Plugin
+### Orchestrator JWT Validation
 
-Kong validates JWTs at the gateway level before requests reach the Orchestrator. This offloads auth from service code.
+Nginx acts purely as a reverse proxy. JWTs are validated at the Orchestrator level using `flask-jwt-extended`'s `@jwt_required()` decorator.
 
-```yaml
-# kong.yml — JWT plugin configuration
-plugins:
-  - name: jwt
-    config:
-      key_claim_name: sub
-      secret_is_base64: false
+```python
+# orchestrator-service/src/app.py
+from flask_jwt_extended import JWTManager
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET")
+jwt = JWTManager(app)
 ```
 
 **Public routes** (no JWT required): `/api/auth/login`, `/api/auth/register`, `/api/webhooks/stripe`
@@ -1147,27 +1170,13 @@ plugins:
 
 > **Note:** CORS headers are set on the **backend** (API Gateway), not the frontend. The frontend merely makes requests — the server must include the appropriate `Access-Control-Allow-*` headers.
 
-Configure Kong's CORS plugin:
+Configure CORS using `Flask-CORS` in the Orchestrator, or add CORS headers manually in the Nginx `location` block. Nginx config example:
 
-```yaml
-# kong.yml — CORS plugin
-plugins:
-  - name: cors
-    config:
-      origins:
-        - "http://localhost:3000"
-        - "https://yourdomain.com"
-      methods:
-        - GET
-        - POST
-        - PATCH
-        - DELETE
-        - OPTIONS
-      headers:
-        - Authorization
-        - Content-Type
-      credentials: true
-      max_age: 3600
+```nginx
+# nginx.conf CORS headers snippet
+add_header 'Access-Control-Allow-Origin' 'http://localhost:3000';
+add_header 'Access-Control-Allow-Methods' 'GET, POST, PATCH, OPTIONS';
+add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type';
 ```
 
 ---
@@ -1267,7 +1276,7 @@ logger.setLevel(logging.INFO)
 
 Each incoming request to the Orchestrator generates a unique **correlation ID** (UUID). This ID is:
 
-1. Generated at the API Gateway (Kong) or Orchestrator on request entry
+1. Generated at the API Gateway (Nginx) or Orchestrator on request entry
 2. Passed to all downstream service calls:
    - **REST:** `X-Correlation-ID` HTTP header
    - **gRPC:** metadata key `correlation-id`

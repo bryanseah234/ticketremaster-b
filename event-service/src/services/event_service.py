@@ -1,4 +1,5 @@
 from src.models.event import Event
+from src.models.venue import Venue
 from src.extensions import db
 import requests
 import os
@@ -53,3 +54,27 @@ def get_event_by_id(event_id):
         event_data['seats'] = [] # Return empty seats layout on failure
         
     return event_data
+
+def create_event(data):
+    venue_data = data.get('venue', {})
+    venue = Venue.query.filter_by(name=venue_data.get('name')).first()
+    if not venue:
+        venue = Venue(
+            name=venue_data.get('name'),
+            address=venue_data.get('address'),
+            total_halls=venue_data.get('total_halls', 1)
+        )
+        db.session.add(venue)
+        db.session.flush()
+
+    event = Event(
+        name=data.get('name'),
+        venue_id=venue.venue_id,
+        hall_id=data.get('hall_id'),
+        event_date=data.get('event_date'),
+        total_seats=data.get('total_seats'),
+        pricing_tiers=data.get('pricing_tiers')
+    )
+    db.session.add(event)
+    db.session.commit()
+    return event.to_dict()
