@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     two_fa_secret TEXT,
     is_flagged BOOLEAN DEFAULT FALSE,
     is_admin BOOLEAN DEFAULT FALSE,
+    is_verified BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -21,16 +22,16 @@ CREATE TABLE IF NOT EXISTS users (
 -- ═══════════════════════════════════════════════════════════════
 
 -- User 1: Normal user (not flagged, $1000 credits)
-INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged, is_admin) VALUES
-('41414141-4141-4141-4141-414141414141', 'user1@example.com', '+6591234567', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 1000.00, FALSE, FALSE)
+INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged, is_admin, is_verified) VALUES
+('41414141-4141-4141-4141-414141414141', 'user1@example.com', '+6591234567', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 1000.00, FALSE, FALSE, TRUE)
 ON CONFLICT (email) DO NOTHING;
 
 -- User 2: High-risk / Flagged user ($500 credits, triggers OTP flow)
-INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged, is_admin) VALUES
-('42424242-4242-4242-4242-424242424242', 'user2@example.com', '+6598765432', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 500.00, TRUE, FALSE)
+INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged, is_admin, is_verified) VALUES
+('42424242-4242-4242-4242-424242424242', 'user2@example.com', '+6598765432', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 500.00, TRUE, FALSE, TRUE)
 ON CONFLICT (email) DO NOTHING;
 
 -- User 3: Admin user
-INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged, is_admin) VALUES
-('43434343-4343-4343-4343-434343434343', 'admin@example.com', '+6588888888', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 0.00, FALSE, TRUE)
+INSERT INTO users (user_id, email, phone, password_hash, credit_balance, is_flagged, is_admin, is_verified) VALUES
+('43434343-4343-4343-4343-434343434343', 'admin@example.com', '+6588888888', '$2b$12$jrGHdU5VKmHxpbehPaEre.DpfqNFf1Ttp.iLuXOamz92RBVn4nONS', 0.00, FALSE, TRUE, TRUE)
 ON CONFLICT (email) DO NOTHING;

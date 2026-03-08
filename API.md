@@ -130,6 +130,7 @@ All request and response bodies use `application/json`.
 | `WRONG_HALL` | 400 | Verify | QR hall_id does not match event hall_id |
 | `UNPAID_SEAT` | 402 | Verify | Seat is in HELD state — payment not completed |
 | `EMAIL_ALREADY_EXISTS` | 409 | Register | Email is already registered |
+| `UNVERIFIED_ACCOUNT` | 403 | Login | Account phone number not yet verified with OTP |
 
 ---
 
@@ -156,11 +157,54 @@ Create a new user account.
   "success": true,
   "data": {
     "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-    "email": "user@example.com",
-    "message": "Account created successfully"
+    "status": "PENDING_VERIFICATION",
+    "message": "OTP sent to phone"
   }
 }
 ```
+
+---
+
+### 🔓 `POST /api/auth/verify-registration`
+
+Verify the SMS OTP sent during registration.
+
+**Request Body:**
+
+```json
+{
+  "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "otp_code": "123456"
+}
+```
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Registration verified successfully. Logged in.",
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+    "user": {
+      "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "email": "user@example.com",
+      "phone": "+6591234567",
+      "credit_balance": 0.00,
+      "is_verified": true
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Scenario | Error Code | HTTP |
+|---|---|---|
+| Invalid OTP or no pending verification | `BAD_REQUEST` | 400 |
+| User not found | `NOT_FOUND` | 404 |
+| Missing user_id or otp_code | `VALIDATION_ERROR` | 400 |
 
 **Error Responses:**
 
@@ -212,6 +256,7 @@ Authenticate and receive JWT tokens.
 |---|---|---|
 | Invalid credentials | `UNAUTHORIZED` | 401 |
 | Missing email or password | `VALIDATION_ERROR` | 400 |
+| Account not verified | `UNVERIFIED_ACCOUNT` | 403 |
 
 ---
 

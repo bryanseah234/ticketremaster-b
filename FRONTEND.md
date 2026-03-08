@@ -26,7 +26,8 @@ For local development, use: `http://localhost:8000/api`
 | 2 | **Event Listing** | `/events` | Paginated grid/list of all events. Filter by date. |
 | 3 | **Event Detail** | `/events/:eventId` | Event info, hall map, seat grid showing availability |
 | 4 | **Login** | `/login` | Email + password form |
-| 5 | **Register** | `/register` | Email, phone, password form → auto-login on success |
+| 5 | **Register** | `/register` | Email, phone, password form → redirects to OTP page |
+| 5.5 | **Verify OTP** | `/verify` | Enter SMS OTP sent during registration → auto-login on success |
 
 ### Authenticated (JWT required)
 
@@ -113,6 +114,7 @@ For local development, use: `http://localhost:8000/api`
 **Errors:**
 
 - `UNAUTHORIZED` (401) → show "Invalid email or password"
+- `UNVERIFIED_ACCOUNT` (403) → show "Please verify your phone number" and redirect to `/verify`
 - `VALIDATION_ERROR` (400) → show inline field errors
 
 ---
@@ -123,13 +125,28 @@ For local development, use: `http://localhost:8000/api`
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Submit register | `POST /auth/register` | `{ "email": "...", "phone": "+65...", "password": "..." }` | `data.user_id`, `data.message` |
+| Submit register | `POST /auth/register` | `{ "email": "...", "phone": "+65...", "password": "..." }` | `data.user_id`, `data.status` ("PENDING_VERIFICATION") |
 
-**On success:** Auto-login by calling `POST /auth/login` immediately, then redirect to `/events`.
+**On success:** Redirect to `/verify` to prompt for OTP code. Store `user_id` to pass to the next screen. Do NOT auto-login yet.
 **Errors:**
 
 - `EMAIL_ALREADY_EXISTS` (409) → "This email is already registered"
 - `VALIDATION_ERROR` (400) → inline field errors
+
+---
+
+### 5.5 Verify Registration (`/verify`)
+
+**UI:** OTP 6-digit input field, submit button.
+
+| Action | API Call | Request Body | Response fields to use |
+|---|---|---|---|
+| Submit OTP | `POST /auth/verify-registration` | `{ "user_id": "...", "otp_code": "123456" }` | `data.access_token` → store in Pinia, `data.refresh_token` → localStorage, `data.user` → store user info |
+
+**On success:** User is officially verified and logged in. Redirect to `/events`.
+**Errors:**
+
+- `BAD_REQUEST` (400) → "Invalid OTP code" or "No pending OTP verification found"
 
 ---
 
@@ -336,6 +353,17 @@ Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `
 
 ---
 
+### Global: API Gateway Errors (Kong)
+
+Kong intercepts requests before your application logic. Add global interceptors or catch blocks for these:
+
+| Error HTTP Status | Triggered By | Frontend Action / Message to Show |
+|---|---|---|
+| `429 Too Many Requests` | User hits the API more than 50 times in 1 minute (Rate Limit) | Show an error Toast: "You are doing that too fast. Please wait a moment before trying again." |
+| `403 Forbidden` | The user is running a bot script (e.g. cURL, Python, Postman missing `User-Agent`) | Show an error Toast: "Access denied. Unusual activity detected." |
+
+---
+
 ## Tech Stack
 
 ### Core (team choice)
@@ -347,7 +375,6 @@ Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `
 | Router | **Vue Router 4** | SPA navigation, route guards for auth-protected pages |
 | State | **Pinia** | Official Vue 3 store. Simple API for auth state, credit balance, ticket lists |
 | HTTP | **Axios** | Request interceptors to auto-attach JWT and auto-refresh on 401 |
-| Styling | **Tailwind CSS v3** | Utility-first CSS — style directly in templates. Massive speed-up vs writing custom CSS |
 | Language | **JavaScript** (not TypeScript) | Simpler for the team. Can upgrade later if needed |
 
 ### Recommended Libraries
@@ -374,26 +401,7 @@ npm create vue@latest ticketremaster-frontend
 
 cd ticketremaster-frontend
 npm install
-npm install -D tailwindcss @tailwindcss/vite
 npm install axios vue-toastification @chenfengyuan/vue-qrcode @heroicons/vue @vueuse/core dayjs @stripe/stripe-js
-```
-
-### Tailwind CSS Setup (after scaffold)
-
-Add the Tailwind Vite plugin in `vite.config.js`:
-
-```js
-import tailwindcss from '@tailwindcss/vite'
-
-export default defineConfig({
-  plugins: [vue(), tailwindcss()],
-})
-```
-
-Add to your main CSS file (e.g. `src/assets/main.css`):
-
-```css
-@import "tailwindcss";
 ```
 
 ---
@@ -441,6 +449,15 @@ api.interceptors.response.use(
       }
       router.push('/login')
     }
+    
+    // Intercept Global Gateway Errors
+    if (error.response?.status === 429) {
+      // e.g. toast.error("You are doing that too fast. Please wait a moment before trying again.")
+    } else if (error.response?.status === 403 && !error.response.data?.error_code) {
+      // Kong 403s don't have our standard `{error_code: ...}` shape
+      // e.g. toast.error("Access denied. Unusual activity detected.")
+    }
+    
     return Promise.reject(error)
   }
 )
@@ -450,7 +467,9 @@ export default api
 
 ---
 
-## Folder Structure (recommended)
+## Folder Structure (SUGGESTED)
+
+*(Note: If you have already built views, keep what you have! This is just a suggestion for where files might live.)*
 
 ```text
 src/
@@ -496,8 +515,6 @@ src/
 
 ## Notes
 
-- **Color palette, theme, fonts** — to be added later per team preference (Tailwind makes this easy to swap via `tailwind.config.js`)
 - **OutSystems QR Scanner** — separate app, not part of this Vue SPA (see `outsystems/README.md`)
-- **All API calls go through the Nginx gateway** at `http://localhost:8000/api` (dev) or production domain
+- **All API calls go through the Nginx gateway** at `http://localhost:8000/api` (dev) or via your production domain `https://ticketremaster.hong-yi.me/api` (prod).
 - **No direct service-to-service calls from frontend** — everything goes through the Orchestrator
-- **Tailwind CSS v3 docs** — <https://tailwindcss.com/docs>
