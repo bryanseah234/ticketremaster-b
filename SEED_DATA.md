@@ -7,7 +7,7 @@
 ## Test User Credentials
 
 | User | Email | Password | Phone | Credits | Flagged | UUID |
-|------|-------|----------|-------|---------|---------|------|
+| --- | --- | --- | --- | --- | --- | --- |
 | Normal user | `user1@example.com` | `password123` | `+6591234567` | $1,000 | ❌ No | `41414141-4141-4141-4141-414141414141` |
 | High-risk user | `user2@example.com` | `password123` | `+6598765432` | $500 | ✅ Yes | `42424242-4242-4242-4242-424242424242` |
 
@@ -19,7 +19,7 @@
 ## Test Event & Venue
 
 | Entity | Name | UUID |
-|--------|------|------|
+| --- | --- | --- |
 | Venue | Singapore Indoor Stadium | `a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1` |
 | Event | Taylor Swift: The Eras Tour | `e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1` |
 
@@ -34,7 +34,7 @@
 All seats are for event `e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1`.
 
 | Row | Seats | UUID pattern | Status |
-|-----|-------|-------------|--------|
+| --- | --- | --- | --- |
 | A | 1–5 | `55555555-5555-5555-5555-5555555551XX` (01–05) | AVAILABLE |
 | B | 1–5 | `55555555-5555-5555-5555-5555555551XX` (06–10) | AVAILABLE |
 | C | 1–5 | `55555555-5555-5555-5555-5555555551XX` (11–15) | AVAILABLE |
@@ -51,7 +51,7 @@ All seats are for event `e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1`.
 ## Service Ports (Docker)
 
 | Service | Internal Port | External Port |
-|---------|--------------|---------------|
+| --- | --- | --- |
 | User Service | 5000 | `localhost:5000` |
 | Order Service | 5001 | `localhost:5001` |
 | Event Service | 5002 | `localhost:5002` |
@@ -68,7 +68,7 @@ All seats are for event `e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1`.
 ## Database Connections
 
 | Database | Host (Docker) | Port (external) | User | Password | DB Name |
-|----------|--------------|-----------------|------|----------|---------|
+| --- | --- | --- | --- | --- | --- |
 | Seats DB | `seats-db` | `localhost:5433` | `inventory_user` | `inventory_dev_pass` | `seats_db` |
 | Users DB | `users-db` | `localhost:5434` | `user_svc_user` | `user_dev_pass` | `users_db` |
 | Orders DB | `orders-db` | `localhost:5435` | `order_svc_user` | `order_dev_pass` | `orders_db` |

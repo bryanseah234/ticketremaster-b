@@ -40,7 +40,7 @@ Your frontend must implement these core views.
 ### Public (no login required)
 
 | # | Page | Route | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | **Landing / Home** | `/` | Hero banner, featured events, CTA to browse |
 | 2 | **Event Listing** | `/events` | Paginated grid/list of all events. Filter by date. |
 | 3 | **Event Detail** | `/events/:eventId` | Event info, hall map, seat grid showing availability |
@@ -51,7 +51,7 @@ Your frontend must implement these core views.
 ### Authenticated (JWT required)
 
 | # | Page | Route | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 6 | **Seat Selection** | `/events/:eventId/seats` | Interactive seat map. Click seat → reserve (5 min hold). |
 | 7 | **Checkout** | `/checkout/:orderId` | Shows held seat, price, credit balance. Pay button. OTP modal if high-risk. |
 | 8 | **My Tickets** | `/tickets` | List of owned tickets. Each has "Show QR" and "Transfer" buttons. |
@@ -60,19 +60,19 @@ Your frontend must implement these core views.
 | 11 | **Transfer Confirm** | `/transfer/:transferId` | Both parties enter OTP codes. On success → shows "Transfer Complete". |
 | 12 | **Credit Top-up** | `/credits/topup` | Enter amount → Stripe Checkout / Stripe Elements. Shows current balance. |
 | 13 | **Profile & Favourites** | `/profile` | View email, phone, credit balance. Flagged status (read-only). |
-| 13.5| **Marketplace** | `/marketplace` | Browse tickets listed for resale. **Must include:**<br/>1. "How the Resale Marketplace Works" (Browse, Review, Purchase)<br/>2. "Why Buy From Our Marketplace" (Verified Sellers, Buyer Guarantee side-panel). |
+| 13.5 | **Marketplace** | `/marketplace` | Browse tickets listed for resale. Must include: (1) "How the Resale Marketplace Works" (Browse, Review, Purchase) and (2) "Why Buy From Our Marketplace" (Verified Sellers, Buyer Guarantee side-panel). |
 
 ### Administrator (Requires JWT with `is_admin` claim)
 
 | # | Page | Route | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 14 | **Admin Event Create** | `/admin/events/new` | Form to create a new event (name, venue, pricing) and automatically bulk-provision seats. |
 | 15 | **Admin Event Dashboard** | `/admin/events/:eventId/dashboard` | Real-time overview of ticket inventory, seats available, and gross sales. |
 
 ### Staff (OutSystems — separate app)
 
 | # | Page | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | S1 | **QR Scanner** | Camera-based QR scan → calls `POST /api/verify` → shows result (✅/❌) |
 
 ---
@@ -87,7 +87,7 @@ Your frontend must implement these core views.
 **UI:** Hero banner, featured events carousel (3–4 cards), "Browse Events" CTA, footer.
 
 | Action | API Call | Request | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load featured events | `GET /events?per_page=4` | — | `data[].event_id`, `name`, `event_date`, `venue.name`, `pricing_tiers` |
 
 **Response fields (event list item):**
@@ -107,7 +107,7 @@ Your frontend must implement these core views.
 **UI:** Search/filter bar, event card grid, pagination controls. Each card links to `/events/:eventId`.
 
 | Action | API Call | Request | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load events | `GET /events?page=1&per_page=20` | Query params | `data[]` → EventCard props. `pagination.total_pages` → pagination controls |
 
 **Response fields:**
@@ -129,7 +129,7 @@ Your frontend must implement these core views.
 **UI:** Event banner, info (name, date, venue, hall), pricing legend, seat grid (from `seats` array), "Select Seats" button.
 
 | Action | API Call | Request | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load event + seats | `GET /events/{event_id}` | Path param | `data.name`, `event_date`, `venue`, `pricing_tiers`, `seats[]` (see fields below) |
 
 **Response fields (event detail):**
@@ -167,7 +167,7 @@ Your frontend must implement these core views.
 **UI:** Centered card, email + password inputs, submit button, link to `/register`.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Submit login | `POST /auth/login` | `{ "email": "user@example.com", "password": "password123" }` | `access_token`, `refresh_token`, `user` |
 
 **Response fields (success):**
@@ -191,7 +191,7 @@ Your frontend must implement these core views.
 **UI:** Centered card, email + phone + password + confirm password, submit button, link to `/login`.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Submit register | `POST /auth/register` | `{ "email": "user@example.com", "phone": "+6591234567", "password": "password123" }` | `user_id`, `status` |
 
 **Response fields (success):**
@@ -213,7 +213,7 @@ Your frontend must implement these core views.
 **UI:** OTP 6-digit input field, submit button.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Submit OTP | `POST /auth/verify-registration` | `{ "user_id": "uuid", "otp_code": "123456" }` | `access_token`, `refresh_token`, `user` |
 
 **Response fields (success):**
@@ -235,7 +235,7 @@ Your frontend must implement these core views.
 **UI:** Interactive seat grid, click to select, "Reserve" button, 5-minute countdown timer on reserve.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load seats | `GET /events/{event_id}` | Path param | `data.seats[]` → render grid |
 | Reserve seat (click) | `POST /reserve` | `{ "seat_id": "uuid", "event_id": "uuid" }` | `data.order_id`, `data.seat_id`, `data.status`, `data.held_until`, `data.ttl_seconds` |
 
@@ -261,7 +261,7 @@ Your frontend must implement these core views.
 **UI:** Order summary (event, seat, price), credit balance display, "Pay with Credits" button. OTP modal if flagged.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load balance | `GET /users/{user_id}` | Path param | `credit_balance` → display |
 | Pay | `POST /pay` | `{ "order_id": "..." }` | `data.status` → if `CONFIRMED`, show success! `data.credits_charged`, `data.remaining_balance` |
 | OTP verify (if flagged) | `POST /verify-otp` | `{ "user_id": "uuid", "otp_code": "123456", "context": "purchase", "reference_id": "order_id" }` | `message` (string) |
@@ -296,7 +296,7 @@ Your frontend must implement these core views.
 **UI:** Grid/list of owned tickets. Each card has ticket info + "Show QR" and "Transfer" buttons. Empty state if none.
 
 | Action | API Call | Request | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load tickets | `GET /tickets` | — | `data[]` → each ticket: `seat_id`, `status`, `price_paid` |
 
 **Response fields (ticket item):**
@@ -319,7 +319,7 @@ Your frontend must implement these core views.
 **UI:** Large QR code, auto-refresh countdown ("QR refreshes in 47s"), event info below QR.
 
 | Action | API Call | Request | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Get QR (on load + every 50s) | `GET /tickets/{seat_id}/qr` | Path param | `data.qr_payload`, `data.generated_at`, `data.expires_at`, `data.ttl_seconds` |
 
 **Response fields (QR):**
@@ -356,7 +356,7 @@ useIntervalFn(async () => {
 **UI:** Form with buyer email/user ID input, credit amount input, seat info display. "Start Transfer" button.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Submit transfer | `POST /transfer/initiate` | `{ "seat_id": "uuid", "seller_user_id": "uuid", "buyer_user_id": "uuid", "credits_amount": 300.00 }` | `data.transfer_id`, `data.seat_id`, `data.status`, `data.message` |
 
 **Response fields (transfer initiate):**
@@ -382,7 +382,7 @@ useIntervalFn(async () => {
 **UI:** Two OTP input fields (seller OTP + buyer OTP), "Confirm Transfer" button. Status display.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Submit OTPs | `POST /transfer/confirm` | `{ "transfer_id": "uuid", "seller_otp": "123456", "buyer_otp": "654321" }` | `data.transfer_id`, `data.status`, `data.seat_id`, `data.new_owner_user_id`, `data.credits_transferred`, `data.message` |
 
 **Response fields (transfer confirm):**
@@ -409,7 +409,7 @@ useIntervalFn(async () => {
 **UI:** Current balance display, amount selector ($50/$100/$200/custom), Stripe card form, "Pay" button.
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load balance | `GET /users/{user_id}` | Path param | `credit_balance` |
 | Create payment | `POST /credits/topup` | `{ "user_id": "uuid", "amount": 100.00 }` | `client_secret`, `amount`, `message` |
 | After Stripe success | `GET /users/{user_id}` | Path param | Refresh `credit_balance` |
@@ -452,7 +452,7 @@ if (result.paymentIntent.status === 'succeeded') {
 4. **Resale Listings Grid/List:** A view showing available reseller tickets. Each card must clearly state the event name, date, row/seat number, and the seller's asking price.
 
 | Action | API Call | Request | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load listings | `GET /marketplace/listings?status=ACTIVE` | Query params | `listing_id`, `seat_id`, `asking_price`, `seller_user_id`, `status` |
 
 **Response fields (listing item):**
@@ -470,7 +470,7 @@ if (result.paymentIntent.status === 'succeeded') {
 **Marketplace Actions:**
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | List ticket | `POST /marketplace/list` | `{ "seat_id": "uuid", "asking_price": 120.00 }` | `data.listing_id`, `data.seat_id`, `data.status`, `data.message` |
 | Buy listing | `POST /marketplace/buy` | `{ "listing_id": "uuid" }` | `data.listing_id`, `data.status`, `data.message` |
 | Approve sale | `POST /marketplace/approve` | `{ "listing_id": "uuid", "otp_code": "123456" }` | `data.listing_id`, `data.status`, `data.message` |
@@ -487,7 +487,7 @@ if (result.paymentIntent.status === 'succeeded') {
 **UI:** Read-only display of user info, credit balance, flagged status. Logout button. Also a section showing "Favourited Events".
 
 | Action | API Call | Request | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Load balance | `GET /users/{user_id}` | Path param | `credit_balance` |
 | Logout | `POST /auth/logout` | — | Clear Pinia store + localStorage → redirect to `/login` |
 
@@ -521,7 +521,7 @@ if (result.paymentIntent.status === 'succeeded') {
 - Admins cannot delete an event once tickets are sold (immutable ledger).
 
 | Action | API Call | Request Body | Response fields to use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Admin Event Create | `POST /admin/events` | `{ "name": "...", "venue": {"name": "Test Venue", "address": "123 Test St", "total_halls": 2}, "hall_id": "HALL-1", "event_date": "2026-12-31T20:00:00", "total_seats": 250, "pricing_tiers": {"CAT1": 100} }` | `data.event_id`, `data.seats_created` |
 | Admin Dashboard | `GET /admin/events/{event_id}/dashboard` | — | `data.seats_sold`, `data.seats_held`, `data.seats_available`, `data.seats_detail[]` |
 
@@ -533,7 +533,7 @@ Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `
 ### Global: Navbar Component
 
 | Action | API Call | When |
-|---|---|---|
+| --- | --- | --- |
 | Navigation Links | — | Links to Home, Events, **Marketplace**, My Tickets, Profile |
 | Check auth state | — | Read from Pinia `authStore.isLoggedIn` |
 | Show credit balance | `GET /users/{user_id}` | On login, on route change (debounced) |
@@ -544,7 +544,7 @@ Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `
 ### Global: 401 Token Refresh (Axios Interceptor)
 
 | Trigger | API Call | Request | Action |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Any API returns 401 | `POST /auth/refresh` | Header: `Authorization: Bearer <refresh_token>` | Store new `access_token` → retry original request. If refresh also fails → redirect to `/login` |
 
 ---
@@ -554,7 +554,7 @@ Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `
 Kong intercepts requests before your application logic. Add global interceptors or catch blocks for these:
 
 | Error HTTP Status | Triggered By | Frontend Action / Message to Show |
-|---|---|---|
+| --- | --- | --- |
 | `429 Too Many Requests` | User hits the API more than 50 times in 1 minute (Rate Limit) | Show an error Toast: "You are doing that too fast. Please wait a moment before trying again." |
 | `403 Forbidden` | The user is running a bot script (e.g. cURL, Python, Postman missing `User-Agent`) | Show an error Toast: "Access denied. Unusual activity detected." |
 
@@ -577,7 +577,7 @@ If the Cloudflare Tunnel or backend is down, the frontend should stay semi-funct
 ### Core (team choice)
 
 | Layer | Choice | Why |
-|---|---|---|
+| --- | --- | --- |
 | Framework | **Vue 3** (Composition API + `<script setup>`) | Team choice. Use Composition API — it's cleaner than Options API for new projects |
 | Build Tool | **Vite** | Default for Vue 3. Near-instant hot-reload (<100ms). `npm create vue@latest` uses Vite |
 | Router | **Vue Router 4** | SPA navigation, route guards for auth-protected pages |
@@ -588,7 +588,7 @@ If the Cloudflare Tunnel or backend is down, the frontend should stay semi-funct
 ### Recommended Libraries
 
 | Library | npm install | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `vue-qrcode` | `npm i @chenfengyuan/vue-qrcode` | Renders QR codes as a `<vue-qrcode>` component |
 | `@stripe/stripe-js` | `npm i @stripe/stripe-js` | Stripe Elements for credit card form (PCI-compliant) |
 | `vue-toastification` | `npm i vue-toastification` | Toast notifications (success/error popups) |
@@ -677,7 +677,7 @@ export default api
 
 ## Folder Structure (SUGGESTED)
 
-*(Note: If you have already built views, keep what you have! This is just a suggestion for where files might live.)*
+Note: If you have already built views, keep what you have. This is just a suggestion for where files might live.
 
 ```text
 src/

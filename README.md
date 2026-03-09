@@ -78,7 +78,7 @@ graph TD
 ### Microservices Breakdown
 
 | Service | Protocol | Domain Responsibility |
-|---|---|---|
+| --- | --- | --- |
 | **API Gateway (Nginx)** | HTTP | Load balancing, rate limiting (100r/m), CORS for `ticketremaster.hong-yi.me`, reverse proxying. |
 | **Orchestrator Service** | REST | The "Manager" — handles cross-service flows, triggers compensations on failure, generates Encrypted QR codes. |
 | **Inventory Service** | gRPC | Mission critical. Handles pessimistic locking `SELECT FOR UPDATE NOWAIT` for seats. Fast and highly concurrent. |
@@ -122,18 +122,18 @@ All backend services will now be accessible via the API Gateway at `http://local
 If your frontend is hosted on Vercel and the backend is local, use Cloudflare Tunnel to get a stable HTTPS URL.
 
 1. Add a domain to Cloudflare and ensure DNS is active.
-2. Cloudflare Zero Trust → Access → Tunnels → Create Tunnel.
-3. Copy the tunnel token and set `CLOUDFLARE_TUNNEL_TOKEN` in your environment.
-4. Add a Public Hostname pointing to:
+1. Cloudflare Zero Trust → Access → Tunnels → Create Tunnel.
+1. Copy the tunnel token and set `CLOUDFLARE_TUNNEL_TOKEN` in your environment.
+1. Add a Public Hostname pointing to:
    - Docker compose: `http://api-gateway:8000`
    - Local host (no Docker): `http://localhost:8000`
-5. Start dev stack with the tunnel:
+1. Start dev stack with the tunnel:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-6. Set frontend env: `VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me/api`
+1. Set frontend env: `VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me/api`
 
 ### 4. Scale for Traffic Drops (Optional)
 
@@ -177,7 +177,7 @@ sequenceDiagram
     Orch-->>User: 200 OK + QR Code Payload
 ```
 
-#### Edge Cases Handled
+#### Transfer Edge Cases
 
 - **Lock Contention:** If two users click "Reserve" at the exact same millisecond, the DB `NOWAIT` lock grants the seat to only one user instantly. The other receives a `409 SEAT_UNAVAILABLE`.
 - **Payment Abandonment:** If the user closes the app and doesn't pay, the message sitting in RabbitMQ expires after 5 minutes and drops into a **Dead Letter Exchange (DLX)**. The Inventory consumer picks it up and resets the seat to `AVAILABLE` automatically.
@@ -210,7 +210,7 @@ sequenceDiagram
     Orch-->>Seller: 200 OK Transfer Complete!
 ```
 
-#### Edge Cases Handled
+#### Verification Edge Cases
 
 - **Self-Transfer:** Prevented instantly (`400 SELF_TRANSFER`).
 - **Mid-Transfer Sales:** A Unique Partial Index in the Database prevents starting a transfer if one is already `PENDING_OTP`.
@@ -257,12 +257,12 @@ When an account is created, a record is inserted into the `users` table within t
 Here is a row-by-row breakdown of the `users` table schema:
 
 | Column Name | Data Type | Description |
-|-------------|-----------|-------------|
+| --- | --- | --- |
 | `user_id` | `UUID` | (Primary Key) Unique identifier for the user. Generated automatically. |
 | `email` | `VARCHAR(255)` | User's email address (Unique). Used for login. |
 | `phone` | `VARCHAR(20)` | User's mobile number. Used for SMS OTP validation. |
 | `password_hash` | `TEXT` | Bcrypt hashed password. Plaintext passwords are **never** stored. |
-| `credit_balance` | `NUMERIC(10, 2)`| The user's platform credits (e.g., $1000.00). Defaults to 0.00. |
+| `credit_balance` | `NUMERIC(10, 2)` | The user's platform credits (e.g., $1000.00). Defaults to 0.00. |
 | `two_fa_secret` | `TEXT` | (Optional) Future-proof column for Time-based One-Time Passwords (TOTP). |
 | `is_flagged` | `BOOLEAN` | If `true`, the user drops into a high-risk bucket and requires OTPs for purchases. |
 | `is_admin` | `BOOLEAN` | If `true`, the user has admin rights (e.g., event creation, dashboard access). |
@@ -306,7 +306,7 @@ SELECT * FROM users;
 For frontend bindings, endpoint structure, and specific configurations, please refer to the documents below:
 
 | Document | Description |
-|---|---|
+| --- | --- |
 | [FRONTEND.md](FRONTEND.md) | Complete guide for Frontend teams (Vue 3, endpoints, API Gateway routes). |
 | [API.md](API.md) | Extensive endpoint dictionary showing JSON inputs and error codes. |
 | [INSTRUCTIONS.md](INSTRUCTIONS.md) | Deep-dive into database schema architectures and RabbitMQ configs. |
