@@ -117,6 +117,24 @@ docker-compose up --build -d
 
 All backend services will now be accessible via the API Gateway at `http://localhost:8000`.
 
+### 3.5 Cloudflare Tunnel (Stable Public URL for Frontend)
+
+If your frontend is hosted on Vercel and the backend is local, use Cloudflare Tunnel to get a stable HTTPS URL.
+
+1. Add a domain to Cloudflare and ensure DNS is active.
+2. Cloudflare Zero Trust → Access → Tunnels → Create Tunnel.
+3. Copy the tunnel token and set `CLOUDFLARE_TUNNEL_TOKEN` in your environment.
+4. Add a Public Hostname pointing to:
+   - Docker compose: `http://api-gateway:8000`
+   - Local host (no Docker): `http://localhost:8000`
+5. Start dev stack with the tunnel:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+6. Set frontend env: `VITE_API_BASE_URL=https://<your-hostname>/api`
+
 ### 4. Scale for Traffic Drops (Optional)
 
 If you expect a massive swarm of customers, you can horizontally scale the Orchestrator and Inventory (locking) services. Nginx will automatically Load Balance traffic across all instances.

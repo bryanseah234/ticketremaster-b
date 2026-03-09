@@ -32,3 +32,9 @@ services:
   inventory-service:
     volumes:
       - ./inventory-service/src:/app/src
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    depends_on:
+      - api-gateway
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
