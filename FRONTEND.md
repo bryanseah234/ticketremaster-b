@@ -15,7 +15,7 @@ For local development, use: `http://localhost:8000/api`
 Use a Vite env var and read it in your API client:
 
 - Local dev: `VITE_API_BASE_URL=http://localhost:8000/api`
-- Production (Vercel): `VITE_API_BASE_URL=https://<public-backend-domain>/api`
+- Production (Vercel): `VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me/api`
 
 If your backend only runs locally, use Cloudflare Tunnel for a stable public URL.
 
@@ -27,7 +27,7 @@ If your backend only runs locally, use Cloudflare Tunnel for a stable public URL
 4. Add a Public Hostname pointing to:
    - Docker compose: `http://api-gateway:8000`
    - Local host (no Docker): `http://localhost:8000`
-5. Set `VITE_API_BASE_URL=https://<your-hostname>/api` in Vercel.
+5. Set `VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me/api` in Vercel.
 
 > **Do not communicate directly with microservices (port 5000, 5002, etc.). Always go through the gateway on port 8000.**
 
@@ -560,6 +560,18 @@ Kong intercepts requests before your application logic. Add global interceptors 
 
 ---
 
+### Global: Tunnel Unavailable / Offline Mode
+
+If the Cloudflare Tunnel or backend is down, the frontend should stay semi-functional with mock data and clear error states:
+
+- Detect network failures (timeout, DNS error, `502/503/504`) and show a persistent banner: "Backend unavailable. Showing limited demo data."
+- Use mock data for public pages (home, events list, event detail) so navigation still works.
+- Disable checkout, seat reservation, transfer, and credit top-up flows with a clear message and disabled CTA.
+- Cache the last successful event list and event detail responses in local storage and fall back to them when the backend is unreachable.
+- For authenticated pages, show a "Read-only demo" state and avoid actions that mutate data.
+
+---
+
 ## Tech Stack
 
 ### Core (team choice)
@@ -712,5 +724,5 @@ src/
 ## Notes
 
 - **OutSystems QR Scanner** — separate app, not part of this Vue SPA (see `outsystems/README.md`)
-- **All API calls go through the Nginx gateway** at `http://localhost:8000/api` (dev) or via your production domain `https://ticketremaster.hong-yi.me/api` (prod).
+- **All API calls go through the Nginx gateway** at `http://localhost:8000/api` (dev) or via your production domain `https://ticketremasterapi.hong-yi.me/api` (prod).
 - **No direct service-to-service calls from frontend** — everything goes through the Orchestrator

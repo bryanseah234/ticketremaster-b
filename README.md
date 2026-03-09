@@ -133,7 +133,7 @@ If your frontend is hosted on Vercel and the backend is local, use Cloudflare Tu
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-6. Set frontend env: `VITE_API_BASE_URL=https://<your-hostname>/api`
+6. Set frontend env: `VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me/api`
 
 ### 4. Scale for Traffic Drops (Optional)
 

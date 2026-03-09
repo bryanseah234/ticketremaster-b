@@ -6,7 +6,16 @@ This guide provides step-by-step instructions for QA and developers to test the 
 All requests must go to the API Gateway running on port `8000`.
 
 - Local: `http://localhost:8000/api`
+- Cloudflare Tunnel: `https://ticketremasterapi.hong-yi.me/api`
 - Production: `https://your-domain.com/api`
+
+---
+
+## Seeded Test Accounts
+
+- Non-admin: `user1@example.com` / `password123`
+- Admin: `admin@example.com` / `password123`
+- OTP mock code (dev): `123456`
 
 ---
 

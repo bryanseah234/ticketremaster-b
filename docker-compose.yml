@@ -220,6 +220,12 @@ services:
     volumes:
       - ./api-gateway/kong.yml:/etc/kong/kong.yml
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    depends_on:
+      - api-gateway
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+
 volumes:
   seats_data:
   users_data:

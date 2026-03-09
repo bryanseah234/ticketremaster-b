@@ -32,7 +32,7 @@ All public API requests go through **Nginx API Gateway**:
 | Environment | Base URL |
 |---|---|
 | Local dev | `http://localhost:8000/api` |
-| Cloudflare Tunnel | `https://<your-hostname>/api` |
+| Cloudflare Tunnel | `https://ticketremasterapi.hong-yi.me/api` |
 | Production | `https://yourdomain.com/api` |
 
 ### Authentication

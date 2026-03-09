@@ -23,6 +23,7 @@ plugins:
         - http://localhost:3000
         - http://127.0.0.1:3000
         - https://ticketremaster.hong-yi.me
+        - https://ticketremasterapi.hong-yi.me
         - https://ticketremaster.vercel.app
         - http://ticketremaster.hong-yi.me
       methods:
