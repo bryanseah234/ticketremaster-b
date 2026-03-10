@@ -28,3 +28,4 @@ class ServiceClient:
 user_service = ServiceClient(os.environ.get("USER_SERVICE_URL", "http://user-service:5000"))
 order_service = ServiceClient(os.environ.get("ORDER_SERVICE_URL", "http://order-service:5001"))
 event_service = ServiceClient(os.environ.get("EVENT_SERVICE_URL", "http://event-service:5002"))
+inventory_service_http = ServiceClient(os.environ.get("INVENTORY_SERVICE_HTTP_URL", "http://inventory-service:8080"))

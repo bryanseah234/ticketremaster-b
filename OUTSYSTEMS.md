@@ -174,6 +174,11 @@ Success response:
 
 ---
 
-## Ready for Design Alignment
+## Design Alignment With Frontend
 
-I’m ready to align the Gatekeeper UI to the frontend look and feel. Share the frontend styles or tokens when you’re ready.
+- Dark glassmorphism aesthetic with orange accents
+- Use glass surfaces with blur for cards and panels
+- Use subtle borders and soft shadow on glass elements
+- Typography uses the frontend font stack and high-contrast text
+- Accents use orange for primary actions and focus states
+- Status banners map to semantic colors: success, warning, disabled
