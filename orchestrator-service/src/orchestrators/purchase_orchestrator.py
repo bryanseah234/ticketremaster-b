@@ -142,14 +142,9 @@ def handle_pay(order_id, user_id):
             return jsonify({"success": False, "error_code": "INITIALIZATION_ERROR", "message": "Inventory check failed"}), 500
 
         # Step 3: Deduct credits (User Service)
-        pass_headers = {"Authorization": f"Bearer {order_id}"} # Optional info
-        deduct_res = user_service.post("/api/credits/deduct", json={"amount": price}, headers={"X-User-Id": user_id})
-        # Wait, user_service might expect Bearer token via JWT. We should send the JWT down or just internal bypass?
-        # Actually user_service/deduct route probably takes JWT.
-        # But wait! Orchestrator doesn't have the original JWT? `request.headers.get("Authorization")` could be used!
         from flask import request
         auth_header = request.headers.get("Authorization", "")
-        deduct_res = user_service.post("/api/credits/deduct", json={"amount": price}, headers={"Authorization": auth_header})
+        deduct_res = user_service.post("/credits/deduct", json={"user_id": user_id, "amount": price}, headers={"Authorization": auth_header})
         
         if deduct_res.status_code == 402:
             return jsonify({"success": False, "error_code": "INSUFFICIENT_CREDITS", "message": "Not enough credits"}), 402
@@ -158,12 +153,19 @@ def handle_pay(order_id, user_id):
         if deduct_res.status_code != 200:
             return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": f"Deduct failed: {deduct_res.text}"}), 500
             
-        new_balance = deduct_res.json().get("data", {}).get("remaining_balance", 0)
+        deduct_body = deduct_res.json() if hasattr(deduct_res, "json") else {}
+        new_balance = 0
+        if isinstance(deduct_body, dict):
+            data_block = deduct_body.get("data") if isinstance(deduct_body.get("data"), dict) else None
+            if data_block:
+                new_balance = data_block.get("remaining_balance", data_block.get("new_balance", 0))
+            else:
+                new_balance = deduct_body.get("remaining_balance", deduct_body.get("new_balance", 0))
 
         # Step 4: Confirm Order (Order Service)
         upd_res = order_service.patch(f"/orders/{order_id}/status", json={"status": "CONFIRMED"})
         if upd_res.status_code != 200:
-            user_service.post("/api/credits/refund", json={"amount": price, "reason": "Order update failed"}, headers={"Authorization": auth_header})
+            user_service.post("/credits/refund", json={"user_id": user_id, "amount": price, "reason": "Order update failed"}, headers={"Authorization": auth_header})
             return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": "Failed to update order"}), 500
             
         # Step 5: Confirm Seat (Inventory Service)
@@ -172,7 +174,7 @@ def handle_pay(order_id, user_id):
             if not conf_res.success:
                 raise Exception("gRPC confirm_seat returned success=False")
         except Exception as e:
-            user_service.post("/api/credits/refund", json={"amount": price, "reason": "Seat confirm failed"}, headers={"Authorization": auth_header})
+            user_service.post("/credits/refund", json={"user_id": user_id, "amount": price, "reason": "Seat confirm failed"}, headers={"Authorization": auth_header})
             order_service.patch(f"/orders/{order_id}/status", json={"status": "FAILED"})
             return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": "Failed to confirm seat"}), 500
 

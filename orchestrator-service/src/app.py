@@ -3,7 +3,7 @@ import json
 import logging
 import uuid
 from flask import Flask, jsonify, request
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from datetime import datetime, timezone
 
 # Structured JSON logging
@@ -71,6 +71,57 @@ def create_app():
             "service": "orchestrator-service",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+
+    @app.route("/api/users/<user_id>", methods=["GET"])
+    @jwt_required()
+    def get_user_profile(user_id):
+        from src.utils.http_client import user_service
+        auth_header = request.headers.get("Authorization", "")
+        res = user_service.get(f"/users/{user_id}", headers={"Authorization": auth_header})
+        return jsonify(res.json()), res.status_code
+
+    @app.route("/api/credits/balance", methods=["GET"])
+    @jwt_required()
+    def get_credit_balance():
+        from src.utils.http_client import user_service
+        user_id = get_jwt_identity()
+        auth_header = request.headers.get("Authorization", "")
+        res = user_service.get(f"/users/{user_id}", headers={"Authorization": auth_header})
+        if res.status_code != 200:
+            return jsonify(res.json()), res.status_code
+        body = res.json() if isinstance(res.json(), dict) else {}
+        credit_balance = body.get("credit_balance", 0)
+        return jsonify({
+            "success": True,
+            "data": {
+                "user_id": user_id,
+                "credit_balance": credit_balance
+            }
+        }), 200
+
+    @app.route("/api/credits/topup", methods=["POST"])
+    @jwt_required()
+    def topup_credits():
+        from src.utils.http_client import user_service
+        user_id = get_jwt_identity()
+        data = request.get_json() or {}
+        amount = data.get("amount")
+        if amount is None:
+            return jsonify({"success": False, "error_code": "VALIDATION_ERROR", "message": "amount is required"}), 400
+        auth_header = request.headers.get("Authorization", "")
+        res = user_service.post("/credits/topup", json={"user_id": user_id, "amount": amount}, headers={"Authorization": auth_header})
+        if res.status_code != 200:
+            return jsonify(res.json()), res.status_code
+        body = res.json() if isinstance(res.json(), dict) else {}
+        return jsonify({
+            "success": True,
+            "data": {
+                "client_secret": body.get("client_secret"),
+                "amount": body.get("amount", amount),
+                "currency": "sgd",
+                "message": body.get("message", "Complete payment on the frontend using Stripe.js")
+            }
+        }), 200
 
     from src.routes.purchase_routes import purchase_bp
     from src.routes.transfer_routes import transfer_bp

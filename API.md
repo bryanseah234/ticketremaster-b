@@ -15,11 +15,13 @@
 7. [Transfer Flow Endpoints (Scenario 2)](#7-transfer-flow-endpoints-scenario-2)
 8. [Verification Endpoint (Scenario 3)](#8-verification-endpoint-scenario-3)
 9. [Credit & Payment Endpoints](#9-credit--payment-endpoints)
-10. [Ticket Endpoints](#10-ticket-endpoints)
-11. [Admin Endpoints](#11-admin-endpoints)
-12. [Health Check Endpoints](#12-health-check-endpoints)
-13. [Internal Service APIs](#13-internal-service-apis)
-14. [Swagger / Flasgger Integration Plan](#14-swagger--flasgger-integration-plan)
+10. [User Profile Endpoints](#10-user-profile-endpoints)
+11. [Ticket Endpoints](#11-ticket-endpoints)
+12. [Marketplace Endpoints](#12-marketplace-endpoints)
+13. [Admin Endpoints](#13-admin-endpoints)
+14. [Health Check Endpoints](#14-health-check-endpoints)
+15. [Internal Service APIs](#15-internal-service-apis)
+16. [Swagger / Flasgger Integration Plan](#16-swagger--flasgger-integration-plan)
 
 ---
 
@@ -27,7 +29,7 @@
 
 ### Base URL
 
-All public API requests go through **Nginx API Gateway**:
+All public API requests go through the **Kong API Gateway**:
 
 | Environment | Base URL |
 | --- | --- |
@@ -115,8 +117,6 @@ All request and response bodies use `application/json`.
 | `ORDER_ALREADY_CONFIRMED` | 409 | Pay | Order has already been confirmed |
 | `OTP_REQUIRED` | 428 | Pay | High-risk user — OTP verification required before payment |
 | `OTP_INVALID` | 401 | Verify OTP, Transfer Confirm | OTP code is incorrect |
-| `OTP_EXPIRED` | 410 | Verify OTP, Transfer Confirm | OTP code has expired |
-| `OTP_MAX_RETRIES` | 429 | Verify OTP, Transfer Confirm | Maximum OTP attempts exceeded |
 | `TRANSFER_NOT_FOUND` | 404 | Transfer Confirm/Dispute/Reverse | Transfer ID does not exist |
 | `TRANSFER_INVALID_STATE` | 409 | Transfer Confirm/Dispute/Reverse | Transfer is not in the expected state |
 | `TRANSFER_IN_PROGRESS` | 409 | Transfer Initiate | A pending transfer already exists for this seat |
@@ -426,7 +426,7 @@ Reserve a seat — places a 5-minute pessimistic lock.
 ```json
 {
   "seat_id": "s1s2s3s4-...",
-  "user_id": "f47ac10b-..."
+  "event_id": "a1b2c3d4-..."
 }
 ```
 
@@ -453,8 +453,6 @@ Reserve a seat — places a 5-minute pessimistic lock.
 | Seat held by another user | `SEAT_UNAVAILABLE` | 409 | `SELECT FOR UPDATE NOWAIT` failed — another transaction holds the lock |
 | Seat already sold | `SEAT_ALREADY_SOLD` | 409 | Seat status is `SOLD` or `CHECKED_IN` |
 | Seat not found | `SEAT_NOT_FOUND` | 404 | seat_id does not exist in seats_db |
-| Event already passed | `EVENT_ENDED` | 410 | Event date is in the past |
-| User not found | `USER_NOT_FOUND` | 404 | user_id does not exist |
 
 ---
 
@@ -507,7 +505,6 @@ Verify OTP for high-risk users during purchase or transfer. Called after receivi
 
 ```json
 {
-  "user_id": "f47ac10b-...",
   "otp_code": "123456",
   "context": "purchase",
   "reference_id": "o1o2o3o4-..."
@@ -521,11 +518,7 @@ Verify OTP for high-risk users during purchase or transfer. Called after receivi
 
 ```json
 {
-  "success": true,
-  "data": {
-    "verified": true,
-    "message": "OTP verified. You may proceed."
-  }
+  "message": "OTP verified successfully"
 }
 ```
 
@@ -534,8 +527,7 @@ Verify OTP for high-risk users during purchase or transfer. Called after receivi
 | Scenario | Error Code | HTTP | Detail |
 | --- | --- | --- | --- |
 | Incorrect OTP | `OTP_INVALID` | 401 | Code does not match |
-| OTP expired (>5 min) | `OTP_EXPIRED` | 410 | Request a new OTP |
-| Max retries exceeded (3) | `OTP_MAX_RETRIES` | 429 | Flow cancelled. Must re-initiate. |
+| OTP missing/expired | `VALIDATION_ERROR` | 400 | No pending OTP verification |
 
 ---
 
@@ -577,13 +569,8 @@ Start a P2P ticket transfer. Triggers OTP for both parties.
 | Scenario | Error Code | HTTP | Detail |
 | --- | --- | --- | --- |
 | Seller does not own seat | `NOT_SEAT_OWNER` | 403 | `seat.owner_user_id != seller_user_id` |
-| Buyer insufficient credits | `INSUFFICIENT_CREDITS` | 402 | `buyer.credit_balance < credits_amount` |
-| Transfer already pending for this seat | `TRANSFER_IN_PROGRESS` | 409 | An `INITIATED` or `PENDING_OTP` transfer exists for this seat_id |
-| Self-transfer | `SELF_TRANSFER` | 400 | `seller_user_id == buyer_user_id` |
 | Seat not in SOLD state | `SEAT_UNAVAILABLE` | 409 | Can only transfer tickets with status `SOLD` |
-| Seller not found | `USER_NOT_FOUND` | 404 | seller_user_id does not exist |
-| Buyer not found | `USER_NOT_FOUND` | 404 | buyer_user_id does not exist |
-| Seat not found | `SEAT_NOT_FOUND` | 404 | seat_id does not exist |
+| Inventory check failed | `INTERNAL_ERROR` | 500 | Failed to verify seat ownership |
 
 ---
 
@@ -621,12 +608,11 @@ Confirm transfer with both OTPs. Executes atomic swap (credits + ownership).
 
 | Scenario | Error Code | HTTP | Detail |
 | --- | --- | --- | --- |
-| Seller OTP incorrect | `OTP_INVALID` | 401 | Seller OTP does not match |
-| Buyer OTP incorrect | `OTP_INVALID` | 401 | Buyer OTP does not match |
-| Either OTP expired | `OTP_EXPIRED` | 410 | Re-initiate transfer |
-| Max OTP retries exceeded (3) | `OTP_MAX_RETRIES` | 429 | Transfer auto-cancelled → `FAILED` |
+| Seller or buyer OTP incorrect | `OTP_INVALID` | 401 | OTP does not match |
 | Transfer not in PENDING_OTP state | `TRANSFER_INVALID_STATE` | 409 | Transfer already completed/cancelled |
 | Transfer not found | `TRANSFER_NOT_FOUND` | 404 | transfer_id does not exist |
+| Buyer insufficient credits | `INSUFFICIENT_CREDITS` | 402 | `buyer.credit_balance < credits_amount` |
+| Credit transfer or ownership update failed | `INTERNAL_ERROR` | 500 | See error message |
 
 ---
 
@@ -662,7 +648,6 @@ Flag a transfer for fraud/dispute. Credits are frozen.
 | --- | --- | --- | --- |
 | Transfer not found | `TRANSFER_NOT_FOUND` | 404 | transfer_id does not exist |
 | Transfer not in COMPLETED state | `TRANSFER_INVALID_STATE` | 409 | Can only dispute completed transfers |
-| User not party to transfer | `FORBIDDEN` | 403 | Only seller or buyer can dispute |
 
 ---
 
@@ -700,7 +685,7 @@ Reverse a disputed transfer — return ownership to seller, credits to buyer.
 | --- | --- | --- | --- |
 | Transfer not found | `TRANSFER_NOT_FOUND` | 404 | transfer_id does not exist |
 | Transfer not in DISPUTED state | `TRANSFER_INVALID_STATE` | 409 | Can only reverse disputed transfers |
-| Buyer no longer has seat (already transferred again) | `SEAT_UNAVAILABLE` | 409 | Seat has changed ownership since dispute |
+| Ownership or credit rollback failed | `INTERNAL_ERROR` | 500 | Manual reconciliation required |
 
 ---
 
@@ -715,8 +700,7 @@ Staff scans QR code to verify ticket at venue entry.
 ```json
 {
   "qr_payload": "base64-encoded-encrypted-payload",
-  "hall_id": "HALL-A",
-  "staff_id": "staff-uuid-..."
+  "hall_id": "HALL-A"
 }
 ```
 
@@ -728,9 +712,6 @@ Staff scans QR code to verify ticket at venue entry.
   "data": {
     "result": "SUCCESS",
     "seat_id": "s1s2s3s4-...",
-    "row_number": "A",
-    "seat_number": 12,
-    "owner_name": "John Doe",
     "message": "✅ Valid ticket. Welcome!"
   }
 }
@@ -753,7 +734,7 @@ All rejection cases return HTTP 200 (the API call succeeded) but with a non-SUCC
 | Result | Trigger | Display Message |
 | --- | --- | --- |
 | `SUCCESS` | `seat.status == SOLD`, no prior check-in | ✅ Valid ticket. Welcome! |
-| `DUPLICATE` | `entry_logs` has `SUCCESS` record for this seat | ⚠️ Already Checked In |
+| `DUPLICATE` | `seat.status == CHECKED_IN` | ⚠️ Already Checked In |
 | `UNPAID` | `seat.status == HELD` | ❌ Incomplete Payment |
 | `NOT_FOUND` | seat_id does not exist | 🚫 Possible Counterfeit |
 | `WRONG_HALL` | QR `hall_id` ≠ `event.hall_id` | 🔄 Wrong Hall — Go to Hall {X} |
@@ -835,7 +816,7 @@ Stripe webhook — called by Stripe on `payment.succeeded`. Adds credits to user
 
 ```json
 {
-  "received": true
+  "status": "success"
 }
 ```
 

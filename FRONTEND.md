@@ -266,7 +266,7 @@ Your frontend must implement these core views.
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Load balance | `GET /users/{user_id}` | Path param | `credit_balance` → display |
+| Load balance | `GET /credits/balance` | — | `data.credit_balance` → display |
 | Pay | `POST /pay` | `{ "order_id": "..." }` | `data.status` → if `CONFIRMED`, show success! `data.credits_charged`, `data.remaining_balance` |
 | OTP verify (if flagged) | `POST /verify-otp` | `{ "user_id": "uuid", "otp_code": "123456", "context": "purchase", "reference_id": "order_id" }` | `message` (string) |
 
@@ -301,15 +301,19 @@ Your frontend must implement these core views.
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Load tickets | `GET /tickets` | — | `data[]` → each ticket: `seat_id`, `status`, `price_paid` |
+| Load tickets | `GET /tickets` | — | `data[]` → each ticket: `seat_id`, `event`, `row_number`, `seat_number`, `status`, `price_paid`, `purchased_at` |
 
 **Response fields (ticket item):**
 
 - `seat_id` (string, UUID)
+- `event` (object: `event_id`, `name`, `event_date`, `hall_id`)
+- `row_number` (string)
+- `seat_number` (number)
 - `status` (string: `SOLD`)
 - `price_paid` (number)
+- `purchased_at` (string, ISO 8601)
 
-**Note:** This endpoint currently does not include event metadata. If you need event name/date, add them on the backend or join by seat_id after extending the payload.
+**Note:** Event data is already included; show `event.name` and `event.event_date` in the UI.
 
 **Card actions:**
 
@@ -414,9 +418,9 @@ useIntervalFn(async () => {
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Load balance | `GET /users/{user_id}` | Path param | `credit_balance` |
-| Create payment | `POST /credits/topup` | `{ "user_id": "uuid", "amount": 100.00 }` | `client_secret`, `amount`, `message` |
-| After Stripe success | `GET /users/{user_id}` | Path param | Refresh `credit_balance` |
+| Load balance | `GET /credits/balance` | — | `data.credit_balance` |
+| Create payment | `POST /credits/topup` | `{ "amount": 100.00 }` | `data.client_secret`, `data.amount`, `data.message` |
+| After Stripe success | `GET /credits/balance` | — | Refresh `data.credit_balance` |
 
 **Stripe.js flow:**
 
@@ -424,7 +428,7 @@ useIntervalFn(async () => {
 import { loadStripe } from '@stripe/stripe-js'
 
 const stripe = await loadStripe('pk_test_...')
-const { data } = await api.post('/credits/topup', { user_id, amount: 100 })
+const { data } = await api.post('/credits/topup', { amount: 100 })
 
 // Use Stripe Elements to collect card → confirmCardPayment
 const result = await stripe.confirmCardPayment(data.client_secret, {
@@ -492,7 +496,8 @@ if (result.paymentIntent.status === 'succeeded') {
 
 | Action | API Call | Request | Response fields to use |
 |---|---|---|---|
-| Load balance | `GET /users/{user_id}` | Path param | `credit_balance` |
+| Load profile | `GET /users/{user_id}` | Path param | `user_id`, `email`, `phone`, `credit_balance`, `is_flagged`, `is_admin`, `is_verified` |
+| Load balance | `GET /credits/balance` | — | `data.credit_balance` |
 | Logout | `POST /auth/logout` | — | Clear Pinia store + localStorage → redirect to `/login` |
 
 **Response fields (user profile):**
@@ -544,7 +549,7 @@ Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `
 |---|---|---|
 | Navigation Links | — | Links to Home, Events, **Marketplace**, My Tickets, Profile |
 | Check auth state | — | Read from Pinia `authStore.isLoggedIn` |
-| Show credit balance | `GET /users/{user_id}` | On login, on route change (debounced) |
+| Show credit balance | `GET /credits/balance` | On login, on route change (debounced) |
 | Refresh token | `POST /auth/refresh` | Axios interceptor handles this automatically on 401 |
 
 ---

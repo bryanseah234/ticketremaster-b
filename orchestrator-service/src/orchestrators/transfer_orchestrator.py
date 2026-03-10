@@ -85,12 +85,15 @@ def handle_confirm(transfer_id, seller_otp, buyer_otp, user_id):
 
         # 4. Transfer Credits (Deduct buyer, Topup seller)
         if credits_amt and credits_amt > 0:
-            # We assume order-service handles deducting internally or we use internal admin endpoints.
-            # To keep it simple, we use the user service public-like endpoints but internally.
-            b_deduct = user_service.post("/api/credits/deduct", json={"amount": credits_amt}, headers={"X-User-Id": buyer_id}) # Custom header for internal auth if needed
-            # Wait, user_service might not allow deducting for arbitrary users.
-            # INSTRUCTIONS: "Transfer Confirm executes atomic swap (credits + ownership)". Let's skip physical credit transfer for now or mock it if it fails.
-            pass
+            transfer_res = user_service.post("/credits/transfer", json={
+                "from_user_id": buyer_id,
+                "to_user_id": seller_id,
+                "amount": credits_amt
+            }, headers={"Authorization": auth_header})
+            if transfer_res.status_code == 402:
+                return jsonify({"success": False, "error_code": "INSUFFICIENT_CREDITS", "message": "Not enough credits"}), 402
+            if transfer_res.status_code != 200:
+                return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": "Credit transfer failed"}), 500
 
         # 5. Swap DB Ownership
         try:
@@ -122,9 +125,39 @@ def handle_dispute(transfer_id, reason, user_id):
     return jsonify(res.json()), res.status_code
 
 def handle_reverse(transfer_id, user_id):
-    # Reverse transfer logic
-    # 1. Update order service
     res = order_service.post(f"/transfers/{transfer_id}/reverse")
-    # 2. Swap ownership back via gRPC
-    # Simplified for E2E
-    return jsonify(res.json()), res.status_code
+    if res.status_code != 200:
+        return jsonify(res.json()), res.status_code
+
+    transfer = res.json() if isinstance(res.json(), dict) else {}
+    seat_id = transfer.get("seat_id")
+    seller_user_id = transfer.get("seller_user_id")
+    buyer_user_id = transfer.get("buyer_user_id")
+    credits_amt = transfer.get("credits_amount") or 0
+
+    if seat_id and seller_user_id:
+        try:
+            inventory_client.update_owner(seat_id, seller_user_id)
+        except Exception:
+            return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": "Failed to restore ownership"}), 500
+
+    if credits_amt and credits_amt > 0 and seller_user_id and buyer_user_id:
+        credit_res = user_service.post("/credits/transfer", json={
+            "from_user_id": seller_user_id,
+            "to_user_id": buyer_user_id,
+            "amount": credits_amt
+        })
+        if credit_res.status_code != 200:
+            return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": "Failed to return credits"}), 500
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "transfer_id": transfer_id,
+            "status": "REVERSED",
+            "seat_id": seat_id,
+            "restored_owner_user_id": seller_user_id,
+            "credits_returned": credits_amt,
+            "message": "Transfer reversed. Ownership and credits restored."
+        }
+    }), 200

@@ -7,7 +7,7 @@ from flask import jsonify
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from src.utils.grpc_client import inventory_client
-from src.utils.http_client import order_service, event_service
+from src.utils.http_client import order_service, event_service, inventory_service_http
 
 logger = logging.getLogger("orchestrator")
 
@@ -132,15 +132,55 @@ def handle_get_tickets(user_id):
         return jsonify(res.json()), res.status_code
         
     orders = res.json()
+    confirmed_orders = [o for o in orders if o.get("status") == "CONFIRMED"]
+    if not confirmed_orders:
+        return jsonify({"success": True, "data": []}), 200
+
+    event_ids = {o.get("event_id") for o in confirmed_orders if o.get("event_id")}
+    event_cache = {}
+    seat_cache = {}
+
+    for event_id in event_ids:
+        try:
+            event_res = event_service.get(f"/api/events/{event_id}")
+            if event_res.status_code == 200:
+                event_body = event_res.json()
+                event_cache[event_id] = event_body.get("data") if isinstance(event_body, dict) else None
+            else:
+                event_cache[event_id] = None
+        except Exception:
+            event_cache[event_id] = None
+
+        try:
+            seats_res = inventory_service_http.get("/internal/seats", params={"event_id": event_id})
+            if seats_res.status_code == 200:
+                seats_data = seats_res.json().get("data", [])
+                seat_cache[event_id] = {seat.get("seat_id"): seat for seat in seats_data if seat.get("seat_id")}
+            else:
+                seat_cache[event_id] = {}
+        except Exception:
+            seat_cache[event_id] = {}
+
     tickets = []
-    
-    for o in orders:
-        if o["status"] == "CONFIRMED":
-            tickets.append({
-                "seat_id": o["seat_id"],
-                "status": "SOLD",
-                "price_paid": o["credits_charged"]
-            })
+    for o in confirmed_orders:
+        event_id = o.get("event_id")
+        event_data = event_cache.get(event_id) if event_id else None
+        seat_id = o.get("seat_id")
+        seat_info = seat_cache.get(event_id, {}).get(seat_id) if event_id else None
+        tickets.append({
+            "seat_id": seat_id,
+            "event": {
+                "event_id": event_id,
+                "name": event_data.get("name") if event_data else None,
+                "event_date": event_data.get("event_date") if event_data else None,
+                "hall_id": event_data.get("hall_id") if event_data else None
+            } if event_id else None,
+            "row_number": seat_info.get("row_number") if seat_info else None,
+            "seat_number": seat_info.get("seat_number") if seat_info else None,
+            "status": "SOLD",
+            "price_paid": o.get("credits_charged"),
+            "purchased_at": o.get("confirmed_at") or o.get("created_at")
+        })
     return jsonify({"success": True, "data": tickets}), 200
 
 def handle_generate_qr(seat_id, user_id):
