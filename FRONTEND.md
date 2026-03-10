@@ -141,6 +141,8 @@ Your frontend must implement these core views.
 - `event_date` (string, ISO 8601)
 - `total_seats` (number)
 - `pricing_tiers` (object: `{ "CAT1": number, "CAT2": number, ... }`)
+- `seat_selection_mode` (string: `SEATMAP` | `CATEGORY`)
+- `seat_config` (object, optional: `{ "category_rows": { "CAT1": ["1","2"], "CAT2": ["3","4"] } }`)
 - `seats[]` (array of seat objects):
   - `seat_id` (string, UUID)
   - `event_id` (string, UUID)
@@ -150,6 +152,8 @@ Your frontend must implement these core views.
   - `held_until` (string, ISO 8601 or null)
   - `row_number` (string)
   - `seat_number` (number)
+  - `category` (string or null)
+  - `price` (number or null)
   - `price_paid` (number or null)
 
 **Seat grid colors:** Map `seats[].status` → color:
@@ -522,11 +526,15 @@ if (result.paymentIntent.status === 'succeeded') {
 
 | Action | API Call | Request Body | Response fields to use |
 |---|---|---|---|
-| Admin Event Create | `POST /admin/events` | `{ "name": "...", "venue": {"name": "Test Venue", "address": "123 Test St", "total_halls": 2}, "hall_id": "HALL-1", "event_date": "2026-12-31T20:00:00", "total_seats": 250, "pricing_tiers": {"CAT1": 100} }` | `data.event_id`, `data.seats_created` |
+| Admin Event Create | `POST /admin/events` | `{ "name": "...", "venue": {"name": "Test Venue", "address": "123 Test St", "total_halls": 2}, "hall_id": "HALL-1", "event_date": "2026-12-31T20:00:00", "total_seats": 250, "pricing_tiers": {"CAT1": 100}, "seat_selection_mode": "SEATMAP", "seat_config": { "category_rows": { "CAT1": ["1","2"] } } }` | `data.event_id`, `data.seats_created` |
 | Admin Dashboard | `GET /admin/events/{event_id}/dashboard` | — | `data.seats_sold`, `data.seats_held`, `data.seats_available`, `data.seats_detail[]` |
 
 **Error Handling:**
 Always read the `error_code` string in the JSON response (e.g. `UNAUTHORIZED`, `FORBIDDEN`).
+
+**Seat Selection Modes:**
+- `SEATMAP` → user picks a specific seat from the map, then calls `POST /reserve` with `seat_id`.
+- `CATEGORY` → user picks a category only, then call `POST /reserve-by-category` with `{ "event_id": "...", "category": "CAT1" }` to get a random available seat in that category.
 
 ---
 

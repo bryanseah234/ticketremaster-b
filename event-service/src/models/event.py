@@ -12,6 +12,8 @@ class Event(db.Model):
     event_date = db.Column(db.DateTime, nullable=False)
     total_seats = db.Column(db.Integer, nullable=False)
     pricing_tiers = db.Column(JSONB, nullable=False)
+    seat_selection_mode = db.Column(db.String(20), nullable=False, default="SEATMAP")
+    seat_config = db.Column(JSONB, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
@@ -25,5 +27,7 @@ class Event(db.Model):
             'hall_id': self.hall_id,
             'event_date': self.event_date.isoformat() if self.event_date else None,
             'total_seats': self.total_seats,
-            'pricing_tiers': self.pricing_tiers
+            'pricing_tiers': self.pricing_tiers,
+            'seat_selection_mode': self.seat_selection_mode,
+            'seat_config': self.seat_config
         }

@@ -8,6 +8,31 @@ import os
 # Default to port 8080 as per architecture
 INVENTORY_SERVICE_HTTP_URL = os.environ.get('INVENTORY_SERVICE_HTTP_URL', 'http://inventory-service:8080')
 
+def _normalize_category_rows(seat_config):
+    if not isinstance(seat_config, dict):
+        return {}
+    category_rows = seat_config.get("category_rows")
+    if not isinstance(category_rows, dict):
+        return {}
+    normalized = {}
+    for category, rows in category_rows.items():
+        if isinstance(rows, list):
+            normalized[category] = set(str(r) for r in rows)
+        elif isinstance(rows, str):
+            normalized[category] = {rows}
+    return normalized
+
+def _map_seat_category(row_number, category_rows):
+    if not category_rows:
+        return None
+    row_value = str(row_number) if row_number is not None else None
+    if not row_value:
+        return None
+    for category, rows in category_rows.items():
+        if row_value in rows:
+            return category
+    return None
+
 def get_all_events(page=1, per_page=20):
     pagination = Event.query.paginate(page=page, per_page=per_page, error_out=False)
     
@@ -34,10 +59,7 @@ def get_event_by_id(event_id):
     
     event_data = event.to_dict()
     
-    # Choreography: Fetch seats from Inventory Service
-    # Graceful fallback if Inventory Service is unreachable (e.g. not implemented yet)
     try:
-        # Timeout set to 2 seconds to avoid blocking for too long
         response = requests.get(
             f"{INVENTORY_SERVICE_HTTP_URL}/internal/seats", 
             params={'event_id': str(event_id)}, 
@@ -45,6 +67,13 @@ def get_event_by_id(event_id):
         )
         if response.status_code == 200:
             seats_data = response.json().get('data', [])
+            pricing = event_data.get("pricing_tiers") or {}
+            category_rows = _normalize_category_rows(event_data.get("seat_config") or {})
+            default_category = next(iter(pricing.keys()), None)
+            for seat in seats_data:
+                category = _map_seat_category(seat.get("row_number"), category_rows) or default_category
+                seat["category"] = category
+                seat["price"] = pricing.get(category) if category else None
             event_data['seats'] = seats_data
         else:
             print(f"Inventory Service returned {response.status_code}: {response.text}")
@@ -73,7 +102,9 @@ def create_event(data):
         hall_id=data.get('hall_id'),
         event_date=data.get('event_date'),
         total_seats=data.get('total_seats'),
-        pricing_tiers=data.get('pricing_tiers')
+        pricing_tiers=data.get('pricing_tiers'),
+        seat_selection_mode=data.get('seat_selection_mode') or "SEATMAP",
+        seat_config=data.get('seat_config') or {}
     )
     db.session.add(event)
     db.session.commit()

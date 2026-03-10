@@ -19,6 +19,20 @@ def reserve():
 
     return handle_reserve(seat_id, user_id, event_id)
 
+@purchase_bp.route('/reserve-by-category', methods=['POST'])
+@jwt_required()
+def reserve_by_category():
+    from src.orchestrators.purchase_orchestrator import handle_reserve_by_category
+    data = request.get_json() or {}
+    user_id = get_jwt_identity()
+    event_id = data.get('event_id')
+    category = data.get('category')
+
+    if not event_id:
+        return jsonify({"success": False, "error_code": "VALIDATION_ERROR", "message": "event_id is required"}), 400
+
+    return handle_reserve_by_category(event_id, user_id, category)
+
 @purchase_bp.route('/pay', methods=['POST'])
 @jwt_required()
 def pay():

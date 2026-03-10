@@ -1,4 +1,5 @@
 import logging
+import random
 from datetime import datetime, timezone
 import grpc
 from flask import jsonify
@@ -82,6 +83,37 @@ def handle_reserve(seat_id, user_id, event_id=None):
 
     except Exception as e:
         logger.error(f"Reserve error: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": str(e)}), 500
+
+def handle_reserve_by_category(event_id, user_id, category=None):
+    try:
+        if not event_id:
+            return jsonify({"success": False, "error_code": "VALIDATION_ERROR", "message": "event_id required"}), 400
+
+        res = event_service.get(f"/api/events/{event_id}")
+        if res.status_code != 200:
+            return jsonify({"success": False, "error_code": "EVENT_NOT_FOUND", "message": "Event not found"}), 404
+
+        event_data = res.json().get("data", {})
+        seats = event_data.get("seats", [])
+        selection_mode = event_data.get("seat_selection_mode")
+        if selection_mode != "CATEGORY":
+            return jsonify({"success": False, "error_code": "INVALID_MODE", "message": "Event does not support category-only selection"}), 400
+
+        available = [s for s in seats if s.get("status") == "AVAILABLE"]
+        if category:
+            available = [s for s in available if s.get("category") == category]
+
+        if not available:
+            return jsonify({"success": False, "error_code": "SEAT_UNAVAILABLE", "message": "No available seats in this category"}), 409
+
+        seat_id = random.choice(available).get("seat_id")
+        if not seat_id:
+            return jsonify({"success": False, "error_code": "SEAT_NOT_FOUND", "message": "Seat not found"}), 404
+
+        return handle_reserve(seat_id, user_id, event_id)
+    except Exception as e:
+        logger.error(f"Reserve-by-category error: {str(e)}", exc_info=True)
         return jsonify({"success": False, "error_code": "INTERNAL_ERROR", "message": str(e)}), 500
 
 def handle_pay(order_id, user_id):
