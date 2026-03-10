@@ -1,6 +1,9 @@
 from src.extensions import db
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
+import logging
+
+logger = logging.getLogger("event-service")
 
 class Event(db.Model):
     __tablename__ = 'events'
@@ -20,6 +23,10 @@ class Event(db.Model):
     venue = db.relationship('Venue', backref=db.backref('events', lazy=True))
 
     def to_dict(self):
+        logger.info(f"DEBUG: self.venue type: {type(self.venue)}")
+        if self.venue:
+            logger.info(f"DEBUG: self.venue direct methods: {[m for m in dir(self.venue) if 'to_dict' in m or not m.startswith('_')]}")
+        
         return {
             'event_id': str(self.event_id),
             'name': self.name,

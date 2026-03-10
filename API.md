@@ -829,6 +829,37 @@ Stripe webhook — called by Stripe on `payment.succeeded`. Adds credits to user
 
 ---
 
+## 10. User Profile Endpoints
+
+### `GET /api/users/{user_id}`
+
+Get user profile information.
+
+**Path Parameters:**
+
+| Param | Type | Description |
+| --- | --- | --- |
+| `user_id` | UUID | User identifier |
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "email": "user@example.com",
+    "phone": "+6591234567",
+    "credit_balance": 500.00,
+    "is_verified": true,
+    "is_flagged": false,
+    "is_admin": false
+  }
+}
+```
+
+---
+
 ## 11. Ticket Endpoints
 
 ### `GET /api/tickets`

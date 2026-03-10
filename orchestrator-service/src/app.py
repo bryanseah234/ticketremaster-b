@@ -14,11 +14,19 @@ class JSONFormatter(logging.Formatter):
             "level": record.levelname,
             "service": "orchestrator-service",
             "correlation_id": getattr(record, "correlation_id", None),
-            "message": record.getMessage(),
+            "message": str(record.getMessage()),
         }
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_data)
+        
+        # Ensure all values are serializable
+        def safe_serialize(obj):
+            if isinstance(obj, (str, int, float, bool, type(None))):
+                return obj
+            return str(obj)
+
+        safe_log_data = {k: safe_serialize(v) for k, v in log_data.items()}
+        return json.dumps(safe_log_data)
 
 from flask import has_request_context
 
