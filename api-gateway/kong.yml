@@ -25,6 +25,7 @@ plugins:
         - https://ticketremaster.hong-yi.me
         - https://ticketremasterapi.hong-yi.me
         - https://ticketremaster.vercel.app
+        - ~^https://.*\.vercel\.app$
         - http://ticketremaster.hong-yi.me
       methods:
         - GET
