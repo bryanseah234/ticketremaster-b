@@ -11,6 +11,20 @@ All requests must go to the API Gateway running on port `8000`.
 
 ---
 
+## Table of Contents
+
+1. [Authenticated Testing (Auth Flow)](#2-authentication-flow-testing)
+2. [Event & Admin Testing](#3-event--admin-testing)
+3. [Purchasing Flow Testing](#4-purchasing-flow-testing)
+4. [Security & Gateway Testing](#5-security--gateway-testing)
+5. [Marketplace Flow Testing](#6-marketplace-flow-testing)
+6. [Transfer Flow Testing (P2P)](#7-transfer-flow-testing-p2p)
+7. [Credits & Internal Testing](#8-credits--internal-testing)
+8. [Database CRUD Verification (Manual SQL)](#9-database-crud-verification-manual-sql)
+9. [End-to-End Verification Checklist](#10-end-to-end-verification-checklist)
+
+---
+
 ## Seeded Test Accounts
 
 - Non-admin: `user1@example.com` / `password123`
@@ -246,3 +260,148 @@ Login as `user2@example.com` (which is hardcoded to `is_flagged: true`). Reserve
    - *Expected:* This should ideally be blocked by a VPC firewall in Production, but locally it proves that hitting `8000` is the actual proper ingress.
 4. **Test Missing API Key:** Uncheck the `apikey` header in Postman on any call.
    - *Expected:* `HTTP 401 Unauthorized` returning `No API key found in request`.
+
+---
+
+## 6. Marketplace Flow Testing
+
+### 6.1 List Ticket on Marketplace
+
+- **Endpoint:** `POST /api/marketplace/list`
+- **Auth:** Bearer Token (Seller)
+- **Body:**
+
+  ```json
+  {
+      "seat_id": "<your-owned-seat-id>",
+      "asking_price": 500.00
+  }
+  ```
+
+- **Expected Status:** `200 OK`
+- **Expected DB State:** `marketplace_listings` table (orders-db) has a new `ACTIVE` row. `seats` table (seats-db) status changes to `LISTED`.
+
+### 6.2 Browse Listings
+
+- **Endpoint:** `GET /api/marketplace/listings?status=ACTIVE`
+- **Expected Status:** `200 OK`
+- **Expected Output:** Array containing the listing created in 6.1.
+
+### 6.3 Buy from Marketplace
+
+1. Login as a different user (e.g., `user2@example.com`).
+2. Ensure user has enough credits (`GET /api/credits/balance`).
+
+- **Endpoint:** `POST /api/marketplace/buy`
+- **Auth:** Bearer Token (Buyer)
+- **Body:**
+
+  ```json
+  {
+      "listing_id": "<listing-id-from-6.1>"
+  }
+  ```
+
+- **Expected Status:** `200 OK`
+- **Expected Output:** `status: "PENDING_TRANSFER"`.
+- **Expected DB State:** Buyer's credits deducted (escrow_hold). Listing status in `orders-db` changes to `PENDING_TRANSFER`.
+
+### 6.4 Approve Sale (Seller)
+
+1. Login back as the seller.
+
+- **Endpoint:** `POST /api/marketplace/approve`
+- **Auth:** Bearer Token (Seller)
+- **Body:**
+
+  ```json
+  {
+      "listing_id": "<listing-id>",
+      "otp_code": "123456"
+  }
+  ```
+
+- **Expected Status:** `200 OK`
+- **Expected DB State:** `seats` table `owner_user_id` updated to buyer. Credits released to seller. Listing status `COMPLETED`.
+
+---
+
+## 7. Transfer Flow Testing (P2P)
+
+### 7.1 Initiate Transfer
+
+- **Endpoint:** `POST /api/transfer/initiate`
+- **Auth:** Bearer Token
+- **Body:**
+
+  ```json
+  {
+      "seat_id": "<seat-id>",
+      "recipient_email": "user2@example.com"
+  }
+  ```
+
+- **Expected Status:** `200 OK`, returns `transfer_id`.
+
+### 7.2 Confirm Transfer (Recipient)
+
+1. Recipient logs in.
+
+- **Endpoint:** `POST /api/transfer/confirm`
+- **Auth:** Bearer Token
+- **Body:** { "transfer_id": "...", "otp_code": "123456" }
+- **Expected Status:** `200 OK`. Seat ownership moves in `seats-db`.
+
+---
+
+## 8. Credits & Internal Testing
+
+### 8.1 Check Balance
+
+- **Endpoint:** `GET /api/credits/balance`
+- **Expected Status:** `200 OK`.
+
+### 8.2 Top-up Credits (Mocked)
+
+- **Endpoint:** `POST /api/credits/topup`
+- **Body:** { "amount": 100 }
+- **Expected Status:** `200 OK`. (Note: In dev, this adds credits via a direct DB update or mocked Stripe flow).
+
+---
+
+## 9. Database CRUD Verification (Manual SQL)
+
+Use a tool like `psql` or DBeaver to connect to the local ports.
+
+### 9.1 User Service (`users-db` : 5434)
+
+- **Read User:** `SELECT * FROM users WHERE email = 'qa_test@example.com';`
+- **Update Credits:** `UPDATE users SET credit_balance = 1000 WHERE email = 'user1@example.com';` (Useful for testing)
+- **Delete User:** `DELETE FROM users WHERE user_id = '...';` (Verify cascading transactions delete if applicable)
+
+### 9.2 Event Service (`events-db` : 5436)
+
+- **Read Event:** `SELECT * FROM events WHERE name = 'QA Testing Concert';`
+- **Update Event:** `UPDATE events SET name = 'QA Updated Concert' WHERE event_id = '...';`
+
+### 9.3 Order Service (`orders-db` : 5435)
+
+- **Read Order:** `SELECT * FROM orders WHERE user_id = '...';`
+- **Read Marketplace:** `SELECT * FROM marketplace_listings;`
+- **Read Transfers:** `SELECT * FROM transfers;`
+
+### 9.4 Inventory Service (`seats-db` : 5433)
+
+- **Read Seat:** `SELECT * FROM seats WHERE seat_id = '...';`
+- **Update Seat Status:** `UPDATE seats SET status = 'AVAILABLE' WHERE seat_id = '...';` (Useful for resetting tests)
+
+---
+
+## 10. End-to-End Verification Checklist
+
+- [ ] Register -> Verify OTP -> Login.
+- [ ] Create Event (Admin) -> Check `events-db`.
+- [ ] Reserve -> Pay (Success) -> Check `orders-db` & `seats-db` status `SOLD`.
+- [ ] List on Marketplace -> Buy -> Approve -> Check ownership transfer.
+- [ ] Transfer P2P -> Check ownership change.
+- [ ] Attempt high-risk payment -> Verify `OTP_REQUIRED` trigger.

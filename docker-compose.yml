@@ -80,9 +80,10 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+    # environment:
+    #   RABBITMQ_DEFAULT_USER: guest
+    #   RABBITMQ_DEFAULT_PASS: guest
+
     volumes:
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
@@ -224,7 +225,8 @@ services:
     image: cloudflare/cloudflared:latest
     depends_on:
       - api-gateway
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+    command: ["tunnel", "--no-autoupdate", "run", "--protocol", "http2", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+
 
 volumes:
   seats_data:

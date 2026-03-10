@@ -14,14 +14,14 @@
 6. [Purchase Flow Endpoints (Scenario 1)](#6-purchase-flow-endpoints-scenario-1)
 7. [Transfer Flow Endpoints (Scenario 2)](#7-transfer-flow-endpoints-scenario-2)
 8. [Verification Endpoint (Scenario 3)](#8-verification-endpoint-scenario-3)
-9. [Credit & Payment Endpoints](#9-credit--payment-endpoints)
+9. [Credit & Payment Endpoints](#9-credit-payment-endpoints)
 10. [User Profile Endpoints](#10-user-profile-endpoints)
 11. [Ticket Endpoints](#11-ticket-endpoints)
 12. [Marketplace Endpoints](#12-marketplace-endpoints)
 13. [Admin Endpoints](#13-admin-endpoints)
 14. [Health Check Endpoints](#14-health-check-endpoints)
-15. [Internal Service APIs](#15-internal-service-apis)
-16. [Swagger / Flasgger Integration Plan](#16-swagger--flasgger-integration-plan)
+15. [Internal Service APIs (Reference)](#15-internal-service-apis-reference)
+16. [Swagger / Flasgger Integration Plan](#16-swagger-flasgger-integration-plan)
 
 ---
 
@@ -829,7 +829,7 @@ Stripe webhook — called by Stripe on `payment.succeeded`. Adds credits to user
 
 ---
 
-## 10. Ticket Endpoints
+## 11. Ticket Endpoints
 
 ### `GET /api/tickets`
 
@@ -847,7 +847,11 @@ List all tickets owned by the authenticated user.
         "event_id": "a1b2c3d4-...",
         "name": "Taylor Swift Eras Tour SG",
         "event_date": "2026-06-15T19:00:00Z",
-        "hall_id": "HALL-A"
+        "hall_id": "HALL-A",
+        "venue": {
+           "name": "Singapore Indoor Stadium",
+           "address": "2 Stadium Walk, Singapore 397691"
+        }
       },
       "row_number": "A",
       "seat_number": 12,
@@ -863,7 +867,7 @@ List all tickets owned by the authenticated user.
 
 ### `GET /api/tickets/{seat_id}/qr`
 
-Generate a fresh QR code payload with a new 60-second timestamp for ticket display.
+Generate a fresh QR code payload for ticket display.
 
 > Only the current seat owner can request a QR. The client should poll this every ~50 seconds to keep the QR code fresh.
 
@@ -897,63 +901,136 @@ Generate a fresh QR code payload with a new 60-second timestamp for ticket displ
 
 ---
 
-## 11. Health Check Endpoints
+## 12. Marketplace Endpoints
 
-Each microservice exposes a `GET /health` endpoint. These are used by Docker `healthcheck` directives and can be called for operational monitoring.
+### `POST /api/marketplace/list`
 
-### `GET /health`
+List a ticket on the resale marketplace.
+
+**Request Body:**
+
+```json
+{
+  "seat_id": "s1s2s3s4-...",
+  "asking_price": 500.00
+}
+```
 
 **Success Response (200):**
 
 ```json
 {
-  "status": "healthy",
-  "service": "inventory-service",
-  "timestamp": "2026-02-19T18:10:00Z",
-  "checks": {
-    "database": "connected",
-    "rabbitmq": "connected"
+  "success": true,
+  "data": {
+    "listing_id": "L1L2L3L4-...",
+    "status": "ACTIVE",
+    "message": "Ticket listed on marketplace."
   }
 }
 ```
 
-**Unhealthy Response (503):**
+---
+
+### `GET /api/marketplace/listings`
+
+Get all active marketplace listings.
+
+**Query Parameters:**
+
+| Param | Type | Required | Description |
+| --- | --- | --- | --- |
+| `status` | string | No | Filter by listing status (default: `ACTIVE`) |
+
+**Success Response (200):**
+
+```json
+[
+  {
+    "listing_id": "L1L2L3L4-...",
+    "seat_id": "s1s2s3s4-...",
+    "asking_price": 500.00,
+    "status": "ACTIVE",
+    "event": {
+      "event_id": "e1e2e3e4-...",
+      "name": "Taylor Swift SG",
+      "event_date": "2026-06-15T19:00:00Z",
+      "venue": { "name": "Indoor Stadium" },
+      "hall_id": "HALL-A"
+    },
+    "seat": {
+      "seat_id": "s1s2s3s4-...",
+      "row_number": "A",
+      "seat_number": 12,
+      "status": "LISTED"
+    }
+  }
+]
+```
+
+---
+
+### `POST /api/marketplace/buy`
+
+Initiate purchase of a marketplace listing. Deducts buyer credits and holds in escrow.
+
+**Request Body:**
 
 ```json
 {
-  "status": "unhealthy",
-  "service": "inventory-service",
-  "timestamp": "2026-02-19T18:10:00Z",
-  "checks": {
-    "database": "disconnected",
-    "rabbitmq": "connected"
+  "listing_id": "L1L2L3L4-..."
+}
+```
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "listing_id": "L1L2L3L4-...",
+    "status": "PENDING_TRANSFER",
+    "message": "Payment successful. Awaiting seller approval."
   }
 }
 ```
 
-| Service | Health Check Port | Dependencies Checked |
-| --- | --- | --- |
-| Inventory Service | 50051 (gRPC) / 8080 (HTTP) | seats_db, RabbitMQ |
-| User Service | 5000 | users_db |
-| Order Service | 5001 | orders_db |
-| Event Service | 5002 | events_db |
-| Orchestrator | 5003 | All downstream services |
+---
+
+### `POST /api/marketplace/approve`
+
+Seller approves the marketplace sale with an OTP.
+
+**Request Body:**
+
+```json
+{
+  "listing_id": "L1L2L3L4-...",
+  "otp_code": "123456"
+}
+```
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "listing_id": "L1L2L3L4-...",
+    "status": "COMPLETED",
+    "message": "Sale approved. Ticket ownership transferred."
+  }
+}
+```
 
 ---
 
-## 13. Internal Service APIs
+## 13. Admin Endpoints
 
-> These endpoints are **not** exposed through Nginx. They are called internally by the Orchestrator or other services.
-
----
-
-## 11. Admin Endpoints
-
-Admin endpoints are located on the Orchestrator Service and require an Admin JWT (`is_admin: true`).
+Admin endpoints require an Admin JWT (`is_admin: true`) and go through `/api/admin`.
 
 ### `POST /api/admin/events`
 
-Create a new event and provision all seats across multiple microservices.
+Create a new event.
 
 **Request Body:**
 
@@ -992,7 +1069,7 @@ Create a new event and provision all seats across multiple microservices.
 
 ### `GET /api/admin/events/{event_id}/dashboard`
 
-Aggregates stats for an event (seats sold, revenue, signed up users).
+Get dashboard statistics for an event.
 
 **Success Response (200):**
 
@@ -1022,51 +1099,55 @@ Aggregates stats for an event (seats sold, revenue, signed up users).
 
 ---
 
-## 12. Health Check Endpoints
+## 14. Health Check Endpoints
 
-### 12.1 Inventory Service (gRPC)
-
-Defined in `inventory-service/src/proto/inventory.proto`.
-
-| RPC | Request | Response | Description |
+| Service | Endpoint | Port | Dependencies |
 | --- | --- | --- | --- |
-| `ReserveSeat` | `{seat_id, user_id}` | `{success, held_until}` | `SELECT FOR UPDATE NOWAIT`. Status → `HELD`. |
-| `ConfirmSeat` | `{seat_id, user_id}` | `{success, qr_code_hash}` | Status → `SOLD`. Sets `owner_user_id`. |
-| `ReleaseSeat` | `{seat_id}` | `{success}` | Status → `AVAILABLE`. Clears hold fields. |
-| `UpdateOwner` | `{seat_id, new_owner_id}` | `{success}` | Transfers ownership for P2P transfer. |
-| `VerifyTicket` | `{seat_id}` | `{status, owner_user_id, event_id}` | Read-only check for verification flow. |
-| `MarkCheckedIn` | `{seat_id}` | `{success}` | Status → `CHECKED_IN`. Writes `entry_log`. |
-| `GetSeatOwner` | `{seat_id}` | `{owner_user_id, status}` | Ownership check for transfer validation. |
+| API Gateway (Kong) | `GET /` | 8000 | - |
+| Orchestrator | `GET /health` | 5003 | All services |
+| Inventory | `GET /health` | 8080 | seats_db, RabbitMQ |
+| User | `GET /health` | 5000 | users_db |
+| Order | `GET /health` | 5001 | orders_db |
+| Event | `GET /health` | 5002 | events_db |
 
-### 12.2 User Service (REST — Internal)
+---
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `GET` | `/users/{user_id}` | Get user profile |
-| `GET` | `/users/{user_id}/risk` | Returns `{is_flagged: bool}` |
-| `POST` | `/credits/deduct` | Deduct credits: `{user_id, amount}` |
-| `POST` | `/credits/transfer` | Atomic swap: `{from_user_id, to_user_id, amount}` |
-| `POST` | `/otp/send` | Send OTP via SMU API: `{user_id}` |
-| `POST` | `/otp/verify` | Verify OTP: `{user_id, otp_code}` |
+## 15. Internal Service APIs (Reference)
 
-### 12.3 Order Service (REST — Internal)
+These are used for service-to-service communication and are NOT exposed via the Gateway.
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `POST` | `/orders` | Create order: `{user_id, seat_id, event_id, credits_charged}` |
-| `PATCH` | `/orders/{order_id}` | Update status: `{status}` |
-| `GET` | `/orders?seat_id=` | Get order by seat (verification flow) |
-| `POST` | `/transfers` | Create transfer record |
-| `PATCH` | `/transfers/{transfer_id}` | Update transfer status |
-| `POST` | `/transfers/{transfer_id}/dispute` | Set `DISPUTED` + reason |
-| `POST` | `/transfers/{transfer_id}/reverse` | Set `REVERSED` + undo |
+### User Service (REST)
 
-### 12.4 Event Service (REST — Internal)
+- `GET /users/{user_id}` (Profile)
+- `GET /users/{user_id}/risk` (Risk status)
+- `POST /credits/topup` (Stripe)
+- `POST /credits/deduct` (Atomic)
+- `POST /credits/transfer` (P2P)
+- `POST /credits/escrow/hold` (Marketplace)
+- `POST /credits/escrow/release` (Marketplace)
+- `POST /otp/send`
+- `POST /otp/verify`
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `GET` | `/events` | List all events |
-| `GET` | `/events/{event_id}` | Get event details including `hall_id` |
+### Order Service (REST)
+
+- `POST /orders` (Creation)
+- `PATCH /orders/{order_id}/status`
+- `POST /transfers` (Start P2P)
+- `PATCH /transfers/{transfer_id}/otp`
+- `POST /marketplace/listings` (Create/Update)
+
+### Inventory Service (gRPC)
+
+- `ReserveSeat`
+- `ConfirmSeat`
+- `ReleaseSeat`
+- `UpdateOwner`
+- `VerifyTicket`
+- `MarkCheckedIn`
+
+### Inventory Service (HTTP Sidecar)
+
+- `GET /internal/seats?event_id={id}`
 
 ---
 
@@ -1213,3 +1294,5 @@ def reserve_seat():
 - [ ] Write YAML docstrings for every endpoint (can be done incrementally as services are built)
 - [ ] Test Swagger UI loads and all endpoints appear
 - [ ] Add `securityDefinitions` for JWT Bearer token
+
+```
