@@ -38,6 +38,20 @@ def handle_reserve(seat_id, user_id, event_id=None):
         if not seat_found:
             return jsonify({"success": False, "error_code": "SEAT_NOT_FOUND", "message": "Seat not found in event"}), 404
 
+        # Step 1b: Proactive risk check — block flagged users before locking the seat
+        try:
+            risk_res = user_service.get(f"/users/{user_id}/risk")
+            if risk_res.status_code == 200:
+                risk_data = risk_res.json()
+                if risk_data.get("is_flagged"):
+                    return jsonify({
+                        "success": False,
+                        "error_code": "OTP_REQUIRED",
+                        "message": "High risk account. OTP verification required before reservation."
+                    }), 428
+        except Exception as e:
+            logger.warning(f"Risk check failed (non-blocking): {str(e)}")
+
         # Step 2: Reserve seat via gRPC (Inventory Service)
         try:
             reserve_res = inventory_client.reserve_seat(seat_id, user_id)
