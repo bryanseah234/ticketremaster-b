@@ -108,7 +108,7 @@ flowchart TD
 
 | Service | Protocol | Domain Responsibility |
 | --- | --- | --- |
-| **API Gateway (Nginx)** | HTTP | Load balancing, rate limiting (100r/m), CORS for `ticketremaster.hong-yi.me`, reverse proxying. |
+| **API Gateway (Kong)** | HTTP | Rate limiting (50 req/min global, 5 req/min on registration), bot detection (blocks automated clients), API key auth, CORS, reverse proxying. |
 | **Orchestrator Service** | REST | The "Manager" — handles cross-service flows, triggers compensations on failure, generates Encrypted QR codes. |
 | **Inventory Service** | gRPC | Mission critical. Handles pessimistic locking `SELECT FOR UPDATE NOWAIT` for seats. Fast and highly concurrent. |
 | **User Service** | REST | Authentication (JWT), Credit balance management, Stripe integration, and SMU OTP 2FA handshakes. |
@@ -179,7 +179,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 ### 4. Scale for Traffic Drops (Optional)
 
-If you expect a massive swarm of customers, you can horizontally scale the Orchestrator and Inventory (locking) services. Nginx will automatically Load Balance traffic across all instances.
+If you expect a massive swarm of customers, you can horizontally scale the Orchestrator and Inventory (locking) services. Kong will automatically load balance traffic across all instances.
 
 ```bash
 docker-compose up -d --scale orchestrator-service=3 --scale inventory-service=2
@@ -189,11 +189,69 @@ docker-compose up -d --scale orchestrator-service=3 --scale inventory-service=2
 
 ## 🚦 Core Scenarios & User Flows
 
-TicketRemaster is designed to handle 3 major business scenarios smoothly, overcoming race conditions and distributed failures.
+TicketRemaster is designed to handle 5 major business scenarios, each with clearly defined success and failure paths with Saga compensations.
 
-### 1. Ticket Purchase Flow
+---
 
-**Goal:** Secure a ticket lock instantly, give the user 5 minutes to pay, deduct credits, and generate an encrypted QR code.
+### Scenario 1 — Ticket Purchase
+
+**Goal:** Secure a ticket lock instantly, give the user 5 minutes to pay, deduct credits, and confirm the seat.
+
+#### Success Path
+
+| Step | From → To | Action |
+|---|---|---|
+| 1 | Client → Orchestrator | `POST /api/reserve {seat_id, user_id, event_id}` |
+| 2 | Orchestrator → Event Svc | `GET /api/events/{event_id}` — fetch seat price from pricing tiers |
+| 3 | Orchestrator → Inventory | gRPC `ReserveSeat(seat_id, user_id)` — `SELECT FOR UPDATE NOWAIT`. Seat → `HELD` |
+| 4 | Orchestrator → Order Svc | `POST /orders` — create `PENDING` order with `credits_charged` |
+| 5 | Orchestrator → RabbitMQ | Publish TTL message to `seat.hold.queue` (5-min expiry) |
+| 6 | Orchestrator → Client | `200 OK` — returns `order_id`, `held_until`, 5-min countdown |
+| 7 | Client → Orchestrator | `POST /api/pay {order_id}` |
+| 8 | Orchestrator → Inventory | gRPC `GetSeatOwner(seat_id)` — verify seat still `HELD` by this user |
+| 9 | Orchestrator → User Svc | `POST /credits/deduct {user_id, amount}` |
+| 10 | Orchestrator → Order Svc | `PATCH /orders/{order_id}/status` → `CONFIRMED` |
+| 11 | Orchestrator → Inventory | gRPC `ConfirmSeat(seat_id, user_id)` — seat → `SOLD`, `owner_user_id` set |
+| 12 | Orchestrator → Client | `200 OK` — purchase confirmed |
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Orch as Orchestrator
+    participant EventS as Event Service
+    participant Inv as Inventory (gRPC)
+    participant OrderS as Order Service
+    participant RMQ as RabbitMQ
+    participant UserS as User Service
+
+    rect rgb(232, 245, 233)
+    Note over User,UserS: Phase 1 — Reserve Seat
+    User->>Orch: POST /api/reserve {seat_id, event_id}
+    Orch->>EventS: GET /api/events/{event_id}
+    EventS-->>Orch: Event data + pricing
+    Orch->>Inv: gRPC ReserveSeat (SELECT FOR UPDATE NOWAIT)
+    Inv-->>Orch: Success (Seat: HELD, held_until)
+    Orch->>OrderS: POST /orders (status: PENDING)
+    OrderS-->>Orch: order_id
+    Orch->>RMQ: Publish TTL message (5-min expiry)
+    Orch-->>User: 200 OK {order_id, held_until, ttl: 300s}
+    end
+
+    rect rgb(227, 242, 253)
+    Note over User,UserS: Phase 2 — Pay & Confirm
+    User->>Orch: POST /api/pay {order_id}
+    Orch->>Inv: gRPC GetSeatOwner — verify still HELD by user
+    Inv-->>Orch: Confirmed
+    Orch->>UserS: POST /credits/deduct {user_id, amount}
+    UserS-->>Orch: Success
+    Orch->>OrderS: PATCH /orders/{id}/status → CONFIRMED
+    Orch->>Inv: gRPC ConfirmSeat
+    Inv-->>Orch: Seat → SOLD
+    Orch-->>User: 200 OK — Purchase Confirmed!
+    end
+```
+
+#### Failure Paths & Compensation
 
 ```mermaid
 sequenceDiagram
@@ -204,89 +262,453 @@ sequenceDiagram
     participant UserS as User Service
     participant OrderS as Order Service
 
-    User->>Orch: POST /reserve {seat_id}
-    Orch->>Inv: ReserveSeat (Pessimistic DB Lock)
-    Inv-->>Orch: Success (Seat: HELD)
-    Orch->>RMQ: Publish Hold (5-min TTL)
-    Orch-->>User: 200 OK (You have 5 mins!)
-    
-    User->>Orch: POST /pay {order_id}
-    Orch->>UserS: Deduct Credits
-    UserS-->>Orch: Success
-    Orch->>OrderS: Create CONFIRMED Order
-    Orch->>Inv: ConfirmSeat
-    Inv-->>Orch: Success (Seat: SOLD)
-    Orch-->>User: 200 OK + QR Code Payload
+    rect rgb(255, 235, 238)
+    Note over User,OrderS: Failure A — Seat Lock Contention (NOWAIT)
+    User->>Orch: POST /api/reserve {seat_id}
+    Orch->>Inv: gRPC ReserveSeat
+    Inv--xOrch: UNAVAILABLE (another user holds the lock)
+    Orch-->>User: 409 SEAT_UNAVAILABLE
+    Note right of Orch: No compensation needed.
+    end
+
+    rect rgb(255, 243, 224)
+    Note over User,OrderS: Failure B — Payment Abandonment (TTL Expiry)
+    User->>Orch: POST /api/reserve (succeeds)
+    Orch-->>User: 200 OK (seat HELD)
+    Note over User: User closes app / walks away
+    RMQ->>RMQ: 5-min TTL expires → DLX
+    RMQ->>Inv: Message to seat.release.queue
+    Inv->>Inv: ReleaseSeat → AVAILABLE
+    Inv->>OrderS: PATCH order → FAILED
+    Note right of Inv: Seat auto-released. No manual action.
+    end
+
+    rect rgb(243, 229, 245)
+    Note over User,OrderS: Failure C — Insufficient Credits
+    User->>Orch: POST /api/pay {order_id}
+    Orch->>UserS: POST /credits/deduct
+    UserS--xOrch: 402 Insufficient credits
+    Orch-->>User: 402 INSUFFICIENT_CREDITS
+    Note right of Orch: Seat stays HELD. DLX auto-releases on expiry.
+    end
+
+    rect rgb(255, 235, 238)
+    Note over User,OrderS: Failure D — ConfirmSeat gRPC fails
+    User->>Orch: POST /api/pay {order_id}
+    Orch->>UserS: Deduct credits ✓
+    Orch->>OrderS: PATCH order → CONFIRMED ✓
+    Orch->>Inv: gRPC ConfirmSeat
+    Inv--xOrch: FAILED
+    Note over Orch: Compensation begins (reverse order)
+    Orch->>UserS: POST /credits/refund {amount}
+    Orch->>OrderS: PATCH order → FAILED
+    Orch-->>User: 500 INTERNAL_ERROR
+    Note right of Inv: Seat stays HELD → DLX auto-releases.
+    end
 ```
 
-#### Transfer Edge Cases
+#### High-Risk User Path (Mandatory OTP)
 
-- **Lock Contention:** If two users click "Reserve" at the exact same millisecond, the DB `NOWAIT` lock grants the seat to only one user instantly. The other receives a `409 SEAT_UNAVAILABLE`.
-- **Payment Abandonment:** If the user closes the app and doesn't pay, the message sitting in RabbitMQ expires after 5 minutes and drops into a **Dead Letter Exchange (DLX)**. The Inventory consumer picks it up and resets the seat to `AVAILABLE` automatically.
-- **High-Risk Users & Fraud:** If `user.is_flagged = true`, Orchestrator interrupts the `/pay` flow with a `428 OTP_REQUIRED` code. The user must complete an SMU 2FA SMS check before the purchase continues.
+If `user.is_flagged = true`, User Service returns `428` during credit deduction. The Orchestrator surfaces `OTP_REQUIRED` and the client must complete SMS 2FA before retrying payment.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Orch as Orchestrator
+    participant UserS as User Service
+
+    User->>Orch: POST /api/pay {order_id}
+    Orch->>UserS: POST /credits/deduct
+    UserS-->>Orch: 428 OTP_REQUIRED
+    Orch-->>User: 428 OTP_REQUIRED
+
+    User->>Orch: POST /api/verify-otp {otp_code}
+    Orch->>UserS: POST /otp/verify
+    UserS-->>Orch: 200 OK (verified)
+    Orch-->>User: 200 OK
+
+    User->>Orch: POST /api/pay {order_id} (retry)
+    Note over Orch: Normal pay flow continues
+```
+
+#### Compensation Matrix — Purchase
+
+| Failure Point | What Already Succeeded | Compensating Actions |
+|---|---|---|
+| `ReserveSeat` gRPC fails (NOWAIT lock) | Nothing | Return `SEAT_UNAVAILABLE`. No compensation needed. |
+| Order creation fails | Seat is `HELD` | Release seat via gRPC. Return error. |
+| RabbitMQ TTL publish fails | Seat `HELD`, order created | Release seat via gRPC. Return error. |
+| Credit deduction fails (insufficient) | Seat `HELD`, TTL published | Return `INSUFFICIENT_CREDITS`. DLX auto-releases seat. |
+| Credit deduction returns 428 (flagged user) | Seat `HELD`, TTL published | Return `OTP_REQUIRED`. User retries after OTP. DLX is the safety net. |
+| Order status update fails | Credits deducted | Refund credits. DLX auto-releases seat. Return error. |
+| `ConfirmSeat` gRPC fails | Credits deducted, order confirmed | Refund credits. Set order → `FAILED`. DLX auto-releases seat. |
 
 ---
 
-### 2. Secure P2P Ticket Transfer
+### Scenario 2 — Secure P2P Ticket Transfer
 
-**Goal:** Allow users to sell tickets to one another securely, transferring ownership and credits atomically.
+**Goal:** Allow users to transfer ticket ownership atomically with dual-OTP verification and credit swap.
+
+#### Success Path
+
+| Step | From → To | Action |
+|---|---|---|
+| 1 | Client → Orchestrator | `POST /api/transfer/initiate {seat_id, seller_user_id, buyer_user_id, credits_amount}` |
+| 2 | Orchestrator → Inventory | gRPC `GetSeatOwner(seat_id)` — verify seller owns seat and status is `SOLD` |
+| 3 | Orchestrator → Order Svc | `POST /transfers` — create transfer record (status: `PENDING_OTP`) |
+| 4 | Orchestrator → User Svc | `POST /otp/send` for both seller and buyer |
+| 5 | Client → Orchestrator | `POST /api/transfer/confirm {transfer_id, seller_otp, buyer_otp}` |
+| 6 | Orchestrator → User Svc | Verify both OTPs via `POST /otp/verify` |
+| 7 | Orchestrator → User Svc | `POST /credits/transfer {from: buyer, to: seller, amount}` |
+| 8 | Orchestrator → Inventory | gRPC `UpdateOwner(seat_id, buyer_id)` |
+| 9 | Orchestrator → Order Svc | `PATCH /transfers/{id}/status` → `COMPLETED` |
+| 10 | Result | Buyer now owns the ticket. Old owner's QR codes are automatically invalidated (owner_id mismatch). |
 
 ```mermaid
 sequenceDiagram
     actor Seller
     actor Buyer
     participant Orch as Orchestrator
+    participant Inv as Inventory (gRPC)
+    participant OrderS as Order Service
     participant UserS as User Service
-    participant Inv as Inventory
-    
-    Seller->>Orch: POST /transfer/initiate {seat_id, buyer_id, amount}
-    Orch->>UserS: Send OTP to Seller & Buyer
-    UserS-->>Seller: SMS Code
-    UserS-->>Buyer: SMS Code
-    
-    Seller->>Orch: POST /transfer/confirm {seller_otp, buyer_otp}
-    Buyer->>Orch: (provides OTP offline to Seller)
-    Orch->>UserS: Verify OTPs
-    UserS->>UserS: Atomic: Buyer Balance -$, Seller Balance +$
-    Orch->>Inv: UpdateOwner (Seat -> Buyer)
-    Orch-->>Seller: 200 OK Transfer Complete!
+
+    rect rgb(232, 245, 233)
+    Note over Seller,UserS: Phase 1 — Initiate Transfer
+    Seller->>Orch: POST /api/transfer/initiate
+    Orch->>Inv: gRPC GetSeatOwner
+    Inv-->>Orch: owner = Seller, status = SOLD ✓
+    Orch->>OrderS: POST /transfers (PENDING_OTP)
+    OrderS-->>Orch: transfer_id
+    Orch->>UserS: POST /otp/send (Seller)
+    Orch->>UserS: POST /otp/send (Buyer)
+    Orch-->>Seller: 201 {transfer_id, status: PENDING_OTP}
+    end
+
+    rect rgb(227, 242, 253)
+    Note over Seller,UserS: Phase 2 — Confirm with Dual OTP
+    Seller->>Orch: POST /api/transfer/confirm {seller_otp, buyer_otp}
+    Orch->>UserS: POST /otp/verify (Seller OTP)
+    UserS-->>Orch: ✓ Valid
+    Orch->>UserS: POST /otp/verify (Buyer OTP)
+    UserS-->>Orch: ✓ Valid
+    Orch->>UserS: POST /credits/transfer (Buyer → Seller)
+    UserS-->>Orch: Credits swapped
+    Orch->>Inv: gRPC UpdateOwner (seat → Buyer)
+    Inv-->>Orch: Ownership updated
+    Orch->>OrderS: PATCH transfer → COMPLETED
+    Orch-->>Seller: 200 OK — Transfer Complete!
+    end
 ```
 
-#### Verification Edge Cases
+#### Failure Paths & Compensation
 
-- **Self-Transfer:** Prevented instantly (`400 SELF_TRANSFER`).
-- **Mid-Transfer Sales:** A Unique Partial Index in the Database prevents starting a transfer if one is already `PENDING_OTP`.
-- **OTP Failure/Expiry:** If either OTP is wrong or expires, the transfer is suspended. 3 wrong attempts sets the transfer state to `FAILED`.
-- **Disputes:** If fraud occurs, support can trigger `/transfer/dispute` to freeze credits, and `/transfer/reverse` to return the ticket to the seller and money to the buyer.
+```mermaid
+sequenceDiagram
+    actor User
+    participant Orch as Orchestrator
+    participant Inv as Inventory (gRPC)
+    participant UserS as User Service
+    participant OrderS as Order Service
+
+    rect rgb(255, 235, 238)
+    Note over User,OrderS: Failure A — Seller doesn't own seat
+    User->>Orch: POST /api/transfer/initiate
+    Orch->>Inv: gRPC GetSeatOwner
+    Inv-->>Orch: owner ≠ seller_user_id
+    Orch-->>User: 403 NOT_SEAT_OWNER
+    Note right of Orch: No side effects.
+    end
+
+    rect rgb(255, 243, 224)
+    Note over User,OrderS: Failure B — OTP verification fails
+    User->>Orch: POST /api/transfer/confirm
+    Orch->>UserS: POST /otp/verify (Seller)
+    UserS--xOrch: 401 Invalid OTP
+    Orch-->>User: 401 OTP_INVALID
+    Note right of Orch: Transfer stays PENDING_OTP.<br/>User can retry. 3 failures → FAILED.
+    end
+
+    rect rgb(255, 235, 238)
+    Note over User,OrderS: Failure C — Insufficient buyer credits
+    User->>Orch: POST /api/transfer/confirm
+    Orch->>UserS: Verify OTPs ✓
+    Orch->>UserS: POST /credits/transfer
+    UserS--xOrch: 402 Insufficient credits
+    Orch-->>User: 402 INSUFFICIENT_CREDITS
+    Note right of Orch: No ownership change. No compensation.
+    end
+
+    rect rgb(243, 229, 245)
+    Note over User,OrderS: Failure D — UpdateOwner gRPC fails
+    User->>Orch: POST /api/transfer/confirm
+    Orch->>UserS: Verify OTPs ✓
+    Orch->>UserS: Credits transferred ✓
+    Orch->>Inv: gRPC UpdateOwner
+    Inv--xOrch: FAILED
+    Note over Orch: Compensation: reverse credits
+    Orch-->>User: 500 INTERNAL_ERROR
+    Note right of Orch: Credits returned. Transfer → FAILED.
+    end
+```
+
+#### Dispute & Reversal
+
+Either party can flag fraud via `POST /api/transfer/dispute`. An admin can then reverse the transfer:
+
+```mermaid
+sequenceDiagram
+    actor Party
+    participant Orch as Orchestrator
+    participant OrderS as Order Service
+    participant Inv as Inventory (gRPC)
+    participant UserS as User Service
+
+    Party->>Orch: POST /api/transfer/dispute {reason}
+    Orch->>OrderS: POST /transfers/{id}/dispute
+    OrderS-->>Orch: Transfer → DISPUTED
+    Orch-->>Party: 200 OK (Credits frozen)
+
+    Note over Orch: Admin reviews and triggers reversal
+
+    Orch->>OrderS: POST /transfers/{id}/reverse
+    OrderS-->>Orch: Transfer data returned
+    Orch->>Inv: gRPC UpdateOwner (seat → original seller)
+    Orch->>UserS: POST /credits/transfer (seller → buyer)
+    Note over Orch: Transfer → REVERSED. Ownership + credits restored.
+```
+
+#### Compensation Matrix — Transfer
+
+| Failure Point | What Already Succeeded | Compensating Actions |
+|---|---|---|
+| Ownership validation fails | Nothing | Return error. No side effects. |
+| Transfer record creation fails | Validation passed | Return error. No side effects. |
+| OTP send fails | Transfer created | Set transfer → `FAILED`. No side effects to undo. |
+| OTP verification fails (either party) | Transfer in `PENDING_OTP` | Allow retries. After 3 failures → `FAILED`. |
+| Credit transfer fails | Both OTPs verified | Set transfer → `FAILED`. No ownership change. |
+| `UpdateOwner` gRPC fails | Credits transferred | Reverse credit transfer. Set transfer → `FAILED`. |
+| Status update fails | Credits + ownership changed | Log critical error. System is consistent. Mark for manual audit. |
 
 ---
 
-### 3. Staff QR Verification
+### Scenario 3 — Staff QR Verification
 
-**Goal:** Verify encrypted QR ticket payloads at the venue gate in under 200ms without revealing plaintext ticket IDs.
+**Goal:** Verify encrypted QR ticket payloads at the venue gate using AES-256-GCM with a 60-second TTL.
+
+#### Success Path
+
+| Step | From → To | Action |
+|---|---|---|
+| 1 | Staff App → Orchestrator | `POST /api/verify {qr_payload, hall_id, staff_id}` |
+| 2 | Orchestrator | Decrypt QR with AES-256-GCM → extract `seat_id`, `owner_id`, `created_at` |
+| 3 | Orchestrator | Validate TTL: `NOW - created_at <= 60 seconds` |
+| 4 | Orchestrator → Inventory | gRPC `VerifyTicket(seat_id)` → returns `status`, `owner_user_id`, `event_id` |
+| 5 | Orchestrator | Verify `owner_id` from QR matches `owner_user_id` from Inventory |
+| 6 | Orchestrator → Event Svc | `GET /api/events/{event_id}` → verify `hall_id` matches |
+| 7 | Orchestrator → Inventory | gRPC `MarkCheckedIn(seat_id)` → seat status → `CHECKED_IN` |
+| 8 | Orchestrator → Staff App | `200 OK` — result: `SUCCESS` |
 
 ```mermaid
 sequenceDiagram
     actor Staff
-    participant Nginx as API Gateway
     participant Orch as Orchestrator
-    participant Inv as Inventory
-    
-    Staff->>Nginx: POST /verify {qr_payload, hall_id}
-    Nginx->>Orch: Route
-    Orch->>Orch: Decrypt AES-256-GCM
-    Orch->>Orch: Check IF (NOW - payload_time) <= 60s
-    Orch->>Inv: VerifyTicket & MarkCheckedIn
-    Inv-->>Orch: SUCCESS
-    Orch-->>Staff: 200 OK (✅ Valid Ticket)
+    participant Inv as Inventory (gRPC)
+    participant EventS as Event Service
+
+    rect rgb(232, 245, 233)
+    Note over Staff,EventS: Success — Valid Ticket Entry
+    Staff->>Orch: POST /api/verify {qr_payload, hall_id}
+    Orch->>Orch: Decrypt AES-256-GCM → {seat_id, owner_id, created_at}
+    Orch->>Orch: Check TTL: NOW - created_at ≤ 60s ✓
+    Orch->>Inv: gRPC VerifyTicket(seat_id)
+    Inv-->>Orch: status=SOLD, owner=owner_id, event_id
+    Orch->>Orch: QR owner_id == seat owner ✓
+    Orch->>EventS: GET /api/events/{event_id}
+    EventS-->>Orch: hall_id matches ✓
+    Orch->>Inv: gRPC MarkCheckedIn(seat_id)
+    Inv-->>Orch: Seat → CHECKED_IN
+    Orch-->>Staff: ✅ SUCCESS — Valid Ticket. Welcome!
+    end
 ```
 
-#### Edge Cases Handled
+#### Failure Paths
 
-- **Screenshot Sharing / Replay Attacks:** The frontend regenerates the QR code every 50 seconds. The backend enforces a strict **60-second TTL**. If a QR is scanned after 60 seconds (like a screenshot sent to a friend), it throws an `EXPIRED` rejection.
-- **Counterfeiting / QR Tampering:** The payload is encrypted with `AES-256-GCM` using a secret backend key. Modifying the QR invalidates the cryptographic tag instantly.
-- **Wrong Gates:** The QR payload embeds the expected `hall_id`. Scanning at the wrong gate throws a `WRONG_HALL` rejection.
-- **Duplicate Scans:** Re-scanning a checked-in ticket returns a `DUPLICATE` alert instantly.
+```mermaid
+sequenceDiagram
+    actor Staff
+    participant Orch as Orchestrator
+    participant Inv as Inventory (gRPC)
+    participant EventS as Event Service
+
+    rect rgb(255, 243, 224)
+    Note over Staff,EventS: Failure A — Expired QR (screenshot shared)
+    Staff->>Orch: POST /api/verify {qr_payload}
+    Orch->>Orch: Decrypt QR ✓
+    Orch->>Orch: TTL check: NOW - created_at > 60s
+    Orch-->>Staff: ⏰ EXPIRED — Refresh ticket in app
+    end
+
+    rect rgb(255, 235, 238)
+    Note over Staff,EventS: Failure B — Tampered / Counterfeit QR
+    Staff->>Orch: POST /api/verify {qr_payload}
+    Orch->>Orch: AES-GCM decrypt fails (auth tag invalid)
+    Orch-->>Staff: 🚫 QR_INVALID — Possible Counterfeit
+    end
+
+    rect rgb(243, 229, 245)
+    Note over Staff,EventS: Failure C — Already Checked In
+    Staff->>Orch: POST /api/verify {qr_payload}
+    Orch->>Orch: Decrypt + TTL ✓
+    Orch->>Inv: gRPC VerifyTicket
+    Inv-->>Orch: status = CHECKED_IN
+    Orch-->>Staff: ⚠️ DUPLICATE — Already Checked In
+    end
+
+    rect rgb(255, 235, 238)
+    Note over Staff,EventS: Failure D — Wrong Hall
+    Staff->>Orch: POST /api/verify {qr_payload, hall_id=HALL-B}
+    Orch->>Orch: Decrypt + TTL ✓
+    Orch->>Inv: gRPC VerifyTicket → event_id
+    Orch->>EventS: GET /api/events/{event_id}
+    EventS-->>Orch: expected hall_id = HALL-A
+    Orch-->>Staff: 🔄 WRONG_HALL — Go to Hall A
+    end
+```
+
+#### All Verification Results
+
+| Case | Result | Logic |
+|---|---|---|
+| Valid entry | `SUCCESS` | seat `SOLD` + QR `owner_id` matches `seat.owner_user_id` + correct hall + within TTL → `CHECKED_IN` |
+| Expired QR | `EXPIRED` | `NOW - created_at > 60s` → screenshot / forwarded QR |
+| Tampered QR | `QR_INVALID` | AES-GCM decryption fails — auth tag mismatch |
+| Already scanned | `DUPLICATE` | seat status is `CHECKED_IN` |
+| Unpaid seat | `UNPAID` | seat status is `HELD` → incomplete purchase |
+| Ticket not found | `NOT_FOUND` | `seat_id` doesn't exist → possible counterfeit |
+| Wrong hall | `WRONG_HALL` | QR scan `hall_id` ≠ event's `hall_id` |
+| Owner mismatch | `NOT_SEAT_OWNER` | QR `owner_id` ≠ `seat.owner_user_id` → ticket was transferred |
+
+---
+
+### Scenario 4 — Marketplace Resale
+
+**Goal:** Allow ticket holders to list tickets for resale, with escrow-based credit settlement and seller approval.
+
+#### Success Path
+
+| Step | From → To | Action |
+|---|---|---|
+| 1 | Seller → Orchestrator | `POST /api/marketplace/list {seat_id, asking_price}` |
+| 2 | Orchestrator → Inventory | gRPC `GetSeatOwner` — verify seller owns seat and status is `SOLD` |
+| 3 | Orchestrator → Order Svc | `POST /marketplace/listings` — create listing |
+| 4 | Orchestrator → Inventory | gRPC `ListSeat(seat_id, seller_id)` — seat status → `LISTED` |
+| 5 | Buyer → Orchestrator | `POST /api/marketplace/buy {listing_id}` |
+| 6 | Orchestrator → User Svc | `POST /credits/escrow/hold` — hold buyer's credits in escrow |
+| 7 | Orchestrator → Inventory | gRPC `ReserveSeat` — seat → `HELD` for buyer |
+| 8 | Orchestrator → User Svc | `POST /otp/send` — notify seller for approval |
+| 9 | Seller → Orchestrator | `POST /api/marketplace/approve {listing_id, seller_otp}` |
+| 10 | Orchestrator → User Svc | Verify seller OTP |
+| 11 | Orchestrator → Inventory | gRPC `ConfirmSeat(seat_id, buyer_id)` — ownership transferred |
+| 12 | Orchestrator → User Svc | `POST /credits/escrow/release` — release escrow to seller |
+| 13 | Orchestrator → Order Svc | `PATCH /marketplace/listings/{id}/status` → `COMPLETED` |
+
+```mermaid
+sequenceDiagram
+    actor Seller
+    actor Buyer
+    participant Orch as Orchestrator
+    participant Inv as Inventory (gRPC)
+    participant OrderS as Order Service
+    participant UserS as User Service
+
+    rect rgb(232, 245, 233)
+    Note over Seller,UserS: Phase 1 — List Ticket
+    Seller->>Orch: POST /api/marketplace/list {seat_id, asking_price}
+    Orch->>Inv: gRPC GetSeatOwner (verify ownership)
+    Inv-->>Orch: owner = Seller, status = SOLD ✓
+    Orch->>OrderS: POST /marketplace/listings
+    OrderS-->>Orch: listing_id
+    Orch->>Inv: gRPC ListSeat → seat LISTED
+    Orch-->>Seller: 201 — Ticket listed!
+    end
+
+    rect rgb(227, 242, 253)
+    Note over Seller,UserS: Phase 2 — Buyer Purchases
+    Buyer->>Orch: POST /api/marketplace/buy {listing_id}
+    Orch->>OrderS: GET /marketplace/listings/{id}
+    Orch->>UserS: POST /credits/escrow/hold (buyer credits)
+    Orch->>OrderS: PATCH listing → PENDING_TRANSFER
+    Orch->>Inv: gRPC ReserveSeat (hold for buyer)
+    Orch->>UserS: POST /otp/send (notify seller)
+    Orch-->>Buyer: 200 — Waiting for seller approval
+    end
+
+    rect rgb(232, 245, 233)
+    Note over Seller,UserS: Phase 3 — Seller Approves
+    Seller->>Orch: POST /api/marketplace/approve {seller_otp}
+    Orch->>UserS: POST /otp/verify (seller OTP)
+    UserS-->>Orch: ✓ Valid
+    Orch->>Inv: gRPC ConfirmSeat (seat → buyer)
+    Orch->>UserS: POST /credits/escrow/release → seller
+    Orch->>OrderS: PATCH listing → COMPLETED
+    Orch-->>Seller: 200 — Resale complete! Credits received.
+    end
+```
+
+#### Failure Paths
+
+| Failure Point | Handling |
+|---|---|
+| Seller doesn't own seat | `403 NOT_SEAT_OWNER` — blocked at listing. |
+| Seat not in `SOLD` state | `400 INVALID_SEAT_STATUS` — can't list `HELD` or `CHECKED_IN` seats. |
+| `ListSeat` gRPC fails | Compensate: cancel listing in Order Service → `CANCELLED`. |
+| Buyer buys own listing | `400 INVALID_PURCHASE` — self-buy blocked. |
+| Buyer insufficient credits | Escrow hold fails → return error. No side effects. |
+| Seller OTP invalid | `401 OTP_INVALID` — seller can retry. |
+| `ConfirmSeat` fails after escrow | Critical: escrow held but ownership failed. Logged for admin audit. |
+| Escrow release fails after ownership change | Critical: ownership transferred but seller not paid. Logged for admin resolution. |
+
+---
+
+### Scenario 5 — Admin Event Management
+
+**Goal:** Create events with provisioned seats and monitor sales via a dashboard.
+
+#### Event Creation Flow
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant Orch as Orchestrator
+    participant EventS as Event Service
+    participant Inv as Inventory (gRPC)
+
+    Admin->>Orch: POST /api/admin/events {name, venue, total_seats, pricing}
+    Orch->>EventS: POST /api/events (create event + venue)
+    EventS-->>Orch: event_id
+    Orch->>Inv: gRPC CreateSeats(event_id, total_seats)
+    Inv-->>Orch: seats_created count
+    Orch-->>Admin: 201 — Event created with seats provisioned
+```
+
+#### Admin Dashboard (Aggregation)
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant Orch as Orchestrator
+    participant EventS as Event Service
+    participant Inv as Inventory (gRPC)
+
+    Admin->>Orch: GET /api/admin/events/{event_id}/dashboard
+    Orch->>EventS: GET /api/events/{event_id}
+    EventS-->>Orch: Event metadata
+    Orch->>Inv: gRPC GetEventSeatsInfo(event_id)
+    Inv-->>Orch: All seats with statuses
+    Orch->>Orch: Aggregate stats (sold, held, available)
+    Orch-->>Admin: 200 — Dashboard JSON
+```
 
 ---
 
