@@ -21,7 +21,7 @@ def publish_seat_hold_ttl(seat_id, user_id, order_id, reserved_at):
         }
         channel.basic_publish(
             exchange='seat.hold.exchange',
-            routing_key='',
+            routing_key='seat.hold',
             body=json.dumps(message),
             properties=pika.BasicProperties(
                 delivery_mode=2, # make message persistent

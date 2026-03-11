@@ -104,7 +104,7 @@ def login():
         # Identity can be user_id
         access_token = create_access_token(
             identity=str(user.user_id), 
-            expires_delta=datetime.timedelta(minutes=15),
+            expires_delta=datetime.timedelta(hours=6),
             additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
         )
         refresh_token = create_refresh_token(
@@ -142,7 +142,7 @@ def refresh():
     user = User.query.get(current_user_id)
     new_access_token = create_access_token(
         identity=current_user_id, 
-        expires_delta=datetime.timedelta(minutes=15),
+        expires_delta=datetime.timedelta(hours=6),
         additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin if user else False}
     )
     return jsonify({'access_token': new_access_token}), 200
@@ -208,7 +208,7 @@ def verify_registration():
             # auto-login
             access_token = create_access_token(
                 identity=str(user.user_id), 
-                expires_delta=datetime.timedelta(minutes=15),
+                expires_delta=datetime.timedelta(hours=6),
                 additional_claims={"iss": "ticketremaster", "is_admin": user.is_admin}
             )
             refresh_token = create_refresh_token(

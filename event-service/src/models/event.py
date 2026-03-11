@@ -23,14 +23,29 @@ class Event(db.Model):
     venue = db.relationship('Venue', backref=db.backref('events', lazy=True))
 
     def to_dict(self):
-        logger.info(f"DEBUG: self.venue type: {type(self.venue)}")
+        venue_info = None
         if self.venue:
-            logger.info(f"DEBUG: self.venue direct methods: {[m for m in dir(self.venue) if 'to_dict' in m or not m.startswith('_')]}")
-        
+            logger.info(f"DEBUG: self.venue internal: {self.venue}, type: {type(self.venue)}, id: {id(self.venue)}")
+            try:
+                if hasattr(self.venue, 'to_dict'):
+                    venue_info = self.venue.to_dict()
+                else:
+                    logger.warning(f"DEBUG: self.venue MISSING to_dict. MRO: {type(self.venue).mro()}")
+                    # Manual fallback
+                    venue_info = {
+                        'venue_id': str(self.venue.venue_id),
+                        'name': self.venue.name,
+                        'address': self.venue.address,
+                        'total_halls': getattr(self.venue, 'total_halls', 1)
+                    }
+            except Exception as e:
+                logger.error(f"DEBUG: Failed to serialize venue: {str(e)}")
+                venue_info = {"error": "serialization_failed", "msg": str(e)}
+
         return {
             'event_id': str(self.event_id),
             'name': self.name,
-            'venue': self.venue.to_dict() if self.venue else None,
+            'venue': venue_info,
             'hall_id': self.hall_id,
             'event_date': self.event_date.isoformat() if self.event_date else None,
             'total_seats': self.total_seats,
