@@ -116,6 +116,19 @@ docker-compose up --build -d
 ```
 
 All backend services will now be accessible via the API Gateway at `http://localhost:8000`.
+ 
+### 4. Database Persistence (Bind Mounts)
+
+TicketRemaster is configured to use **Bind Mounts** for database persistence. This means your database data (events, users, tickets) is stored locally in the `docker-data/` directory within this project.
+
+- **Visibility**: You can see the actual Postgres data files on your machine.
+- **Portability**: You can commit the `docker-data/` folder to Git to share your database state with teammates (though binary files can be large).
+- **Stability**: Data survives a `docker-compose down` and remains even if you prune your Docker volumes.
+
+> [!IMPORTANT]
+> To wipe the database completely, you must manually delete the `docker-data/` folder and restart the containers.
+
+---
 
 ### 3.5 Cloudflare Tunnel (Stable Public URL for Frontend)
 
@@ -284,8 +297,14 @@ You can use a visual database tool like [DBeaver](https://dbeaver.io/), [pgAdmin
 - **Seats/Inventory DB:** `localhost:5433` (User: `inventory_user` / DB: `seats_db`)
 
 *(Passwords are dictated by the `.env` file you configured).*
+ 
+#### Method 2: Inspecting Local Files
 
-#### Method 2: Command Line (psql)
+Since the databases use bind mounts, you can also see the PostgreSQL internal directory structure at `./docker-data/db/<service_name>/`.
+
+---
+
+#### Method 3: Command Line (psql)
 
 You can directly execute SQL queries inside the running Docker container:
 

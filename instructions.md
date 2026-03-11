@@ -71,6 +71,18 @@ ticketremaster-b/
 ├── .env.example
 ├── API.md                          # full endpoint reference
 ├── CONTRIBUTING.md                 # team conventions
+├── docker-data/                    # Persistent database files (local)
+│   └── db/
+│       ├── seats/
+│       ├── users/
+│       ├── orders/
+│       └── events/
+│
+├── tests/                          # Consolidated test files
+│   ├── test_admin.py
+│   ├── test_otp.py
+│   ├── test_user_service_full.py
+│   └── test_inventory_grpc.py
 │
 ├── api-gateway/
 │   ├── nginx.conf                  # route definitions
@@ -281,7 +293,7 @@ services:
       POSTGRES_USER: inventory_user
       POSTGRES_PASSWORD: ${INVENTORY_DB_PASS}
     volumes:
-      - seats_data:/var/lib/postgresql/data
+      - ./docker-data/db/seats:/var/lib/postgresql/data
       - ./inventory-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U inventory_user -d seats_db"]
@@ -296,7 +308,7 @@ services:
       POSTGRES_USER: user_svc_user
       POSTGRES_PASSWORD: ${USER_DB_PASS}
     volumes:
-      - users_data:/var/lib/postgresql/data
+      - ./docker-data/db/users:/var/lib/postgresql/data
       - ./user-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user_svc_user -d users_db"]
@@ -311,7 +323,7 @@ services:
       POSTGRES_USER: order_svc_user
       POSTGRES_PASSWORD: ${ORDER_DB_PASS}
     volumes:
-      - orders_data:/var/lib/postgresql/data
+      - ./docker-data/db/orders:/var/lib/postgresql/data
       - ./order-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U order_svc_user -d orders_db"]
@@ -326,7 +338,7 @@ services:
       POSTGRES_USER: event_svc_user
       POSTGRES_PASSWORD: ${EVENT_DB_PASS}
     volumes:
-      - events_data:/var/lib/postgresql/data
+      - ./docker-data/db/events:/var/lib/postgresql/data
       - ./event-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U event_svc_user -d events_db"]
@@ -456,11 +468,7 @@ services:
     volumes:
       - ./api-gateway/nginx.conf:/etc/nginx/nginx.conf
 
-volumes:
-  seats_data:
-  users_data:
-  orders_data:
-  events_data:
+
 ```
 
 ### docker-compose.dev.yml

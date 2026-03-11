@@ -34,7 +34,7 @@
   - All 4 PostgreSQL DBs (`seats-db`, `users-db`, `orders-db`, `events-db`) with healthchecks
   - RabbitMQ (`rabbitmq:3-management`) with healthcheck
   - Service stubs for all 5 microservices + Kong
-  - Named volumes for each database (`seats_data`, `users_data`, `orders_data`, `events_data`)
+  - Bind mounts for each database (`./docker-data/db/<service_name>`)
   - All `depends_on` with `condition: service_healthy` so services only start after deps are ready
   - See `INSTRUCTIONS.md` Section 4 for full example YAML
 - [x] Write `docker-compose.dev.yml` with:
