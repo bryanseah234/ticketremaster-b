@@ -10,7 +10,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - ./docker-data/db/seats:/var/lib/postgresql/data
+      - seats_db_data:/var/lib/postgresql/data
       - ./inventory-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U inventory_user -d seats_db"]
@@ -28,7 +28,7 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - ./docker-data/db/users:/var/lib/postgresql/data
+      - users_db_data:/var/lib/postgresql/data
       - ./user-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user_svc_user -d users_db"]
@@ -46,7 +46,7 @@ services:
     ports:
       - "5435:5432"
     volumes:
-      - ./docker-data/db/orders:/var/lib/postgresql/data
+      - orders_db_data:/var/lib/postgresql/data
       - ./order-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U order_svc_user -d orders_db"]
@@ -64,7 +64,7 @@ services:
     ports:
       - "5436:5432"
     volumes:
-      - ./docker-data/db/events:/var/lib/postgresql/data
+      - events_db_data:/var/lib/postgresql/data
       - ./event-service/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U event_svc_user -d events_db"]
@@ -226,7 +226,8 @@ services:
     depends_on:
       - api-gateway
     command: ["tunnel", "--no-autoupdate", "run", "--protocol", "http2", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
-
-
-
-
+volumes:
+  seats_db_data:
+  users_db_data:
+  orders_db_data:
+  events_db_data:
