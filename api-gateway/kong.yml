@@ -37,6 +37,8 @@ plugins:
         - Authorization
         - Content-Type
         - X-Correlation-ID
+        - apikey
+        - X-Requested-With
       credentials: true
       max_age: 3600
 
