@@ -21,13 +21,13 @@ class Seat(Base):
         default="AVAILABLE",
     )
     held_by_user_id = Column(UUID(as_uuid=True), nullable=True)
-    held_until = Column(DateTime, nullable=True)
+    held_until = Column(DateTime(timezone=True), nullable=True)
     qr_code_hash = Column(String, nullable=True)
     price_paid = Column(Numeric(10, 2), nullable=True)
     row_number = Column(String(4), nullable=False)
     seat_number = Column(Integer, nullable=False)
-    created_at = Column(DateTime, server_default="now()")
-    updated_at = Column(DateTime, server_default="now()")
+    created_at = Column(DateTime(timezone=True), server_default="now()")
+    updated_at = Column(DateTime(timezone=True), server_default="now()")
 
     def to_dict(self):
         return {

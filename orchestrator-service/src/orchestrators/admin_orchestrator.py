@@ -108,7 +108,7 @@ def handle_get_dashboard(event_id):
         logger.error(f"gRPC error calling Inventory Service: {e}")
         return jsonify({"success": False, "error_code": "SERVICE_UNAVAILABLE", "message": "Inventory service is unavailable"}), 503
 
-    # Formulate Dashboard Response
+    # Formulate Dashboard Response to match API.md
     sold_seats = len([s for s in seats_list if s['status'] in ['SOLD', 'CHECKED_IN']])
     held_seats = len([s for s in seats_list if s['status'] == 'HELD'])
     available_seats = len([s for s in seats_list if s['status'] == 'AVAILABLE'])
@@ -117,11 +117,14 @@ def handle_get_dashboard(event_id):
         "event_id": event_id,
         "name": event_data.get('name'),
         "event_date": event_data.get('event_date'),
-        "seats_sold": sold_seats,
-        "seats_held": held_seats,
-        "seats_available": available_seats,
-        "total_revenue": 0, 
-        "seats_detail": seats_list
+        "stats": {
+            "total_seats": len(seats_list),
+            "seats_sold": sold_seats,
+            "seats_held": held_seats,
+            "seats_available": available_seats,
+            "total_revenue": 0 # TODO: Calculate actual revenue
+        },
+        "attendees": seats_list # Renamed from seats_detail
     }
 
     return jsonify({"success": True, "data": dashboard_data}), 200
