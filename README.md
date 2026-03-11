@@ -13,11 +13,13 @@ TicketRemaster relies on the **Saga Orchestrator Pattern**. Instead of microserv
 ### High-Level Architecture Flow
 
 ```mermaid
-graph TD
+%%{init: {'theme': 'default', 'themeVariables': { 'fontFamily': 'sans-serif', 'primaryTextColor': '#000000', 'clusterTextColor': '#000000', 'lineColor': '#aaaaaa'}}}%%
+flowchart TD
     %% User Interface Layer
     subgraph UILayer[User Interface Layer]
         Client((Frontend / Vue SPA))
     end
+    style UILayer fill:#e0f0ff,stroke:#0066cc,stroke-width:2px,color:#000000
     
     Nginx[Kong API Gateway]
     
@@ -25,54 +27,81 @@ graph TD
     subgraph CompositeLayer[Composite Microservice Layer]
         Orch[Orchestrator Service]
     end
+    style CompositeLayer fill:#fbfceb,stroke:#a3a54b,stroke-width:2px,color:#000000
     
     %% Atomic Microservice Layer
     subgraph AtomicLayer[Atomic Microservice Layer]
-        InvSvc[Inventory Service <br/> gRPC / Locks]
         UserSvc[User Service <br/> Auth / Credits]
-        OrderSvc[Order Service <br/> Ledger]
         EventSvc[Event Service <br/> Metadata]
+        OrderSvc[Order Service <br/> Ledger]
+        InvSvc[Inventory Service <br/> gRPC / Locks]
     end
+    style AtomicLayer fill:#f2f2f2,stroke:#666666,stroke-width:2px,color:#000000
 
-    %% External Layer
-    subgraph ExternalLayer[External APIs / DBs]
+    %% External APIs
+    subgraph ExternalAPIs[External APIs]
         Stripe[(Stripe API)]
         SMU[(SMU 2FA API)]
-        RMQ((RabbitMQ DLX))
-        DBs[(PostgreSQL DBs <br/> x4)]
     end
+    style ExternalAPIs fill:#e8e8e8,stroke:#333333,stroke-width:2px,color:#000000
+    
+    %% Message Broker
+    RMQ((RabbitMQ DLX))
+
+    %% Data Persistence Layer
+    subgraph DataLayer[Data Persistence Layer]
+        UserDB[(User PostgreSQL)]
+        EventDB[(Event PostgreSQL)]
+        OrderDB[(Order PostgreSQL)]
+        InvDB[(Inventory PostgreSQL)]
+    end
+    style DataLayer fill:#e6f2ff,stroke:#003366,stroke-width:2px,color:#000000
+    
+    %% --- Edge Definitions ---
     
     Client -->|HTTP/REST| Nginx
     
+    %% Gateway Routes
     Nginx -->|Routes /api/*| Orch
-    Nginx -->|Routes /api/auth| UserSvc
-    Nginx -->|Routes /api/events| EventSvc
+    Nginx --->|Routes /api/auth| UserSvc
+    Nginx --->|Routes /api/events| EventSvc
     
-    Orch -->|gRPC / HTTP2| InvSvc
+    %% Orchestrator Routes
     Orch -->|REST| UserSvc
-    Orch -->|REST| OrderSvc
     Orch -->|REST| EventSvc
+    Orch -->|REST| OrderSvc
+    Orch -->|gRPC / HTTP2| InvSvc
     
+    %% Message Broker Routes
     Orch -->|AMQP Publishes| RMQ
     RMQ -->|AMQP Consumes Expiry| InvSvc
     
+    %% External API Routes
     UserSvc -->|REST| Stripe
     UserSvc -->|REST| SMU
     
-    InvSvc --- DBs
-    UserSvc --- DBs
-    OrderSvc --- DBs
-    EventSvc --- DBs
+    %% Decoupled Data Persistence Connections
+    UserSvc --- UserDB
+    EventSvc --- EventDB
+    OrderSvc --- OrderDB
+    InvSvc --- InvDB
     
-    classDef composite fill:#fbfceb,stroke:#a3a54b,stroke-width:2px;
-    classDef atomic fill:#f2f2f2,stroke:#666,stroke-width:2px;
-    classDef gateway fill:#ffcfcf,stroke:#cc0000,stroke-width:2px,stroke-dasharray: 5 5;
-    classDef ui fill:#e0f0ff,stroke:#0066cc,stroke-width:2px;
+    %% Node Styling Profiles
+    classDef composite fill:#fbfceb,stroke:#a3a54b,stroke-width:2px,color:#000000;
+    classDef atomic fill:#f2f2f2,stroke:#666,stroke-width:2px,color:#000000;
+    classDef gateway fill:#ffcfcf,stroke:#cc0000,stroke-width:2px,stroke-dasharray: 5 5,color:#000000;
+    classDef ui fill:#e0f0ff,stroke:#0066cc,stroke-width:2px,color:#000000;
+    classDef datalayer fill:#e6f2ff,stroke:#003366,stroke-width:2px,color:#000000;
+    classDef external fill:#d9d9d9,stroke:#333,stroke-width:2px,color:#000000;
+    classDef broker fill:#ffe6cc,stroke:#d79b00,stroke-width:2px,color:#000000;
     
     class CompositeLayer composite;
     class AtomicLayer atomic;
     class Nginx gateway;
-    class UILayer ui;
+    class Client ui;
+    class DataLayer datalayer;
+    class Stripe,SMU external;
+    class RMQ broker;
 ```
 
 ### Microservices Breakdown
