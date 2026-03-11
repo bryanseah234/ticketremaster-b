@@ -85,8 +85,10 @@ def create_app():
     def get_user_profile(user_id):
         from src.utils.http_client import user_service
         auth_header = request.headers.get("Authorization", "")
-        res = user_service.get(f"/users/{user_id}", headers={"Authorization": auth_header})
-        return jsonify(res.json()), res.status_code
+        resp = user_service.get(f"/users/{user_id}", headers={"Authorization": auth_header})
+        if resp.status_code == 200:
+            return jsonify({"success": True, "data": resp.json()}), 200
+        return jsonify(resp.json()), resp.status_code
 
     @app.route("/api/credits/balance", methods=["GET"])
     @jwt_required()
