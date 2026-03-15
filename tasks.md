@@ -1,5 +1,5 @@
 # TicketRemaster — Implementation Task List
-### Stack: Python · Flask · PostgreSQL · RabbitMQ · gRPC · Docker · Kubernetes
+### Stack: Python · Flask · PostgreSQL · RabbitMQ · gRPC · OutSystems · Docker · Kubernetes
 
 ---
 
@@ -58,16 +58,16 @@ Each follows the same pattern: scaffold → model → migrate → routes → see
 - [ ] Write unit tests
 - [ ] Add to `docker-compose.yml`
 
-### 1.4 Credit Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `credits` table migration
-- [ ] Implement `POST /credits` — initialise credit record (zero balance)
-- [ ] Implement `GET /credits/<user_id>` — get balance
-- [ ] Implement `PATCH /credits/<user_id>` — update balance (accepts new absolute balance, not delta)
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+### 1.4 Credit Service (OutSystems — external)
+- [ ] Build `POST /credits` endpoint in OutSystems — initialise zero balance record for a new user
+- [ ] Build `GET /credits/<user_id>` endpoint in OutSystems — return current credit balance
+- [ ] Build `PATCH /credits/<user_id>` endpoint in OutSystems — update balance (accepts new absolute balance, not delta); confirm response includes updated `creditBalance` so orchestrators do not need a second GET call
+- [ ] Secure OutSystems REST API with an API key
+- [ ] Confirm all three JSON response shapes match the contracts in the API reference PDF
+- [ ] Add `CREDIT_SERVICE_URL` and `OUTSYSTEMS_API_KEY` to `.env.example`
+- [ ] Add `OUTSYSTEMS_API_KEY` to Kubernetes Secrets list for Phase 8
+- [ ] Test all three endpoints manually via Postman before building any orchestrator that calls them
+- [ ] Do NOT add Credit Service to `docker-compose.yml` — it is an external OutSystems service
 
 ### 1.5 Credit Transaction Service
 - [ ] Scaffold service
@@ -219,7 +219,7 @@ Depends on: User Service, Credit Service
 - [ ] Build `@require_auth` JWT decorator in `middleware.py` (to be reused in all orchestrators)
 - [ ] Build `@require_staff` JWT decorator in `middleware.py`
 - [ ] Build `call_service()` helper for internal HTTP calls with timeout and error handling
-- [ ] Implement `POST /auth/register` — hash password, create user, initialise credits, compensate on failure
+- [ ] Implement `POST /auth/register` — hash password, create user via User Service, initialise zero credit balance via OutSystems Credit Service, compensate (delete user) if OutSystems call fails
 - [ ] Implement `POST /auth/login` — validate credentials with bcrypt, issue JWT (include venueId for staff)
 - [ ] Implement `GET /auth/me` — decode JWT and return user profile
 - [ ] Write integration tests
@@ -239,21 +239,22 @@ Depends on: Event Service, Venue Service, Seat Service, Seat Inventory Service
 - [ ] Add to `docker-compose.yml`
 
 ### 6.3 Credit Orchestrator
-Depends on: Credit Service, Credit Transaction Service, Stripe Wrapper
+Depends on: Credit Service (OutSystems), Credit Transaction Service, Stripe Wrapper
 
 - [ ] Scaffold orchestrator
 - [ ] Copy `middleware.py` from Auth Orchestrator
 - [ ] Add `requests` to `requirements.txt`
 - [ ] Implement `GET /health`
-- [ ] Implement `GET /credits/balance` — get balance for authenticated user
+- [ ] Implement `call_credit_service()` helper — wraps `call_service()` with OutSystems API key header injected from `OUTSYSTEMS_API_KEY` env var
+- [ ] Implement `GET /credits/balance` — get balance for authenticated user from OutSystems
 - [ ] Implement `POST /credits/topup/initiate` — call Stripe Wrapper, return clientSecret
-- [ ] Implement `POST /credits/topup/webhook` — verify Stripe result, check idempotency, credit user, log transaction
-- [ ] Implement `GET /credits/transactions` — get paginated transaction history
+- [ ] Implement `POST /credits/topup/webhook` — verify Stripe result, check idempotency via Credit Transaction Service, update balance in OutSystems, log transaction to Credit Transaction Service
+- [ ] Implement `GET /credits/transactions` — get paginated transaction history from Credit Transaction Service
 - [ ] Write integration tests using Stripe test mode
 - [ ] Add to `docker-compose.yml`
 
 ### 6.4 Ticket Purchase Orchestrator
-Depends on: Seat Inventory Service (gRPC), Ticket Service, Credit Service, Credit Transaction Service, RabbitMQ
+Depends on: Seat Inventory Service (gRPC), Ticket Service, Credit Service (OutSystems), Credit Transaction Service, RabbitMQ
 
 - [ ] Scaffold orchestrator
 - [ ] Copy `middleware.py` from Auth Orchestrator
@@ -265,7 +266,7 @@ Depends on: Seat Inventory Service (gRPC), Ticket Service, Credit Service, Credi
 - [ ] Start DLX consumer in background thread on app startup
 - [ ] Implement DLX consumer handler — call gRPC `ReleaseSeat` for each expired hold message
 - [ ] Implement `POST /purchase/hold/<inventory_id>` — call gRPC HoldSeat, publish TTL message, return heldUntil
-- [ ] Implement `POST /purchase/confirm/<inventory_id>` — verify hold, check credits, call gRPC SellSeat, create ticket, deduct credits, log transaction
+- [ ] Implement `POST /purchase/confirm/<inventory_id>` — verify hold, check credits via OutSystems, call gRPC SellSeat, create ticket, deduct credits in OutSystems, log transaction to Credit Transaction Service
 - [ ] Set `SEAT_HOLD_DURATION_SECONDS` as an environment variable (600 production, 10 for testing)
 - [ ] Write integration tests including hold expiry scenario
 - [ ] Add to `docker-compose.yml`
@@ -297,7 +298,7 @@ Depends on: Ticket Service, Marketplace Service
 - [ ] Add to `docker-compose.yml`
 
 ### 6.7 Transfer Orchestrator
-Depends on: Marketplace Service, Transfer Service, OTP Wrapper, Credit Service, Credit Transaction Service, Ticket Service, RabbitMQ
+Depends on: Marketplace Service, Transfer Service, OTP Wrapper, Credit Service (OutSystems), Credit Transaction Service, Ticket Service, RabbitMQ
 
 - [ ] Scaffold orchestrator
 - [ ] Copy `middleware.py` from Auth Orchestrator
@@ -309,7 +310,7 @@ Depends on: Marketplace Service, Transfer Service, OTP Wrapper, Credit Service, 
 - [ ] Implement `POST /transfer/initiate` — validate listing, check buyer credits, send buyer OTP via OTP Wrapper, create transfer record
 - [ ] Implement `POST /transfer/<transfer_id>/buyer-verify` — verify buyer OTP, set buyerOtpVerified, publish seller notification message
 - [ ] Implement `POST /transfer/<transfer_id>/seller-accept` — send seller OTP via OTP Wrapper, update transfer status
-- [ ] Implement `POST /transfer/<transfer_id>/seller-verify` — verify seller OTP, re-check buyer balance, execute transfer (saga pattern with compensating actions)
+- [ ] Implement `POST /transfer/<transfer_id>/seller-verify` — verify seller OTP, re-check buyer balance via OutSystems, execute transfer (saga pattern: deduct buyer in OutSystems → credit seller in OutSystems → log both transactions → update ticket → complete listing → complete transfer; compensate in reverse on any failure)
 - [ ] Implement `GET /transfer/<transfer_id>` — return transfer status (accessible by buyer and seller only)
 - [ ] Implement `POST /transfer/<transfer_id>/cancel` — cancel in-progress transfer, reset ticket to listed, listing to active
 - [ ] Write integration tests for full happy path
@@ -368,7 +369,7 @@ Run all tests using your Postman or Bruno collection against the full stack runn
 - [ ] Install Kompose
 - [ ] Run `kompose convert -f docker-compose.yml` to generate base Kubernetes manifests
 - [ ] Review generated Deployment and Service YAML files for each service
-- [ ] Create `k8s/secrets.yaml` — move JWT_SECRET, STRIPE_SECRET_KEY, QR_SECRET, STRIPE_WEBHOOK_SECRET out of plaintext Deployments
+- [ ] Create `k8s/secrets.yaml` — move JWT_SECRET, STRIPE_SECRET_KEY, QR_SECRET, STRIPE_WEBHOOK_SECRET, OUTSYSTEMS_API_KEY out of plaintext Deployments
 - [ ] Update all Deployments to reference secrets via `secretKeyRef`
 - [ ] Add `livenessProbe` and `readinessProbe` (pointing at `GET /health`) to every Deployment
 - [ ] Add resource requests and limits to every Deployment

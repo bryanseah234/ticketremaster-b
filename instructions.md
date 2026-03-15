@@ -1,5 +1,5 @@
 # TicketRemaster — Implementation Instructions
-### Stack: Python · Flask · PostgreSQL · RabbitMQ · gRPC · Docker · Kubernetes
+### Stack: Python · Flask · PostgreSQL · RabbitMQ · gRPC · OutSystems · Docker · Kubernetes
 
 This document explains the reasoning behind the implementation order in `tasks.md` and provides detailed guidance for each phase.
 
@@ -40,7 +40,6 @@ ticketremaster/
 │   ├── ticket-log-service/
 │   ├── marketplace-service/
 │   ├── transfer-service/
-│   ├── credit-service/
 │   ├── credit-transaction-service/
 │   ├── stripe-wrapper/
 │   └── otp-wrapper/
@@ -291,10 +290,37 @@ The User Service stores exactly what it receives — a pre-hashed password and s
 bcrypt logic lives in the Auth Orchestrator. Add bcrypt to the Auth Orchestrator's
 requirements.txt, not here.
 
-**Credit Service — absolute balance updates**
-The Credit Service PATCH endpoint accepts the new absolute balance, not a delta. The
-orchestrator calculates the new value (current + delta) before calling this service.
-This keeps the Credit Service dumb — it never does arithmetic.
+**Credit Service — OutSystems, not Flask**
+The Credit Service is built and hosted in OutSystems, not as a Flask service. Do not
+scaffold a Flask service or create a Postgres container for it. Instead, the OutSystems
+team builds three REST endpoints that expose the same contract as the API reference PDF.
+Your only responsibilities here are to verify the endpoints work correctly via Postman,
+confirm the JSON response shapes match what your orchestrators expect, and add
+`CREDIT_SERVICE_URL` and `OUTSYSTEMS_API_KEY` to `.env.example`.
+
+Since OutSystems is external to your Docker network, all calls to it go over HTTPS.
+Create a dedicated helper in any orchestrator that touches Credit Service so the API
+key header is always injected consistently:
+
+```python
+def call_credit_service(method, path, **kwargs):
+    headers = kwargs.pop('headers', {})
+    headers['X-API-Key'] = os.environ['OUTSYSTEMS_API_KEY']
+    return call_service(
+        method,
+        f"{os.environ['CREDIT_SERVICE_URL']}{path}",
+        headers=headers,
+        **kwargs
+    )
+```
+
+Use `call_credit_service()` everywhere instead of the generic `call_service()` when
+calling credit endpoints. This keeps the API key injection in one place.
+
+**One thing to confirm with the OutSystems team before building orchestrators:**
+The PATCH /credits/<user_id> response must include the updated `creditBalance` in the
+response body. If it does not, your orchestrators will need an extra GET call after
+every balance update to confirm the new value. Aligning on this early saves rework.
 
 **Venue and Seat Services — seed data early**
 Seed at least 2 venues and their full seat rows during Phase 1. You will need this data
@@ -718,8 +744,9 @@ def register():
     if err:
         return jsonify({"error": {"code": err}}), 400
 
-    _, credit_err = call_service('POST', f"{CREDIT_SERVICE}/credits",
-                                 json={'userId': user_data['userId']})
+    # Initialise credit balance in OutSystems
+    _, credit_err = call_credit_service('POST', f"/credits",
+                                        json={'userId': user_data['userId']})
     if credit_err:
         # compensating action — remove the user we just created
         call_service('DELETE', f"{USER_SERVICE}/users/{user_data['userId']}")
@@ -753,10 +780,51 @@ test that internal HTTP calls between services are working correctly.
 The Stripe webhook endpoint must not use @require_auth — it is called by Stripe, not
 your frontend. Verify the Stripe signature instead (see Phase 4).
 
+**Calling OutSystems for balance updates:**
+Use `call_credit_service()` for all Credit Service calls. This helper wraps the generic
+`call_service()` and always injects the OutSystems API key header:
+
+```python
+def call_credit_service(method, path, **kwargs):
+    headers = kwargs.pop('headers', {})
+    headers['X-API-Key'] = os.environ['OUTSYSTEMS_API_KEY']
+    return call_service(
+        method,
+        f"{os.environ['CREDIT_SERVICE_URL']}{path}",
+        headers=headers,
+        **kwargs
+    )
+```
+
+The full webhook flow once Stripe confirms payment:
+
+```python
+# 1. Check idempotency — has this payment intent already been processed?
+existing, _ = call_service('GET',
+    f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{payment_intent_id}")
+if existing:
+    return jsonify({"success": True}), 200   # already processed, do nothing
+
+# 2. Get current balance from OutSystems
+credit_data, _ = call_credit_service('GET', f"/credits/{user_id}")
+current_balance = credit_data['creditBalance']
+
+# 3. Update balance in OutSystems (absolute value)
+call_credit_service('PATCH', f"/credits/{user_id}",
+    json={'creditBalance': current_balance + credits})
+
+# 4. Log to Credit Transaction Service
+call_service('POST', f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
+    'userId': user_id,
+    'delta': credits,
+    'reason': 'topup',
+    'referenceId': payment_intent_id
+})
+```
+
 **Idempotency — prevent double crediting:**
-Stripe may deliver the same webhook more than once. Before crediting, check whether
-the stripePaymentIntentId already exists in Credit Transaction Service. If it does,
-return 200 without crediting again.
+Stripe may deliver the same webhook more than once. The idempotency check in step 1
+above guards against this — always perform it before any balance update.
 
 ### 6.4 Ticket Purchase Orchestrator
 Set up the gRPC client using the generated stubs:
@@ -790,6 +858,31 @@ t = threading.Thread(target=start_dlx_consumer, daemon=True)
 t.start()
 ```
 
+**Credit check against OutSystems:**
+When confirming a purchase, fetch the buyer's balance from OutSystems using
+`call_credit_service()` before deducting. After a successful purchase, update the
+balance in OutSystems with the new absolute value and then log the movement to your
+Credit Transaction Service:
+
+```python
+# Check balance
+credit_data, _ = call_credit_service('GET', f"/credits/{user_id}")
+if credit_data['creditBalance'] < ticket_price:
+    return jsonify({"error": {"code": "INSUFFICIENT_CREDITS"}}), 402
+
+# Deduct in OutSystems
+call_credit_service('PATCH', f"/credits/{user_id}",
+    json={'creditBalance': credit_data['creditBalance'] - ticket_price})
+
+# Log to Credit Transaction Service
+call_service('POST', f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
+    'userId': user_id,
+    'delta': -ticket_price,
+    'reason': 'ticket_purchase',
+    'referenceId': ticket_id
+})
+```
+
 Never hardcode the hold duration — use an environment variable so it can be set to
 10 seconds in test and 10 minutes in production:
 
@@ -797,6 +890,7 @@ Never hardcode the hold duration — use an environment variable so it can be se
 SEAT_HOLD_DURATION_SECONDS=600   # production
 SEAT_HOLD_DURATION_SECONDS=10    # test
 ```
+
 
 ### 6.5 QR Orchestrator
 The QR_SECRET must be a long random string (32+ characters) stored as an environment
@@ -839,14 +933,17 @@ def execute_transfer(transfer_id, buyer_id, seller_id,
                      buyer_balance, seller_balance):
     completed = []
     try:
-        call_service('PATCH', f"{CREDIT_SERVICE}/credits/{buyer_id}",
+        # Steps 1-2: update balances in OutSystems
+        call_credit_service('PATCH', f"/credits/{buyer_id}",
                      json={'creditBalance': buyer_balance - credit_amount})
         completed.append('buyer_deducted')
 
-        call_service('PATCH', f"{CREDIT_SERVICE}/credits/{seller_id}",
+        # Step 2: credit seller in OutSystems
+        call_credit_service('PATCH', f"/credits/{seller_id}",
                      json={'creditBalance': seller_balance + credit_amount})
         completed.append('seller_credited')
 
+        # Step 3-4: log both movements to your Credit Transaction Service
         call_service('POST', f"{CREDIT_TXN_SERVICE}/credit-transactions",
                      json={'userId': buyer_id, 'delta': -credit_amount,
                            'reason': 'p2p_sent', 'referenceId': transfer_id})
@@ -857,6 +954,7 @@ def execute_transfer(transfer_id, buyer_id, seller_id,
                            'reason': 'p2p_received', 'referenceId': transfer_id})
         completed.append('seller_txn_logged')
 
+        # Steps 5-7: update ticket, listing, and transfer state
         call_service('PATCH', f"{TICKET_SERVICE}/tickets/{ticket_id}",
                      json={'ownerId': buyer_id, 'status': 'active'})
         completed.append('ticket_transferred')
@@ -869,12 +967,12 @@ def execute_transfer(transfer_id, buyer_id, seller_id,
                            'completedAt': datetime.utcnow().isoformat()})
 
     except Exception as e:
-        # compensate in reverse order
+        # compensate in reverse order — restore OutSystems balances
         if 'seller_credited' in completed:
-            call_service('PATCH', f"{CREDIT_SERVICE}/credits/{seller_id}",
+            call_credit_service('PATCH', f"/credits/{seller_id}",
                          json={'creditBalance': seller_balance})
         if 'buyer_deducted' in completed:
-            call_service('PATCH', f"{CREDIT_SERVICE}/credits/{buyer_id}",
+            call_credit_service('PATCH', f"/credits/{buyer_id}",
                          json={'creditBalance': buyer_balance})
         call_service('PATCH', f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
                      json={'status': 'failed'})
@@ -883,10 +981,10 @@ def execute_transfer(transfer_id, buyer_id, seller_id,
 
 **Re-check buyer credits at execution time:**
 The buyer's balance was checked at initiation. They may have spent credits since then.
-Always re-fetch the balance immediately before deducting:
+Always re-fetch from OutSystems immediately before deducting:
 
 ```python
-buyer_credit, _ = call_service('GET', f"{CREDIT_SERVICE}/credits/{buyer_id}")
+buyer_credit, _ = call_credit_service('GET', f"/credits/{buyer_id}")
 if buyer_credit['creditBalance'] < credit_amount:
     return jsonify({"error": {"code": "INSUFFICIENT_CREDITS"}}), 402
 ```
