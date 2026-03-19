@@ -39,10 +39,8 @@ htmlcov/
 .pytest_cache/
 .tox/
 
-# ── gRPC generated stubs (rebuild from .proto) ──────────────────
-*_pb2.py
-*_pb2_grpc.py
-*_pb2.pyi
+# Python service migrations
+migrations/
 
 # ── OS files ─────────────────────────────────────────────────────
 .DS_Store
@@ -57,3 +55,4 @@ desktop.ini
 *.bak
 *.tmp
 .env
+

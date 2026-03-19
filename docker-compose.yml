@@ -1,0 +1,56 @@
+name: ticketremaster
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  env_file:
+    - .env
+  networks:
+    - ticketremaster
+
+x-postgres-defaults: &postgres-defaults
+  image: postgres:16-alpine
+  restart: unless-stopped
+  env_file:
+    - .env
+  networks:
+    - ticketremaster
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 10s
+
+services:
+  # Phase 0 baseline only. Add services here as each one is scaffolded.
+  # Example pattern for future services:
+  # user-service:
+  #   <<: *service-defaults
+  #   build:
+  #     context: ./services/user-service
+  #   ports:
+  #     - "5000:5000"
+  #   environment:
+  #     FLASK_APP: app.py
+  #     DATABASE_URL: postgresql://ticketremaster:${USER_SERVICE_DB_PASSWORD}@user-service-db:5432/user_service
+  #   depends_on:
+  #     user-service-db:
+  #       condition: service_healthy
+  #
+  # user-service-db:
+  #   <<: *postgres-defaults
+  #   container_name: user-service-db
+  #   environment:
+  #     POSTGRES_DB: user_service
+  #     POSTGRES_USER: ticketremaster
+  #     POSTGRES_PASSWORD: ${USER_SERVICE_DB_PASSWORD}
+  #   volumes:
+  #     - user-service-db-data:/var/lib/postgresql/data
+
+networks:
+  ticketremaster:
+    driver: bridge
+
+volumes:
+  # Add one named volume per Postgres container as services come online.
+  # user-service-db-data:

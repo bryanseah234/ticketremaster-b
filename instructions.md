@@ -218,7 +218,7 @@ calls to other services. They only talk to their own PostgreSQL database. Build 
 2. Write the SQLAlchemy model in models.py
 3. Run migrations: flask db init -> flask db migrate -m "initial" -> flask db upgrade
 4. Implement each route in routes.py
-5. Test each endpoint manually with Postman or Bruno
+5. Test each endpoint manually with Postman
 6. Add to docker-compose.yml and verify it boots cleanly
 
 ### SQLAlchemy model pattern
@@ -1029,7 +1029,7 @@ def scan_ticket():
 
 ## Phase 7 — End-to-End Testing
 
-Test each scenario as a complete flow using your Postman or Bruno collection. Do not
+Test each scenario as a complete flow using your Postman collection. Do not
 test individual endpoints in isolation here — test the full journey end to end.
 
 **Scenario 2b (hold expiry):**
@@ -1222,3 +1222,4 @@ docker compose build           # build all images into Minikube's daemon
 kubectl apply -f k8s/          # apply all manifests
 minikube tunnel                # expose Ingress at localhost
 ```
+
