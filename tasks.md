@@ -23,17 +23,16 @@ These services have no dependencies on other services and can be built first.
 Each follows the same pattern: scaffold → model → migrate → routes → seed → test → docker-compose.
 
 ### 1.1 User Service
-- [ ] Scaffold service (`app.py`, `models.py`, `routes.py`, `requirements.txt`, `Dockerfile`)
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `users` table migration (`flask db init` → `flask db migrate` → `flask db upgrade`)
-- [ ] Implement `POST /users` — create user (stores pre-hashed password and salt — no bcrypt here)
-- [ ] Implement `GET /users/<user_id>` — get by ID
-- [ ] Implement `GET /users/by-email/<email>` — get by email
-- [ ] Implement `PATCH /users/<user_id>` — partial update
-- [ ] Write unit tests
-- [ ] Add service and its own Postgres container to `docker-compose.yml`
-- [ ] Verify boots cleanly with `docker compose up`
+- [x] Scaffold service (`app.py`, `models.py`, `routes.py`, `requirements.txt`, `Dockerfile`)
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `users` table migration (`flask db init` -> `flask db migrate` -> `flask db upgrade`)
+- [x] Implement `POST /users` - create user (stores pre-hashed password and salt - no bcrypt here)
+- [x] Implement `GET /users/<user_id>` - get by ID
+- [x] Implement `GET /users/by-email/<email>` - get by email
+- [x] Write unit tests
+- [x] Add service and its own Postgres container to `docker-compose.yml`
+- [x] Verify boots cleanly with `docker compose up`
 
 ### 1.2 Venue Service
 - [ ] Scaffold service
@@ -378,5 +377,10 @@ Run all tests using your Postman collection against the full stack running via `
 - [ ] Change all orchestrator Services from NodePort to ClusterIP
 - [ ] Create `k8s/ingress.yaml` — single Ingress routing /auth, /events, /purchase, /credits, /marketplace, /transfer, /tickets, /verify to their respective orchestrators
 - [ ] Test full stack on Minikube (`minikube start` → `eval $(minikube docker-env)` → `docker compose build` → `kubectl apply -f k8s/` → `minikube tunnel`)
+
+
+
+
+
 
 
