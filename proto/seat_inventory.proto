@@ -20,10 +20,13 @@ message HoldSeatResponse {
   string status = 2;
   string held_until = 3;
   string error_code = 4;
+  string hold_token = 5;
 }
 
 message ReleaseSeatRequest {
   string inventory_id = 1;
+  string user_id = 2;
+  string hold_token = 3;
 }
 
 message ReleaseSeatResponse {
@@ -32,6 +35,8 @@ message ReleaseSeatResponse {
 
 message SellSeatRequest {
   string inventory_id = 1;
+  string user_id = 2;
+  string hold_token = 3;
 }
 
 message SellSeatResponse {

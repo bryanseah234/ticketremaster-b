@@ -64,6 +64,113 @@ services:
     volumes:
       - event-service-db-data:/var/lib/postgresql/data
 
+  seat-inventory-service:
+    <<: *service-defaults
+    build:
+      context: ./services/seat-inventory-service
+    ports:
+      - "5003:5000"
+      - "50051:50051"
+    environment:
+      SEAT_INVENTORY_SERVICE_DATABASE_URL: ${SEAT_INVENTORY_SERVICE_DATABASE_URL}
+      SEAT_INVENTORY_GRPC_PORT: ${SEAT_INVENTORY_GRPC_PORT:-50051}
+    depends_on:
+      seat-inventory-service-db:
+        condition: service_healthy
+
+  seat-inventory-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${SEAT_INVENTORY_SERVICE_DB_NAME}
+      POSTGRES_USER: ${SEAT_INVENTORY_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${SEAT_INVENTORY_SERVICE_DB_PASSWORD}
+    volumes:
+      - seat-inventory-service-db-data:/var/lib/postgresql/data
+
+  ticket-service:
+    <<: *service-defaults
+    build:
+      context: ./services/ticket-service
+    ports:
+      - "5004:5000"
+    environment:
+      TICKET_SERVICE_DATABASE_URL: ${TICKET_SERVICE_DATABASE_URL}
+    depends_on:
+      ticket-service-db:
+        condition: service_healthy
+
+  ticket-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${TICKET_SERVICE_DB_NAME}
+      POSTGRES_USER: ${TICKET_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${TICKET_SERVICE_DB_PASSWORD}
+    volumes:
+      - ticket-service-db-data:/var/lib/postgresql/data
+
+  ticket-log-service:
+    <<: *service-defaults
+    build:
+      context: ./services/ticket-log-service
+    ports:
+      - "5005:5000"
+    environment:
+      TICKET_LOG_SERVICE_DATABASE_URL: ${TICKET_LOG_SERVICE_DATABASE_URL}
+    depends_on:
+      ticket-log-service-db:
+        condition: service_healthy
+
+  ticket-log-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${TICKET_LOG_SERVICE_DB_NAME}
+      POSTGRES_USER: ${TICKET_LOG_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${TICKET_LOG_SERVICE_DB_PASSWORD}
+    volumes:
+      - ticket-log-service-db-data:/var/lib/postgresql/data
+
+  marketplace-service:
+    <<: *service-defaults
+    build:
+      context: ./services/marketplace-service
+    ports:
+      - "5006:5000"
+    environment:
+      MARKETPLACE_SERVICE_DATABASE_URL: ${MARKETPLACE_SERVICE_DATABASE_URL}
+    depends_on:
+      marketplace-service-db:
+        condition: service_healthy
+
+  marketplace-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${MARKETPLACE_SERVICE_DB_NAME}
+      POSTGRES_USER: ${MARKETPLACE_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${MARKETPLACE_SERVICE_DB_PASSWORD}
+    volumes:
+      - marketplace-service-db-data:/var/lib/postgresql/data
+
+  transfer-service:
+    <<: *service-defaults
+    build:
+      context: ./services/transfer-service
+    ports:
+      - "5007:5000"
+    environment:
+      TRANSFER_SERVICE_DATABASE_URL: ${TRANSFER_SERVICE_DATABASE_URL}
+    depends_on:
+      transfer-service-db:
+        condition: service_healthy
+
+  transfer-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${TRANSFER_SERVICE_DB_NAME}
+      POSTGRES_USER: ${TRANSFER_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${TRANSFER_SERVICE_DB_PASSWORD}
+    volumes:
+      - transfer-service-db-data:/var/lib/postgresql/data
+
 networks:
   ticketremaster:
     driver: bridge
@@ -71,4 +178,9 @@ networks:
 volumes:
   user-service-db-data:
   event-service-db-data:
+  seat-inventory-service-db-data:
+  ticket-service-db-data:
+  ticket-log-service-db-data:
+  marketplace-service-db-data:
+  transfer-service-db-data:
 
