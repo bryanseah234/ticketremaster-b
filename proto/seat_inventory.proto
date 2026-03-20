@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package seatinventory;
+
+service SeatInventoryService {
+  rpc HoldSeat (HoldSeatRequest) returns (HoldSeatResponse);
+  rpc ReleaseSeat (ReleaseSeatRequest) returns (ReleaseSeatResponse);
+  rpc SellSeat (SellSeatRequest) returns (SellSeatResponse);
+  rpc GetSeatStatus (GetSeatStatusRequest) returns (GetSeatStatusResponse);
+}
+
+message HoldSeatRequest {
+  string inventory_id = 1;
+  string user_id = 2;
+  int32 hold_duration_seconds = 3;
+}
+
+message HoldSeatResponse {
+  bool success = 1;
+  string status = 2;
+  string held_until = 3;
+  string error_code = 4;
+}
+
+message ReleaseSeatRequest {
+  string inventory_id = 1;
+}
+
+message ReleaseSeatResponse {
+  bool success = 1;
+}
+
+message SellSeatRequest {
+  string inventory_id = 1;
+}
+
+message SellSeatResponse {
+  bool success = 1;
+}
+
+message GetSeatStatusRequest {
+  string inventory_id = 1;
+}
+
+message GetSeatStatusResponse {
+  string inventory_id = 1;
+  string status = 2;
+  string held_until = 3;
+}

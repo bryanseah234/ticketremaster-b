@@ -1,0 +1,192 @@
+{
+  "info": {
+    "_postman_id": "6a0f25a1-6dd1-4f11-9d7a-8f85c4c6c001",
+    "name": "TicketRemaster",
+    "description": "Shared Postman collection for TicketRemaster API testing across services and orchestrators.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "User Service Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{user_service_url}}/health",
+              "host": [
+                "{{user_service_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Event Orchestrator Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_orchestrator_url}}/health",
+              "host": [
+                "{{event_orchestrator_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ticket Purchase Orchestrator Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ticket_purchase_orchestrator_url}}/health",
+              "host": [
+                "{{ticket_purchase_orchestrator_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane@example.com\",\n  \"password\": \"change-me\"\n}"
+            },
+            "url": {
+              "raw": "{{auth_orchestrator_url}}/auth/register",
+              "host": [
+                "{{auth_orchestrator_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane@example.com\",\n  \"password\": \"change-me\"\n}"
+            },
+            "url": {
+              "raw": "{{auth_orchestrator_url}}/auth/login",
+              "host": [
+                "{{auth_orchestrator_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_orchestrator_url}}/auth/me",
+              "host": [
+                "{{auth_orchestrator_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "item": [
+        {
+          "name": "List Events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{event_orchestrator_url}}/events",
+              "host": [
+                "{{event_orchestrator_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "user_service_url",
+      "value": "http://localhost:5000"
+    },
+    {
+      "key": "auth_orchestrator_url",
+      "value": "http://localhost:5100"
+    },
+    {
+      "key": "event_orchestrator_url",
+      "value": "http://localhost:5200"
+    },
+    {
+      "key": "ticket_purchase_orchestrator_url",
+      "value": "http://localhost:5400"
+    },
+    {
+      "key": "jwt_token",
+      "value": ""
+    }
+  ]
+}
