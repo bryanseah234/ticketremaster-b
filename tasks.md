@@ -1,421 +1,386 @@
-# TicketRemaster — Implementation Tasks
->
-> **⚠️ ATTENTION AI AGENTS:** Read `INSTRUCTIONS.md` Section 15 (Development Guidelines) before starting.
->
-> Work through these in order. Each phase builds on the previous one.
-> Cross-reference `INSTRUCTIONS.md` for schemas, flow details, and configuration.
-> Cross-reference `API.md` for request/response contracts and error codes.
+# TicketRemaster — Implementation Task List
+### Stack: Python · Flask · PostgreSQL · RabbitMQ · gRPC · OutSystems · Docker · Kubernetes
 
 ---
 
 ## Phase 0 — Project Setup
 
-- [x] Create repo, initialise git
-- [x] Copy folder structure from `INSTRUCTIONS.md` Section 2 — create all empty directories
-  - `api-gateway/`, `orchestrator-service/src/routes/`, `orchestrator-service/src/orchestrators/`
-  - `inventory-service/src/proto/`, `inventory-service/src/models/`, `inventory-service/src/services/`, `inventory-service/src/consumers/`
-  - `user-service/src/models/`, `user-service/src/services/`
-  - `order-service/src/models/`, `order-service/src/services/`
-  - `event-service/src/models/`, `event-service/src/services/`
-  - `rabbitmq/`
-- [x] Create `.env` from `.env.example` and fill in **local** placeholder values
-  - Fill all `*_DB_PASS` values with dev-safe passwords
-  - Set `JWT_SECRET` to any long random string
-  - Set `QR_ENCRYPTION_KEY` to exactly 32 characters/bytes
-  - Set `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` to Stripe test keys
-  - Set `SMU_API_URL` and `SMU_API_KEY` from your lab environment
-- [x] Write a root-level `README.md` with setup instructions (✅ already done — verify it stays up to date)
+- [x] Initialise monorepo folder structure (one folder per service and per orchestrator)
+- [x] Create `proto/seat_inventory.proto` - shared gRPC contract at repo root
+- [x] Set up shared `docker-compose.yml` at root level
+- [x] Set up shared `.env.example` with all environment variable keys
+- [x] Create a base `Dockerfile` template to reuse across all services
+- [x] Create a base `requirements.txt` with shared dependencies (flask, flask-sqlalchemy, flask-migrate, psycopg2-binary, python-dotenv, gunicorn)
+- [x] Set up a shared Postman collection for API testing
+- [x] Initialise a Git repository with a `.gitignore` (include `.env`, `__pycache__`, `*.pyc`, `migrations/`)
+- [x] Generate gRPC Python stubs from `proto/seat_inventory.proto` using `grpc_tools.protoc` and commit the generated files
 
 ---
 
-## Phase 1 — Infrastructure (get everything running empty)
+## Phase 1 — Foundation Services (no dependencies)
 
-- [x] Write `docker-compose.yml` with:
-  - All 4 PostgreSQL DBs (`seats-db`, `users-db`, `orders-db`, `events-db`) with healthchecks
-  - RabbitMQ (`rabbitmq:3-management`) with healthcheck
-  - Service stubs for all 5 microservices + Kong
-  - Named volumes for each database (`seats_data`, `users_data`, `orders_data`, `events_data`)
-  - All `depends_on` with `condition: service_healthy` so services only start after deps are ready
-  - See `INSTRUCTIONS.md` Section 4 for full example YAML
-- [x] Write `docker-compose.dev.yml` with:
-  - Volume mounts for each service's `src/` directory (hot-reload without rebuild)
-  - `FLASK_DEBUG: "1"` and `FLASK_ENV: development` per service
-- [x] Write `rabbitmq/definitions.json` with:
-  - `seat.hold.exchange` (direct, durable)
-  - `seat.hold.queue` with `x-message-ttl: 300000` and `x-dead-letter-exchange: seat.release.exchange`
-  - `seat.release.exchange` (direct, durable) — the Dead Letter Exchange
-  - `seat.release.queue` (durable) — consumed by Inventory Service
-  - Bindings: `seat.hold.exchange → seat.hold.queue`, `seat.release.exchange → seat.release.queue`
-- [x] Write `rabbitmq/rabbitmq.conf` to load definitions on startup:
-  - `load_definitions = /etc/rabbitmq/definitions.json`
-- [x] Add a minimal `Dockerfile` to each service folder (curl added for healthchecks)
-- [x] Run `docker compose up --build` — all 11 containers started healthy ✅
-- [x] Confirm RabbitMQ management UI is reachable at `localhost:15672` (default: guest/guest)
-- [x] Confirm all 4 Postgres instances are reachable on ports 5433-5436
-- [x] Confirm all health checks pass (`docker compose ps` shows `healthy` for all services)
-- [ ] Verify `docker-compose.dev.yml` works: run with both files, edit a source file and confirm Flask auto-restarts
+These services have no dependencies on other services and can be built first.
+Each follows the same pattern: scaffold → model → migrate → routes → seed → test → docker-compose.
 
----
+### 1.1 User Service
+- [x] Scaffold service (`app.py`, `models.py`, `routes.py`, `requirements.txt`, `Dockerfile`)
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `users` table migration (`flask db init` -> `flask db migrate` -> `flask db upgrade`)
+- [x] Implement `POST /users` - create user (stores pre-hashed password and salt - no bcrypt here)
+- [x] Implement `GET /users/<user_id>` - get by ID
+- [x] Implement `GET /users/by-email/<email>` - get by email
+- [x] Write unit tests
+- [x] Add service and its own Postgres container to `docker-compose.yml`
+- [x] Verify boots cleanly with `docker compose up`
 
-## Phase 2 — Database Setup
+### 1.2 Venue Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `venues` table migration
+- [ ] Write `seed.py` — seed at least 2 venues with capacity, coordinates, address
+- [ ] Run `seed.py` via `docker compose exec` and verify records exist
+- [ ] Implement `GET /venues` — list all active venues
+- [ ] Implement `GET /venues/<venue_id>` — get by ID
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
 
-- [x] **seats_db**: Write `inventory-service/init.sql`:
-  - `seats` table — all columns from `INSTRUCTIONS.md` Section 3 (`seat_id UUID PK`, `event_id`, `owner_user_id`, `status ENUM(AVAILABLE/HELD/SOLD/CHECKED_IN)`, `held_by_user_id`, `held_until`, `qr_code_hash`, `price_paid`, `row_number`, `seat_number`, `created_at`, `updated_at`)
-  - `entry_logs` table — `log_id`, `seat_id FK`, `scanned_at`, `scanned_by_staff_id`, `result ENUM`, `hall_id_presented`, `hall_id_expected`
-  - Use `CREATE TABLE IF NOT EXISTS` throughout
-- [x] **users_db**: Write `user-service/init.sql`:
-  - `users` table — `user_id`, `email UNIQUE`, `phone`, `password_hash`, `credit_balance NUMERIC(10,2)`, `two_fa_secret`, `is_flagged BOOLEAN`, `created_at`
-- [x] **orders_db**: Write `order-service/init.sql`:
-  - `orders` table — `order_id`, `user_id`, `seat_id`, `event_id`, `status ENUM(PENDING/CONFIRMED/FAILED/REFUNDED)`, `credits_charged`, `verification_sid TEXT NULL` (for high-risk purchase OTP — cleared after verification), `created_at`, `confirmed_at`
-  - `transfers` table — `transfer_id`, `seat_id`, `seller_user_id`, `buyer_user_id`, `initiated_by ENUM(SELLER/BUYER)`, `status ENUM(INITIATED/PENDING_OTP/COMPLETED/DISPUTED/REVERSED)`, `seller_otp_verified`, `buyer_otp_verified`, `seller_verification_sid TEXT NULL`, `buyer_verification_sid TEXT NULL` (both cleared after verification), `credits_amount`, `dispute_reason`, `created_at`, `completed_at`
-  - Partial unique index: `CREATE UNIQUE INDEX idx_one_active_transfer_per_seat ON transfers (seat_id) WHERE status IN ('INITIATED', 'PENDING_OTP');`
-- [x] **events_db**: Write `event-service/init.sql`:
-  - `venues` table — `venue_id`, `name`, `address`, `total_halls`, `created_at`
-  - `events` table — `event_id`, `name`, `venue_id FK`, `hall_id`, `event_date`, `total_seats`, `pricing_tiers JSONB`
-  - See `INSTRUCTIONS.md` Section 14 for the example seed SQL
-- [x] Mount init SQL files in `docker-compose.yml` via `/docker-entrypoint-initdb.d/init.sql` for each DB
-- [x] Seed `events_db`:
-  - 1 venue: Singapore Indoor Stadium (use a fixed UUID so other seeds can reference it)
-  - 1–2 events linked to that venue with pricing tiers (use fixed UUIDs)
-- [x] Seed `seats_db`:
-  - 20+ seats linked to the seeded event's UUID, rows A–D, all status `AVAILABLE`
-  - Use `INSERT ... ON CONFLICT DO NOTHING` for idempotency
-- [x] Seed `users_db`:
-  - 2 test users: one normal (with credits), one with `is_flagged = true` (with credits)
-  - Use `bcrypt`-hashed passwords in seed data
-- [x] Verify clean start: `docker compose down -v && docker compose up --build` — tables created, seeds populated
+### 1.3 Seat Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `seats` table migration
+- [ ] Write `seed.py` — seed all seats for each seeded venue (rows A–Z, seats 1–N based on venue capacity)
+- [ ] Run `seed.py` and verify seat records exist for all venues
+- [ ] Implement `GET /seats/venue/<venue_id>` — get all seats for a venue
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
 
----
+### 1.4 Credit Service (OutSystems — external)
+- [ ] Build `POST /credits` endpoint in OutSystems — initialise zero balance record for a new user
+- [ ] Build `GET /credits/<user_id>` endpoint in OutSystems — return current credit balance
+- [ ] Build `PATCH /credits/<user_id>` endpoint in OutSystems — update balance (accepts new absolute balance, not delta); confirm response includes updated `creditBalance` so orchestrators do not need a second GET call
+- [ ] Secure OutSystems REST API with an API key
+- [ ] Confirm all three JSON response shapes match the contracts in the API reference PDF
+- [ ] Add `CREDIT_SERVICE_URL` and `OUTSYSTEMS_API_KEY` to `.env.example`
+- [ ] Add `OUTSYSTEMS_API_KEY` to Kubernetes Secrets list for Phase 8
+- [ ] Test all three endpoints manually via Postman before building any orchestrator that calls them
+- [ ] Do NOT add Credit Service to `docker-compose.yml` — it is an external OutSystems service
 
-## Phase 3 — Event Service (simplest, start here)
-
-- [x] Scaffold Flask app in `event-service/src/app.py`
-- [x] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `psycopg2-binary`, `sqlalchemy`
-- [x] Connect to `events_db` via SQLAlchemy or psycopg2 using env vars `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`
-- [x] Implement `GET /events`:
-  - Returns list of events with nested venue info
-  - Supports `?page=` and `?per_page=` query params (default 20, max 100)
-  - Uses standard success response format from `API.md` Section 2
-- [x] Implement `GET /events/{event_id}`:
-  - Returns event including `hall_id`, `venue_id`, pricing tiers, and a `seats` list showing availability
-  - Returns `EVENT_NOT_FOUND` (404) if not found
-  - Returns `INVALID_UUID` (400) if UUID is malformed
-- [x] Implement `GET /health`:
-  - Checks DB connectivity
-  - Returns `{"status": "healthy", ...}` on 200, `{"status": "unhealthy", ...}` on 503
-- [x] Add Flasgger docstrings to all endpoints
-- [x] Write a production-ready `Dockerfile` and confirm service runs in Docker
-- [x] Test with curl or Swagger UI at `localhost:5002/apidocs/`
+### 1.5 Credit Transaction Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `credit_txns` table migration
+- [ ] Implement `POST /credit-transactions` — log a credit movement (delta, reason, referenceId)
+- [ ] Implement `GET /credit-transactions/user/<user_id>` — get history (paginated)
+- [ ] Implement `GET /credit-transactions/reference/<reference_id>` — look up by referenceId (for Stripe idempotency check)
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
 
 ---
 
-## Phase 4 — User Service
+## Phase 2 — Event & Seat Inventory Services
 
-- [x] Scaffold Flask app in `user-service/src/app.py`
-- [x] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `bcrypt`, `stripe`, `psycopg2-binary`, `sqlalchemy`, `requests`
-- [x] Connect to `users_db` via env vars
-- [x] Implement `POST /api/auth/register` 🔓 Public:
-  - Hash password with bcrypt
-  - Return `user_id` on success
-  - Return `EMAIL_ALREADY_EXISTS` (409) if email taken
-  - Validate email format, phone format, password length ≥ 8
-- [x] Implement `POST /api/auth/login` 🔓 Public:
-  - Verify bcrypt hash
-  - Issue `access_token` (15min TTL) and `refresh_token` (7 days TTL) via Flask-JWT-Extended
-  - Return `user_id`, `email`, `credit_balance` in response body
-- [x] Implement `POST /api/auth/refresh`:
-  - Accept `refresh_token` in `Authorization: Bearer` header
-  - Return new `access_token`
-- [x] Implement `POST /api/auth/logout`:
-  - Add JWT to blocklist (in-memory or Redis)
-- [x] Implement `GET /users/{user_id}`:
-  - Return full user profile (exclude `password_hash`)
-  - Return `USER_NOT_FOUND` (404) if not found
-- [x] Implement `GET /users/{user_id}/risk`:
-  - Returns `{"is_flagged": bool}` — used by Orchestrator to decide if OTP is required
-- [x] Implement `POST /credits/deduct {user_id, amount}`:
-  - `SELECT FOR UPDATE` on user row to prevent race conditions
-  - Check `credit_balance >= amount`, deduct atomically
-  - Return `INSUFFICIENT_CREDITS` (402) if insufficient
-- [x] Implement `POST /credits/refund {user_id, amount}`:
-  - Add back credits — called by Orchestrator during compensation flows
-- [x] Implement `POST /credits/transfer {from_user_id, to_user_id, amount}`:
-  - Atomic credit swap in a single DB transaction — used in P2P transfer
-- [x] Implement `POST /otp/send {user_id}`:
-  - Looks up user's `phone` from DB
-  - Calls SMU API `POST /SendOTP {Mobile: phone}` — returns `{VerificationSid, Success, ErrorMessage}`
-  - **Store `VerificationSid`** — persist on the related transfer/order record or in a short-TTL Redis key keyed by `user_id`; required for verification
-  - Return error if `Success == false`
-- [x] Implement `POST /otp/verify {user_id, otp_code}`:
-  - Retrieve stored `VerificationSid` for this user/context
-  - Calls SMU API `POST /VerifyOTP {VerificationSid, Code: otp_code}` — returns `{Success, Status, ErrorMessage}`
-  - Treat `Status == "approved"` as verified; `Status == "pending"` as wrong code; `Status == "expired"` as expired
-  - Track retry count; after 3 failures return `OTP_MAX_RETRIES`
-- [x] Implement Stripe webhook `POST /api/webhooks/stripe` 🔓 Public:
-  - Validate Stripe signature using `STRIPE_WEBHOOK_SECRET`
-  - On `payment.succeeded`: add credits to user's `credit_balance`
-- [x] Implement `GET /health` — check DB connectivity
-- [x] Add Flasgger docstrings to all endpoints
-- [x] Write `Dockerfile` and test all endpoints end-to-end
+Depends on: Venue Service, Seat Service (seeded data must exist)
+
+### 2.1 Event Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `events` table migration
+- [ ] Write `seed.py` — seed at least 2 events pointing to seeded venues
+- [ ] Run `seed.py` and verify event records exist
+- [ ] Implement `GET /events` — list all events
+- [ ] Implement `GET /events/<event_id>` — get by ID
+- [ ] Implement `POST /events` — create event (admin only)
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
+
+### 2.2 Seat Inventory Service
+- [ ] Scaffold service (`app.py`, `models.py`, `routes.py`, `grpc_server.py`, `server.py`, `requirements.txt`, `Dockerfile`)
+- [ ] Add `grpcio` and `grpcio-tools` to `requirements.txt`
+- [ ] Copy generated gRPC stubs (`seat_inventory_pb2.py`, `seat_inventory_pb2_grpc.py`) into this service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `seat_inventory` table migration
+- [ ] Write `seed.py` — create one inventory record per seat per event (status: available)
+- [ ] Run `seed.py` and verify inventory records exist
+- [ ] Implement gRPC `HoldSeat` — with `SELECT FOR UPDATE` pessimistic lock
+- [ ] Implement gRPC `ReleaseSeat`
+- [ ] Implement gRPC `SellSeat`
+- [ ] Implement gRPC `GetSeatStatus`
+- [ ] Implement `GET /inventory/event/<event_id>` — seat map (REST)
+- [ ] Implement `server.py` — starts gRPC server (port 50051) and Flask REST server (port 5000) in parallel threads
+- [ ] Write unit tests including concurrent hold race condition test (two simultaneous HoldSeat requests for same seat — assert only one succeeds)
+- [ ] Add to `docker-compose.yml` exposing both ports 5000 and 50051
 
 ---
 
-## Phase 5 — Order Service
+## Phase 3 — Ticket, Marketplace & Transfer Services
 
-- [ ] Scaffold Flask app in `order-service/src/app.py`
-- [ ] Add to `requirements.txt`: `flask`, `flasgger`, `psycopg2-binary`, `sqlalchemy`
-- [ ] Connect to `orders_db` via env vars
-- [ ] Implement `POST /orders {user_id, seat_id, event_id, credits_charged}`:
-  - Create order record with status `PENDING`
-  - Return `order_id`
-- [ ] Implement `PATCH /orders/{order_id} {status}`:
-  - Update status to `CONFIRMED`, `FAILED`, or `REFUNDED`
-  - Return `ORDER_NOT_FOUND` (404) if not found
-- [ ] Implement `GET /orders?seat_id=`:
-  - Fetch order by `seat_id` — used in Scenario 3 verification to confirm `CONFIRMED` order exists
-- [ ] Implement `POST /transfers {seat_id, seller_user_id, buyer_user_id, initiated_by, credits_amount}`:
-  - Create transfer record with status `INITIATED`
-  - Return `transfer_id`
-- [ ] Implement `PATCH /transfers/{transfer_id} {status, seller_otp_verified?, buyer_otp_verified?}`:
-  - Update transfer through its lifecycle states
-- [ ] Implement `POST /transfers/{transfer_id}/dispute {reason}`:
-  - Set status → `DISPUTED`, store `dispute_reason`
-- [ ] Implement `POST /transfers/{transfer_id}/reverse`:
-  - Set status → `REVERSED`
-- [ ] Implement `GET /health` — check DB connectivity
-- [ ] Add Flasgger docstrings to all endpoints
-- [ ] Write `Dockerfile` and test all endpoints
+Depends on: User Service, Event Service, Venue Service, Seat Inventory Service
 
----
+### 3.1 Ticket Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `tickets` table migration
+- [ ] Implement `POST /tickets` — create ticket record (generates initial qrHash placeholder)
+- [ ] Implement `GET /tickets/<ticket_id>` — get by ID
+- [ ] Implement `GET /tickets/owner/<owner_id>` — get all tickets by owner
+- [ ] Implement `GET /tickets/qr/<qr_hash>` — look up by QR hash
+- [ ] Implement `PATCH /tickets/<ticket_id>` — partial update (status, ownerId, qrHash, qrTimestamp)
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
 
-## Phase 6 — Inventory Service (gRPC)
+### 3.2 Ticket Log Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `ticket_logs` table migration
+- [ ] Implement `POST /ticket-logs` — create scan log entry
+- [ ] Implement `GET /ticket-logs/ticket/<ticket_id>` — get all scan logs for a ticket
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
 
-- [ ] Define `inventory-service/src/proto/inventory.proto` with the following RPCs:
-  - `ReserveSeat(seat_id, user_id)` → `{success, held_until}` — sets status `HELD`
-  - `ConfirmSeat(seat_id, user_id)` → `{success}` — sets status `SOLD`, `owner_user_id`
-  - `ReleaseSeat(seat_id)` → `{success}` — sets status `AVAILABLE`, clears held fields
-  - `UpdateOwner(seat_id, new_owner_id)` → `{success}` — for P2P transfer
-  - `VerifyTicket(seat_id)` → `{status, owner_user_id, event_id}` — read-only
-  - `MarkCheckedIn(seat_id)` → `{success}` — sets status `CHECKED_IN`, writes `entry_log`
-  - `GetSeatOwner(seat_id)` → `{owner_user_id, status}` — ownership check
-- [ ] Generate Python gRPC stubs from `.proto` using `grpc_tools.protoc`
-- [ ] Implement `lock_service.py` — `ReserveSeat` using `SELECT FOR UPDATE NOWAIT`
-  - On lock failure (another user holds the row): raise gRPC error → Orchestrator returns `SEAT_UNAVAILABLE`
-- [ ] Implement `ownership_service.py` — `UpdateOwner`, `ConfirmSeat`
-- [ ] Implement `verification_service.py` — `VerifyTicket`, `MarkCheckedIn` (writes `entry_logs`)
-- [ ] Implement `ReleaseSeat` — sets `status = AVAILABLE`, clears `held_by_user_id`, `held_until`
-- [ ] Implement `seat_release_consumer.py`:
-  - Listens to `seat.release.queue` via `pika`
-  - On message: call `ReleaseSeat(seat_id)` and update the pending order to `FAILED` via HTTP call to Order Service
-  - Use `basic_ack` on success, `basic_nack(requeue=True)` on failure
-  - See `INSTRUCTIONS.md` Section 8 for full consumer code
-- [ ] Start consumer in a separate **daemon thread** alongside the gRPC server in `main.py`
-- [ ] Implement HTTP sidecar health endpoint `GET /health` on port 8080:
-  - Check `seats_db` connectivity and RabbitMQ connectivity
-- [ ] Write `Dockerfile` and test gRPC calls with `grpcurl` or a Python test script
+### 3.3 Marketplace Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `listings` table migration
+- [ ] Implement `POST /listings` — create listing (status: active)
+- [ ] Implement `GET /listings` — get all active listings
+- [ ] Implement `GET /listings/<listing_id>` — get by ID
+- [ ] Implement `PATCH /listings/<listing_id>` — update status (active / completed / cancelled)
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
+
+### 3.4 Transfer Service
+- [ ] Scaffold service
+- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [ ] Implement `GET /health`
+- [ ] Create `transfers` table migration
+- [ ] Implement `POST /transfers` — create transfer record
+- [ ] Implement `GET /transfers/<transfer_id>` — get by ID
+- [ ] Implement `PATCH /transfers/<transfer_id>` — update fields (status, OTP flags, SIDs, completedAt)
+- [ ] Write unit tests
+- [ ] Add to `docker-compose.yml`
 
 ---
 
-## Phase 7 — Orchestrator Service
+## Phase 4 — External Wrappers
 
-- [ ] Scaffold Flask app in `orchestrator-service/src/app.py`
-- [ ] Add to `requirements.txt`: `flask`, `flask-jwt-extended`, `flasgger`, `grpcio`, `grpcio-tools`, `pika`, `cryptography`, `httpx`, `requests`
-- [ ] Set up gRPC client stub to connect to `inventory-service:50051`
-- [ ] Set up HTTP clients (httpx or requests) for User, Order, and Event services using env vars
-- [ ] Set up RabbitMQ publisher connection (publish to `seat.hold.exchange`)
-- [ ] Implement structured JSON logging middleware:
-  - Generate a `correlation_id` (UUID) per request
-  - Attach to `X-Correlation-ID` HTTP header for downstream REST calls
-  - Attach to `correlation-id` gRPC metadata for downstream gRPC calls
-  - Include in every log line — see `INSTRUCTIONS.md` Section 13 for the `JSONFormatter` code
-- [ ] Implement QR code util in `utils/qr_util.py`:
-  - `generate_qr(seat_id, user_id, hall_id)` → AES-256-GCM encrypted base64 string
-  - `decrypt_qr(payload)` → decoded JSON dict or raise error
-  - Use `QR_ENCRYPTION_KEY` from env (32 bytes), random 12-byte IV per generation
-  - Output format: `base64(IV ∥ ciphertext ∥ auth_tag)`
-  - See `INSTRUCTIONS.md` Section 7.1 for payload structure and encryption details
+### 4.1 Stripe Wrapper
+- [ ] Scaffold service
+- [ ] Add `stripe` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Implement `POST /stripe/create-payment-intent` — create Payment Intent, attach userId in metadata
+- [ ] Implement `POST /stripe/webhook` — verify Stripe signature, extract userId and credits, forward result
+- [ ] Test with Stripe CLI: `stripe listen --forward-to localhost:PORT/stripe/webhook`
+- [ ] Verify webhook signature rejection works (send a request without a valid signature)
+- [ ] Add to `docker-compose.yml`
 
-### Scenario 1 — Purchase Flow
-
-- [ ] Implement `POST /api/reserve` in `purchase_routes.py`:
-  - Call Inventory gRPC `ReserveSeat(seat_id, user_id)`
-  - Handle `NOWAIT` lock failure → return `SEAT_UNAVAILABLE` (409) — no compensation needed
-  - On success: publish TTL message `{seat_id, user_id, order_id, reserved_at}` to `seat.hold.exchange`
-  - If RabbitMQ publish fails: call `ReleaseSeat` gRPC to undo hold, return `INTERNAL_ERROR`
-  - Return `{order_id, seat_id, status: "HELD", held_until, ttl_seconds}` on success
-- [ ] Implement `POST /api/pay` in `purchase_routes.py`:
-  - Check `user.is_flagged` via User Svc `GET /users/{user_id}/risk` — if true, return `OTP_REQUIRED` (428)
-  - Check seat is still `HELD` — if TTL expired, return `HOLD_EXPIRED` (410)
-  - Call User Svc `POST /credits/deduct {user_id, amount}`
-  - If deduct fails (insufficient): return `INSUFFICIENT_CREDITS` (402) — seat stays held, DLX will auto-release
-  - Call Order Svc `POST /orders` → get `order_id`, set status `CONFIRMED`
-  - If Order creation fails: call `POST /credits/refund` to reverse deduction → return `INTERNAL_ERROR`
-  - Call Inventory gRPC `ConfirmSeat(seat_id, user_id)` — status → `SOLD`
-  - If ConfirmSeat fails: call `POST /credits/refund` + update order → `FAILED` → return `INTERNAL_ERROR`
-  - Generate QR code with `generate_qr(seat_id, user_id, hall_id)`
-  - Return `{order_id, seat_id, status: "CONFIRMED", credits_charged, remaining_balance, qr_payload}`
-  - **Compensation matrix:** see `INSTRUCTIONS.md` Section 5
-- [ ] Implement `POST /api/verify-otp` — verify OTP for high-risk users:
-  - Accepts `{user_id, otp_code, context, reference_id}`
-  - Calls User Svc `POST /otp/verify`
-  - On success: mark OTP as verified for the given `context` (purchase / transfer)
-
-### Scenario 2 — P2P Transfer
-
-- [ ] Implement `POST /api/transfer/initiate` in `transfer_routes.py`:
-  - Validate: seller owns seat (`GetSeatOwner`), seat status is `SOLD`
-  - Validate: no pending transfer for this seat (query Order Svc)
-  - Block self-transfer: return `SELF_TRANSFER` (400) if `seller_user_id == buyer_user_id`
-  - Validate: buyer has sufficient credits (User Svc `GET /users/{buyer_id}`)
-  - Create transfer record via Order Svc `POST /transfers` → status `INITIATED`
-  - Trigger OTP for both seller and buyer via User Svc `POST /otp/send` for each user
-  - Update transfer → `PENDING_OTP`
-  - Return `{transfer_id, seat_id, status: "PENDING_OTP"}`
-- [ ] Implement `POST /api/transfer/confirm` in `transfer_routes.py`:
-  - Verify both OTPs via User Svc `POST /otp/verify` for seller and buyer
-  - On OTP failure: allow retries up to 3 — after 3 failures, update transfer → `FAILED`
-  - Execute atomic swap:
-    1. User Svc `POST /credits/transfer {from_user_id: buyer, to_user_id: seller, amount}`
-    2. Inventory gRPC `UpdateOwner(seat_id, buyer_id)` — if fails, reverse credit transfer and set transfer → `FAILED`
-    3. Order Svc `PATCH /transfers/{transfer_id}` → `COMPLETED`
-  - Generate new QR code for the new owner (buyer's `user_id`)
-  - Return `{transfer_id, status: "COMPLETED", new_owner_user_id, credits_transferred}`
-- [ ] Implement `POST /api/transfer/dispute`:
-  - Delegate to Order Svc `POST /transfers/{transfer_id}/dispute`
-  - Only seller or buyer can dispute — check JWT user_id
-- [ ] Implement `POST /api/transfer/reverse`:
-  - Reverse: `UpdateOwner` back to seller + credit reversal + Order Svc `reverse`
-
-### Scenario 3 — QR Verification
-
-- [ ] Implement `POST /api/verify` in `verification_routes.py`:
-  - Decrypt QR payload using `decrypt_qr(qr_payload)` — return `QR_INVALID` (400) if fails
-  - Validate timestamp: `NOW - generated_at <= 60 seconds` — return (result: `EXPIRED`) if stale
-  - Fan out **parallel** calls to 3 services:
-    - Inventory gRPC `VerifyTicket(seat_id)` → `{status, owner_user_id, event_id}`
-    - Order Svc `GET /orders?seat_id=` → confirm `CONFIRMED` order exists
-    - Event Svc `GET /events/{event_id}` → get expected `hall_id`
-  - Run all business rule checks (see `INSTRUCTIONS.md` Section 7 validation table)
-  - On all checks pass: call Inventory gRPC `MarkCheckedIn(seat_id)`
-  - Write `entry_log` for every scan (pass or fail) — note: log write failure is non-critical
-  - Return `{result, seat_id, row_number, seat_number, owner_name, message}` — all rejections return HTTP 200
-
-### Ticket Endpoints
-
-- [ ] Implement `GET /api/tickets`:
-  - Read JWT to get `user_id`
-  - Query Inventory service for all seats where `owner_user_id == user_id` (add a gRPC RPC or HTTP query)
-  - For each seat, fan out to Event Service to get event name / date
-  - Return list with nested `event` object, `row_number`, `seat_number`, `status`, `price_paid`, `purchased_at`
-- [ ] Implement `GET /api/tickets/{seat_id}/qr`:
-  - Verify JWT user_id == `seat.owner_user_id` — else `NOT_SEAT_OWNER` (403)
-  - Verify seat is `SOLD` — else `SEAT_UNAVAILABLE` (409)
-  - Generate fresh QR with current timestamp via `generate_qr(seat_id, user_id, hall_id)`
-  - Return `{qr_payload, generated_at, expires_at, ttl_seconds: 60}`
-
-### Credit Endpoints
-
-- [ ] Implement `GET /api/credits/balance`:
-  - Reads JWT user_id, calls User Svc `GET /users/{user_id}`, return `credit_balance`
-- [ ] Implement `POST /api/credits/topup {amount}`:
-  - Call User Svc to create Stripe Payment Intent
-  - Return `{client_secret, amount, currency}` for frontend Stripe.js to complete
-
-### Orchestrator Health
-
-- [ ] Implement `GET /health`:
-  - Ping all 4 downstream services (Inventory, User, Order, Event) and RabbitMQ
-  - Return `{"status": "healthy/unhealthy", "checks": {...}}`
-- [ ] Add Flasgger docstrings to all public endpoints
-- [ ] Write `Dockerfile` and confirm service starts cleanly
+### 4.2 OTP Wrapper
+- [ ] Scaffold service
+- [ ] Implement `GET /health`
+- [ ] Implement `POST /otp/send` — call SMU Notification API, return SID
+- [ ] Implement `POST /otp/verify` — call SMU Notification API with SID + OTP, return pass/fail
+- [ ] Add to `docker-compose.yml`
 
 ---
 
-## Phase 8 — API Gateway (Kong)
+## Phase 5 — RabbitMQ Setup
 
-- [ ] Write `api-gateway/kong.yml` (declarative DB-less mode) with:
-  - Routes for all Orchestrator public endpoints pointing to `http://orchestrator-service:5003`
-  - Route for `GET /api/events` and `GET /api/events/{event_id}` — these should be public (no JWT)
-  - Route for `POST /api/auth/*` — public (no JWT)
-  - Route for `POST /api/webhooks/stripe` — public (no JWT), but uses Stripe signature
-  - All other routes — JWT required
-- [ ] Add Kong JWT plugin config:
-  - Validate JWT via `JWT_SECRET`, extract `sub` claim as user_id
-  - See `INSTRUCTIONS.md` Section 11 for plugin YAML
-- [ ] Add Kong CORS plugin config:
-  - Allow origins: `localhost:3000` (dev) + production domain
-  - Allow methods: GET, POST, PATCH, DELETE, OPTIONS
-  - Allow headers: `Authorization`, `Content-Type`
-  - `credentials: true`
-- [ ] Add rate limiting plugin to protect against surge traffic (e.g., 100 req/min per consumer)
-- [ ] Write `api-gateway/Dockerfile` (or use `image: kong:3.6` directly)
-- [ ] Test that requests through `localhost:8000` correctly reach the Orchestrator
-- [ ] Verify JWT is rejected without a valid token on protected routes
+Depends on: All atomic services running
+
+- [ ] Add RabbitMQ (`rabbitmq:3-management`) to `docker-compose.yml` with ports 5672 and 15672
+- [ ] Add `pika` to `requirements.txt` of any service that publishes or consumes
+- [ ] Write `queue_setup.py` — declares Seat Hold TTL Queue, DLX exchange, dead letter queue, and Seller Notification Queue
+- [ ] Call `queue_setup.py` on startup of Ticket Purchase Orchestrator and Transfer Orchestrator
+- [ ] Verify TTL expiry and DLX routing manually via RabbitMQ management UI (http://localhost:15672)
+- [ ] Verify Seller Notification Queue publishes and consumes correctly
 
 ---
 
-## Phase 9 — End-to-End Testing
+## Phase 6 — Orchestrators
 
-> **Pre-conditions before starting Phase 9:**
->
-> - `docker compose up --build` is clean with all services `healthy`
-> - Seed data is present (Phase 2 seed verified)
-> - You have the test user credentials (from seed data)
-> - You have registered a user via `POST /api/auth/register` and hold a valid JWT
+Build in order — each one validates the integration pattern for the next.
 
-### Setup
+### 6.1 Auth Orchestrator
+Depends on: User Service, Credit Service
 
-- [ ] Register 2 test users via API: a normal user and explicitly mark one `is_flagged = true` in DB
-- [ ] Top up credits for both users (either via Stripe test mode or direct DB update for testing)
+- [ ] Scaffold orchestrator (`app.py`, `routes.py`, `middleware.py`, `requirements.txt`, `Dockerfile`)
+- [ ] Add `PyJWT` and `bcrypt` to `requirements.txt`
+- [ ] Add `requests` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Build `@require_auth` JWT decorator in `middleware.py` (to be reused in all orchestrators)
+- [ ] Build `@require_staff` JWT decorator in `middleware.py`
+- [ ] Build `call_service()` helper for internal HTTP calls with timeout and error handling
+- [ ] Implement `POST /auth/register` — hash password, create user via User Service, initialise zero credit balance via OutSystems Credit Service, compensate (delete user) if OutSystems call fails
+- [ ] Implement `POST /auth/login` — validate credentials with bcrypt, issue JWT (include venueId for staff)
+- [ ] Implement `GET /auth/me` — decode JWT and return user profile
+- [ ] Write integration tests
+- [ ] Add to `docker-compose.yml`
 
-### Scenario 1 — Purchase
+### 6.2 Event Orchestrator
+Depends on: Event Service, Venue Service, Seat Service, Seat Inventory Service
 
-- [ ] Test happy path: reserve → pay → confirm booking (verify seat becomes `SOLD` in DB)
-- [ ] Test seat lock contention: two concurrent users reserve same seat → second gets `SEAT_UNAVAILABLE`
-- [ ] Test abandonment: reserve → wait for TTL (5 min) → confirm seat returns to `AVAILABLE` via DLX
-- [ ] Test high-risk user: reserve → pay → receive `OTP_REQUIRED` → verify OTP → complete pay
-- [ ] Test insufficient credits: reserve with user who has < event price → pay → `INSUFFICIENT_CREDITS`
-- [ ] Test compensation: mock `ConfirmSeat` gRPC failure → verify credits are refunded and order is `FAILED`
-- [ ] Test hold expired: reserve, wait for TTL, then call `/api/pay` → `HOLD_EXPIRED`
+- [ ] Scaffold orchestrator
+- [ ] Add `requests` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Implement `GET /events` — list events (no JWT required)
+- [ ] Implement `GET /events/<event_id>` — event detail with venue (no JWT required)
+- [ ] Implement `GET /events/<event_id>/seats` — seat map (no JWT required)
+- [ ] Implement `GET /events/<event_id>/seats/<inventory_id>` — single seat detail (no JWT required)
+- [ ] Write integration tests
+- [ ] Add to `docker-compose.yml`
 
-### Scenario 2 — Transfer
+### 6.3 Credit Orchestrator
+Depends on: Credit Service (OutSystems), Credit Transaction Service, Stripe Wrapper
 
-- [ ] Test success path: User A owns seat → initiate → both submit OTPs → confirm → verify ownership & credits changed
-- [ ] Test seller-initiated vs. buyer-initiated transfer (both should work)
-- [ ] Test OTP failure: submit wrong OTP → transfer stays `PENDING_OTP`
-- [ ] Test max OTP retries (3 failures) → transfer auto-cancelled → status `FAILED`
-- [ ] Test duplicate transfer: start second transfer for same seat while one is `PENDING_OTP` → `TRANSFER_IN_PROGRESS`
-- [ ] Test self-transfer → `SELF_TRANSFER`
-- [ ] Test dispute: complete transfer → call `/dispute` → status `DISPUTED`
-- [ ] Test reverse: dispute a transfer → call `/reverse` → ownership and credits restored
-- [ ] Test QR invalidation: after transfer, old owner's QR should be rejected (user_id mismatch) on verify
+- [ ] Scaffold orchestrator
+- [ ] Copy `middleware.py` from Auth Orchestrator
+- [ ] Add `requests` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Implement `call_credit_service()` helper — wraps `call_service()` with OutSystems API key header injected from `OUTSYSTEMS_API_KEY` env var
+- [ ] Implement `GET /credits/balance` — get balance for authenticated user from OutSystems
+- [ ] Implement `POST /credits/topup/initiate` — call Stripe Wrapper, return clientSecret
+- [ ] Implement `POST /credits/topup/webhook` — verify Stripe result, check idempotency via Credit Transaction Service, update balance in OutSystems, log transaction to Credit Transaction Service
+- [ ] Implement `GET /credits/transactions` — get paginated transaction history from Credit Transaction Service
+- [ ] Write integration tests using Stripe test mode
+- [ ] Add to `docker-compose.yml`
 
-### Scenario 3 — Verification
+### 6.4 Ticket Purchase Orchestrator
+Depends on: Seat Inventory Service (gRPC), Ticket Service, Credit Service (OutSystems), Credit Transaction Service, RabbitMQ
 
-- [ ] Test valid scan → result `SUCCESS`, seat becomes `CHECKED_IN` in DB, `entry_log` written
-- [ ] Test duplicate scan with same QR → result `DUPLICATE` (200, not error)
-- [ ] Test scan of `HELD` seat (payment not completed) → result `UNPAID`
-- [ ] Test non-existent seat_id in QR → result `NOT_FOUND`
-- [ ] Test wrong hall (QR `hall_id` ≠ event `hall_id`) → result `WRONG_HALL`
-- [ ] Test expired QR: generate QR, wait >60 seconds, scan → result `EXPIRED`
-- [ ] Test old owner's QR after transfer → rejected (user_id mismatch)
+- [ ] Scaffold orchestrator
+- [ ] Copy `middleware.py` from Auth Orchestrator
+- [ ] Add `requests`, `grpcio`, `pika` to `requirements.txt`
+- [ ] Copy gRPC stubs (`seat_inventory_pb2.py`, `seat_inventory_pb2_grpc.py`) into orchestrator
+- [ ] Implement `GET /health`
+- [ ] Set up gRPC client channel to Seat Inventory Service
+- [ ] Implement `queue_setup.py` — declare Seat Hold TTL Queue and DLX on startup
+- [ ] Start DLX consumer in background thread on app startup
+- [ ] Implement DLX consumer handler — call gRPC `ReleaseSeat` for each expired hold message
+- [ ] Implement `POST /purchase/hold/<inventory_id>` — call gRPC HoldSeat, publish TTL message, return heldUntil
+- [ ] Implement `POST /purchase/confirm/<inventory_id>` — verify hold, check credits via OutSystems, call gRPC SellSeat, create ticket, deduct credits in OutSystems, log transaction to Credit Transaction Service
+- [ ] Set `SEAT_HOLD_DURATION_SECONDS` as an environment variable (600 production, 10 for testing)
+- [ ] Write integration tests including hold expiry scenario
+- [ ] Add to `docker-compose.yml`
+
+### 6.5 QR Orchestrator
+Depends on: Ticket Service
+
+- [ ] Scaffold orchestrator
+- [ ] Copy `middleware.py` from Auth Orchestrator
+- [ ] Add `requests` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Implement `GET /tickets` — list all active tickets for authenticated user
+- [ ] Implement `GET /tickets/<ticket_id>/qr` — generate fresh SHA-256 qrHash using ticketId + timestamp + QR_SECRET, update ticket record, return QR data
+- [ ] Set `QR_SECRET` as environment variable (generate with `python -c "import secrets; print(secrets.token_hex(32))"`)
+- [ ] Write integration tests including rejection of listed and used tickets
+- [ ] Add to `docker-compose.yml`
+
+### 6.6 Marketplace Orchestrator
+Depends on: Ticket Service, Marketplace Service
+
+- [ ] Scaffold orchestrator
+- [ ] Copy `middleware.py` from Auth Orchestrator
+- [ ] Add `requests` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Implement `GET /marketplace` — browse all active listings with event and seat details
+- [ ] Implement `POST /marketplace/list` — validate ticket ownership and status, set ticket to listed, create listing
+- [ ] Implement `DELETE /marketplace/<listing_id>` — cancel listing, reset ticket to active
+- [ ] Write integration tests
+- [ ] Add to `docker-compose.yml`
+
+### 6.7 Transfer Orchestrator
+Depends on: Marketplace Service, Transfer Service, OTP Wrapper, Credit Service (OutSystems), Credit Transaction Service, Ticket Service, RabbitMQ
+
+- [ ] Scaffold orchestrator
+- [ ] Copy `middleware.py` from Auth Orchestrator
+- [ ] Add `requests`, `pika` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Implement `queue_setup.py` — declare Seller Notification Queue on startup
+- [ ] Start Seller Notification Queue consumer in background thread on app startup
+- [ ] Implement Seller Notification Queue consumer handler — notify seller (e.g. store notification flag or push via websocket)
+- [ ] Implement `POST /transfer/initiate` — validate listing, check buyer credits, send buyer OTP via OTP Wrapper, create transfer record
+- [ ] Implement `POST /transfer/<transfer_id>/buyer-verify` — verify buyer OTP, set buyerOtpVerified, publish seller notification message
+- [ ] Implement `POST /transfer/<transfer_id>/seller-accept` — send seller OTP via OTP Wrapper, update transfer status
+- [ ] Implement `POST /transfer/<transfer_id>/seller-verify` — verify seller OTP, re-check buyer balance via OutSystems, execute transfer (saga pattern: deduct buyer in OutSystems → credit seller in OutSystems → log both transactions → update ticket → complete listing → complete transfer; compensate in reverse on any failure)
+- [ ] Implement `GET /transfer/<transfer_id>` — return transfer status (accessible by buyer and seller only)
+- [ ] Implement `POST /transfer/<transfer_id>/cancel` — cancel in-progress transfer, reset ticket to listed, listing to active
+- [ ] Write integration tests for full happy path
+- [ ] Write integration tests for each failure scenario (buyer OTP fail, seller OTP fail, insufficient credits at execution)
+- [ ] Add to `docker-compose.yml`
+
+### 6.8 Ticket Verification Orchestrator
+Depends on: Ticket Service, Event Service, Seat Inventory Service, Venue Service, Ticket Log Service
+
+- [ ] Scaffold orchestrator
+- [ ] Copy `middleware.py` from Auth Orchestrator
+- [ ] Add `requests` to `requirements.txt`
+- [ ] Implement `GET /health`
+- [ ] Implement `POST /verify/scan` — full QR verification in correct check order:
+  - [ ] Look up ticket by qrHash
+  - [ ] Check QR TTL (60 seconds) — log expired if stale
+  - [ ] Validate event is active
+  - [ ] Confirm seat status is sold via Seat Inventory Service
+  - [ ] Confirm ticket status is active
+  - [ ] Check for duplicate scan via Ticket Log Service
+  - [ ] Check venueId matches staff JWT venueId — return correct venue on mismatch
+  - [ ] All pass: update ticket to used, log checked_in
+- [ ] Write integration tests for each rejection scenario (expired, duplicate, wrong venue, invalid ticket)
+- [ ] Add to `docker-compose.yml`
 
 ---
 
-## Phase 10 — Polish
+## Phase 7 — End-to-End Testing
 
-- [ ] Add standard error response format (`{"success": false, "error_code": ..., "message": ...}`) to every service — see `API.md` Section 2
-- [ ] Add request validation using Pydantic or manual checks (reject malformed UUIDs, missing fields, negative amounts)
-- [ ] Add structured JSON logging with correlation IDs to every service — see `INSTRUCTIONS.md` Section 13
-- [ ] Complete all Flasgger/Swagger docstrings for every endpoint; verify Swagger UI loads at each service port
-- [ ] Set up shared Postman workspace:
-  - Create workspace `TicketRemaster` with collections per scenario (Auth, Purchase, Transfer, Verification)
-  - Set collection variable `baseUrl` and auto-capture `accessToken` after login
-  - Export collection to `postman/TicketRemaster.postman_collection.json` and commit to repo
-  - See `INSTRUCTIONS.md` Section 15 for setup details
-- [ ] Write `.github/workflows/ci.yml`:
-  - Trigger on push and PR to `main`
-  - Steps: `flake8` lint, `black --check`, run `pytest` (per service)
-- [ ] Update root `README.md` with final setup, run, and testing instructions
-- [ ] Do a full clean run: `docker compose down -v && docker compose up --build` — confirm everything builds from scratch with no errors
-- [ ] Verify CI pipeline passes on GitHub (check Actions tab on PR)
+Run all tests using your Postman collection against the full stack running via `docker compose up`.
+
+- [ ] Test Scenario 1: Full credit top-up flow (Stripe test mode — initiate → Stripe UI → webhook → balance updated)
+- [ ] Test Scenario 2: Full ticket purchase flow (browse events → view seat map → hold seat → confirm purchase → ticket created)
+- [ ] Test Scenario 2b: Hold expiry — set `SEAT_HOLD_DURATION_SECONDS=10`, select a seat, wait 10 seconds, confirm seat returns to available automatically
+- [ ] Test Scenario 3: Full P2P transfer happy path (list ticket → buyer initiates → buyer OTP → seller accepts → seller OTP → credits swap → ticket ownership changes)
+- [ ] Test Scenario 3b: Transfer cancellation mid-flow (cancel after buyer OTP verified — confirm listing reactivated and ticket returns to listed)
+- [ ] Test Scenario 3c: Insufficient credits at execution time (manually drain buyer credits between initiation and seller verification — confirm INSUFFICIENT_CREDITS returned and credits not deducted)
+- [ ] Test Scenario 4: Ticket verification all pass (scan valid ticket at correct venue — confirm checked_in)
+- [ ] Test Scenario 4b: Expired QR rejection (wait 61 seconds after generating QR — confirm QR_EXPIRED)
+- [ ] Test Scenario 4c: Duplicate scan rejection (scan same ticket twice — confirm DUPLICATE_SCAN on second scan)
+- [ ] Test Scenario 4d: Wrong venue redirect (scan ticket at wrong venue — confirm WRONG_VENUE with correct venue details returned)
+
+---
+
+## Phase 8 — Docker & Kubernetes
+
+### Docker Compose final checks
+- [ ] Verify all services and orchestrators boot cleanly with `docker compose up`
+- [ ] Confirm all inter-service communication uses Docker service names (not localhost)
+- [ ] Confirm all services have `GET /health` returning 200
+- [ ] Confirm all Postgres containers have `pg_isready` healthchecks
+- [ ] Confirm all services have `restart: unless-stopped`
+- [ ] Confirm `SEAT_HOLD_DURATION_SECONDS` and `QR_SECRET` are environment variables, not hardcoded
+
+### Kubernetes migration
+- [ ] Install Kompose
+- [ ] Run `kompose convert -f docker-compose.yml` to generate base Kubernetes manifests
+- [ ] Review generated Deployment and Service YAML files for each service
+- [ ] Create `k8s/secrets.yaml` — move JWT_SECRET, STRIPE_SECRET_KEY, QR_SECRET, STRIPE_WEBHOOK_SECRET, OUTSYSTEMS_API_KEY out of plaintext Deployments
+- [ ] Update all Deployments to reference secrets via `secretKeyRef`
+- [ ] Add `livenessProbe` and `readinessProbe` (pointing at `GET /health`) to every Deployment
+- [ ] Add resource requests and limits to every Deployment
+- [ ] Add `HorizontalPodAutoscaler` for `seat-inventory-service` (minReplicas: 2, maxReplicas: 10, CPU target: 70%)
+- [ ] Add `HorizontalPodAutoscaler` for `ticket-purchase-orchestrator` (minReplicas: 2, maxReplicas: 8, CPU target: 70%)
+- [ ] Change all orchestrator Services from NodePort to ClusterIP
+- [ ] Create `k8s/ingress.yaml` — single Ingress routing /auth, /events, /purchase, /credits, /marketplace, /transfer, /tickets, /verify to their respective orchestrators
+- [ ] Test full stack on Minikube (`minikube start` → `eval $(minikube docker-env)` → `docker compose build` → `kubectl apply -f k8s/` → `minikube tunnel`)
+
+
+
+
+
+
+

@@ -1,1476 +1,1225 @@
-# TicketRemaster — Backend Architecture Reference
->
-> IS213 Enterprise Solution Development · v4.0
+# TicketRemaster — Implementation Instructions
+### Stack: Python · Flask · PostgreSQL · RabbitMQ · gRPC · OutSystems · Docker · Kubernetes
+
+This document explains the reasoning behind the implementation order in `tasks.md` and provides detailed guidance for each phase.
 
 ---
 
-## Table of Contents
+## Why this order?
 
-1. [System Overview](#1-system-overview)
-2. [Folder & Repository Structure](#2-folder--repository-structure)
-3. [Database Schemas](#3-database-schemas)
-4. [Docker Compose Setup](#4-docker-compose-setup)
-5. [Scenario 1 — Complete Ticket Purchase Flow](#5-scenario-1--complete-ticket-purchase-flow)
-6. [Scenario 2 — Secure P2P Ticket Transfer](#6-scenario-2--secure-p2p-ticket-transfer)
-7. [Scenario 3 — Ticket Verification (QR Scan)](#7-scenario-3--ticket-verification-qr-scan)
-8. [RabbitMQ Configuration](#8-rabbitmq-configuration)
-9. [External APIs Reference](#9-external-apis-reference)
-10. [Environment Variables](#10-environment-variables)
-11. [Authentication & Authorization](#11-authentication--authorization)
-12. [Concurrency Handling](#12-concurrency-handling)
-13. [Logging & Observability](#13-logging--observability)
-14. [Database Migration & Seeding Strategy](#14-database-migration--seeding-strategy)
-
----
-
-## 1. System Overview
-
-### Architecture Pattern
-
-TicketRemaster follows a **microservices architecture** with an **Orchestrator (Saga Manager)** pattern. All external traffic flows through Kong API Gateway into the Orchestrator, which coordinates atomic services. Services communicate via gRPC (performance), REST (standard), and AMQP (async/resilience). Each service owns a dedicated PostgreSQL database — no cross-DB joins.
-
-### Architecture Layers
-
-| Layer | Component | Role |
-|---|---|---|
-| Client | Vue Web App / OutSystems | Customer UI / Staff QR scanner |
-| Gateway | Kong API Gateway | Auth, rate-limiting, CORS, routing to Orchestrator |
-| Composite | Orchestrator Service | Saga Manager — coordinates all multi-step flows |
-| Atomic | Inventory Service (gRPC) | Seat states, locks, entry logs — Seats DB |
-| Atomic | User Service (REST) | Profiles, credits, SMU 2FA — Users DB |
-| Atomic | Order Service (REST) | Transaction ledger, transfer records — Orders DB |
-| Atomic | Event Service (REST) | Venues, halls, pricing — Events DB |
-| Messaging | RabbitMQ | Async DLX for seat auto-release on TTL expiry |
-| External | Stripe API | Credit top-up payments (called from User Svc) |
-| External | SMU Notification API | 2FA OTP send/verify (called from User Svc) |
-
-### Communication Protocols
-
-| Protocol | Path | Why |
-|---|---|---|
-| gRPC / HTTP2 | Orchestrator ↔ Inventory | Performance-critical seat locking. Uses `SELECT FOR UPDATE NOWAIT` to minimise lock contention under high concurrency. |
-| REST / HTTP | Orchestrator ↔ User, Order, Event | Standard request/response for business logic that is not latency-critical. |
-| REST / HTTP | Event Svc → Inventory Svc | **Choreography exception:** Event Service calls Inventory Service directly to fetch per-seat availability when serving `GET /events/{event_id}`. This avoids routing a read-only fan-out through the Orchestrator. |
-| AMQP | Orchestrator → RabbitMQ → Inventory | Async DLX-based seat auto-release. Decouples TTL recovery from the main request path. |
-| REST | User Svc → SMU Notification API | 2FA OTP send and verify for critical handshakes (purchase risk check, P2P transfer). |
-| REST | User Svc → Stripe API | Credit top-up. Stripe webhook confirms payment before credits are added. |
-
----
-
-## 2. Folder & Repository Structure
-
-> **Note:** The `ticketremaster-b` repository IS the backend root. All paths below are relative to the repository root.
-
-One backend repository. Each top-level folder is a microservice with its own Dockerfile. All services are orchestrated from the root `docker-compose.yml`.
+The build order follows a strict dependency graph — each layer can only be built once the layers it depends on are stable. The principle is:
 
 ```
-ticketremaster-b/
-├── docker-compose.yml              # spins up everything
-├── docker-compose.dev.yml          # hot-reload dev overrides
+Foundation services → Event & Inventory services → Ticket/Transfer/Marketplace services
+→ External wrappers → RabbitMQ → Orchestrators (simple → complex)
+→ E2E tests → Docker & Kubernetes
+```
+
+Never start an orchestrator until all the atomic services it calls are running and tested. Orchestrators are wiring, not logic — if the services underneath are broken, debugging the orchestrator becomes impossible.
+
+---
+
+## Phase 0 — Project Setup
+
+### Folder structure
+Organise as a monorepo with one folder per service. Each service is fully self-contained with its own `requirements.txt`, `Dockerfile`, and database migrations.
+
+```
+ticketremaster/
+├── docker-compose.yml
 ├── .env.example
-├── API.md                          # full endpoint reference
-├── CONTRIBUTING.md                 # team conventions
-│
-├── api-gateway/
-│   ├── kong.yml                    # route definitions
-│   └── Dockerfile
-│
-├── orchestrator-service/
-│   ├── src/
-│   │   ├── app.py
-│   │   ├── routes/
-│   │   │   ├── purchase_routes.py
-│   │   │   ├── transfer_routes.py
-│   │   │   └── verification_routes.py
-│   │   └── orchestrators/
-│   │       ├── purchase_orchestrator.py
-│   │       ├── transfer_orchestrator.py
-│   │       └── verification_orchestrator.py
-│   ├── requirements.txt
-│   └── Dockerfile
-│
-├── inventory-service/              # gRPC / HTTP2
-│   ├── init.sql                    # DB schema + seed data
-│   ├── src/
-│   │   ├── proto/inventory.proto
-│   │   ├── models/seat.py          # AVAILABLE | HELD | SOLD | CHECKED_IN
-│   │   ├── models/entry_log.py
-│   │   ├── consumers/
-│   │   │   └── seat_release_consumer.py
-│   │   └── services/
-│   │       ├── lock_service.py
-│   │       ├── ownership_service.py
-│   │       └── verification_service.py
-│   └── Dockerfile
-│
-├── user-service/                   # REST
-│   ├── init.sql
-│   ├── src/
-│   │   ├── models/user.py
-│   │   └── services/
-│   │       ├── auth_service.py
-│   │       ├── credit_service.py   # Stripe wrapper
-│   │       ├── otp_service.py      # SMU API wrapper
-│   │       └── transfer_service.py # credit swap
-│   └── Dockerfile
-│
-├── order-service/                  # REST
-│   ├── init.sql
-│   ├── src/
-│   │   ├── models/order.py
-│   │   ├── models/transfer.py
-│   │   └── services/
-│   │       ├── order_service.py
-│   │       └── transfer_service.py # dispute / undo
-│   └── Dockerfile
-│
-├── event-service/                  # REST
-│   ├── init.sql
-│   ├── src/
-│   │   ├── models/venue.py
-│   │   ├── models/event.py
-│   │   └── services/event_service.py
-│   └── Dockerfile
-│
-├── outsystems/                     # OutSystems Gatekeeper App integration
-│   ├── README.md                   # Import guide for OutSystems team
-│   └── verification-api-swagger.json  # Swagger 2.0 spec (importable)
-│
-├── rabbitmq/
-│   ├── definitions.json            # DLX queues, TTL config
-│   └── rabbitmq.conf
-│
-└── .github/
-    └── workflows/
-        └── ci.yml                  # lint + test on PR
+├── proto/
+│   └── seat_inventory.proto        <- shared gRPC contract
+├── services/
+│   ├── user-service/
+│   ├── event-service/
+│   ├── venue-service/
+│   ├── seat-service/
+│   ├── seat-inventory-service/
+│   ├── ticket-service/
+│   ├── ticket-log-service/
+│   ├── marketplace-service/
+│   ├── transfer-service/
+│   ├── credit-transaction-service/
+│   ├── stripe-wrapper/
+│   └── otp-wrapper/
+└── orchestrators/
+    ├── auth-orchestrator/
+    ├── event-orchestrator/
+    ├── credit-orchestrator/
+    ├── ticket-purchase-orchestrator/
+    ├── qr-orchestrator/
+    ├── marketplace-orchestrator/
+    ├── transfer-orchestrator/
+    └── ticket-verification-orchestrator/
 ```
 
----
-
-## 3. Database Schemas
-
-Each microservice owns a dedicated PostgreSQL instance. No service may directly query another service's database — all cross-service data access goes through REST or gRPC calls.
-
-### seats_db (Inventory Service)
-
-**seats**
-
-| Column | Type | Notes |
-|---|---|---|
-| seat_id | UUID PK | Primary identifier |
-| event_id | UUID | Links to events_db (ID only, no JOIN) |
-| owner_user_id | UUID nullable | Current ticket owner (null = available) |
-| status | ENUM | `AVAILABLE` \| `HELD` \| `SOLD` \| `CHECKED_IN` |
-| held_by_user_id | UUID nullable | User currently in checkout flow |
-| held_until | TIMESTAMP | TTL — 5 min from reservation. DLX triggers on expiry |
-| qr_code_hash | TEXT nullable | Latest generated encrypted QR payload (for audit). Validation is done cryptographically on the live QR, not by DB comparison. |
-| price_paid | NUMERIC(10,2) | Credits charged at time of purchase |
-| row_number | VARCHAR(4) | e.g. A, B, C |
-| seat_number | INT | e.g. 12 |
-| created_at | TIMESTAMP | Record creation time |
-| updated_at | TIMESTAMP | Last state change |
-
-**entry_logs**
-
-| Column | Type | Notes |
-|---|---|---|
-| log_id | UUID PK | |
-| seat_id | UUID FK | References seats.seat_id |
-| scanned_at | TIMESTAMP | Server-side scan time |
-| scanned_by_staff_id | UUID | Staff user ID from OutSystems app |
-| result | ENUM | `SUCCESS` \| `DUPLICATE` \| `WRONG_HALL` \| `UNPAID` \| `NOT_FOUND` \| `EXPIRED` |
-| hall_id_presented | VARCHAR(20) | Hall from QR payload |
-| hall_id_expected | VARCHAR(20) | Hall from event record |
-
----
-
-### users_db (User Service)
-
-| Column | Type | Notes |
-|---|---|---|
-| user_id | UUID PK | |
-| email | VARCHAR(255) UNIQUE | |
-| phone | VARCHAR(20) | Used by SMU Notification API for OTP SMS |
-| password_hash | TEXT | bcrypt |
-| credit_balance | NUMERIC(10,2) | Internal credit. Topped up via Stripe |
-| two_fa_secret | TEXT | Stored for TOTP if applicable |
-| is_flagged | BOOLEAN | High-risk flag — triggers mandatory OTP on purchase |
-| created_at | TIMESTAMP | |
-
----
-
-### orders_db (Order Service)
-
-**orders** — immutable transaction ledger
-
-| Column | Type | Notes |
-|---|---|---|
-| order_id | UUID PK | |
-| user_id | UUID | Buyer — references users_db by ID only |
-| seat_id | UUID | References seats_db by ID only |
-| event_id | UUID | Denormalised for query convenience |
-| status | ENUM | `PENDING` \| `CONFIRMED` \| `FAILED` \| `REFUNDED` |
-| credits_charged | NUMERIC(10,2) | Amount deducted at confirmation |
-| verification_sid | TEXT nullable | SMU API `VerificationSid` for high-risk purchase OTP. Stored after `POST /SendOTP`, used in `POST /VerifyOTP`. Cleared once verified. |
-| created_at | TIMESTAMP | |
-| confirmed_at | TIMESTAMP | Null until payment confirmed |
-
-**transfers**
-
-| Column | Type | Notes |
-|---|---|---|
-| transfer_id | UUID PK | |
-| seat_id | UUID | |
-| seller_user_id | UUID | User A |
-| buyer_user_id | UUID | User B |
-| initiated_by | ENUM | `SELLER` \| `BUYER` — records who started the transfer |
-| status | ENUM | `INITIATED` \| `PENDING_OTP` \| `COMPLETED` \| `DISPUTED` \| `REVERSED` |
-| seller_otp_verified | BOOLEAN | SMU API verification for User A |
-| buyer_otp_verified | BOOLEAN | SMU API verification for User B |
-| seller_verification_sid | TEXT nullable | SMU API `VerificationSid` for the seller's OTP. Stored after `POST /SendOTP` for seller, used in `POST /VerifyOTP`. Cleared once verified. |
-| buyer_verification_sid | TEXT nullable | SMU API `VerificationSid` for the buyer's OTP. Stored after `POST /SendOTP` for buyer, used in `POST /VerifyOTP`. Cleared once verified. |
-| credits_amount | NUMERIC(10,2) | Credits transferred from B to A |
-| dispute_reason | TEXT nullable | Filled on fraud flag / user dispute |
-| created_at | TIMESTAMP | |
-| completed_at | TIMESTAMP | |
-
-> **Concurrency constraint:** A UNIQUE partial index on `(seat_id) WHERE status IN ('INITIATED', 'PENDING_OTP')` prevents multiple simultaneous transfers for the same seat.
-
----
-
-### events_db (Event Service)
-
-**venues**
-
-| Column | Type | Notes |
-|---|---|---|
-| venue_id | UUID PK | Primary identifier |
-| name | VARCHAR(255) | e.g. Singapore Indoor Stadium |
-| address | TEXT | Full address |
-| total_halls | INT | Number of halls in venue |
-| created_at | TIMESTAMP | |
-
-**events**
-
-| Column | Type | Notes |
-|---|---|---|
-| event_id | UUID PK | |
-| name | VARCHAR(255) | e.g. Taylor Swift Eras Tour SG |
-| venue_id | UUID FK | References venues.venue_id |
-| hall_id | VARCHAR(20) | Specific hall — used in Scenario 3 mismatch check |
-| event_date | TIMESTAMP | |
-| total_seats | INT | |
-| pricing_tiers | JSONB | e.g. `{"CAT1": 350, "CAT2": 200}` |
-
----
-
-## 4. Docker Compose Setup
-
-Run `docker compose up --build` from the repository root to start all services. All environment variables are loaded from `.env` (copy from `.env.example`).
-
-```yaml
-services:
-
-  # ── Databases ──────────────────────────────────────────────
-  seats-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: seats_db
-      POSTGRES_USER: inventory_user
-      POSTGRES_PASSWORD: ${INVENTORY_DB_PASS}
-    volumes:
-      - seats_data:/var/lib/postgresql/data
-      - ./inventory-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U inventory_user -d seats_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  users-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: users_db
-      POSTGRES_USER: user_svc_user
-      POSTGRES_PASSWORD: ${USER_DB_PASS}
-    volumes:
-      - users_data:/var/lib/postgresql/data
-      - ./user-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user_svc_user -d users_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  orders-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: orders_db
-      POSTGRES_USER: order_svc_user
-      POSTGRES_PASSWORD: ${ORDER_DB_PASS}
-    volumes:
-      - orders_data:/var/lib/postgresql/data
-      - ./order-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U order_svc_user -d orders_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  events-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: events_db
-      POSTGRES_USER: event_svc_user
-      POSTGRES_PASSWORD: ${EVENT_DB_PASS}
-    volumes:
-      - events_data:/var/lib/postgresql/data
-      - ./event-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U event_svc_user -d events_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── Messaging ──────────────────────────────────────────────
-  rabbitmq:
-    image: rabbitmq:3-management
-    ports: ["5672:5672", "15672:15672"]
-    volumes:
-      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
-      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-
-  # ── Microservices ───────────────────────────────────────────
-  inventory-service:
-    build: ./inventory-service
-    depends_on:
-      seats-db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      DB_HOST: seats-db
-      DB_NAME: seats_db
-      DB_USER: inventory_user
-      DB_PASS: ${INVENTORY_DB_PASS}
-      RABBITMQ_HOST: rabbitmq
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-  user-service:
-    build: ./user-service
-    depends_on:
-      users-db:
-        condition: service_healthy
-    environment:
-      DB_HOST: users-db
-      DB_NAME: users_db
-      DB_USER: user_svc_user
-      DB_PASS: ${USER_DB_PASS}
-      STRIPE_KEY: ${STRIPE_SECRET_KEY}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-      SMU_API_URL: ${SMU_API_URL}
-      SMU_API_KEY: ${SMU_API_KEY}
-      JWT_SECRET: ${JWT_SECRET}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-  order-service:
-    build: ./order-service
-    depends_on:
-      orders-db:
-        condition: service_healthy
-    environment:
-      DB_HOST: orders-db
-      DB_NAME: orders_db
-      DB_USER: order_svc_user
-      DB_PASS: ${ORDER_DB_PASS}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-  event-service:
-    build: ./event-service
-    depends_on:
-      events-db:
-        condition: service_healthy
-    environment:
-      DB_HOST: events-db
-      DB_NAME: events_db
-      DB_USER: event_svc_user
-      DB_PASS: ${EVENT_DB_PASS}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-  orchestrator-service:
-    build: ./orchestrator-service
-    depends_on:
-      inventory-service:
-        condition: service_healthy
-      user-service:
-        condition: service_healthy
-      order-service:
-        condition: service_healthy
-      event-service:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      INVENTORY_SERVICE_URL: inventory-service:50051
-      USER_SERVICE_URL: http://user-service:5000
-      ORDER_SERVICE_URL: http://order-service:5001
-      EVENT_SERVICE_URL: http://event-service:5002
-      RABBITMQ_HOST: rabbitmq
-      JWT_SECRET: ${JWT_SECRET}
-      QR_ENCRYPTION_KEY: ${QR_ENCRYPTION_KEY}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-  api-gateway:
-    image: kong:3.6
-    depends_on:
-      orchestrator-service:
-        condition: service_healthy
-    ports: ["8000:8000", "8001:8001"]
-    volumes:
-      - ./api-gateway/kong.yml:/etc/kong/kong.yml
-    environment:
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_DATABASE: "off"
-
-volumes:
-  seats_data:
-  users_data:
-  orders_data:
-  events_data:
-```
-
-### docker-compose.dev.yml
-
-The dev override file enables **hot-reload** during development by mounting source code as volumes and enabling debug mode. Use it alongside the main compose file:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
-
-```yaml
-# docker-compose.dev.yml — development overrides
-services:
-  orchestrator-service:
-    volumes:
-      - ./orchestrator-service/src:/app/src
-    environment:
-      FLASK_DEBUG: "1"
-      FLASK_ENV: development
-
-  user-service:
-    volumes:
-      - ./user-service/src:/app/src
-    environment:
-      FLASK_DEBUG: "1"
-      FLASK_ENV: development
-
-  order-service:
-    volumes:
-      - ./order-service/src:/app/src
-    environment:
-      FLASK_DEBUG: "1"
-      FLASK_ENV: development
-
-  event-service:
-    volumes:
-      - ./event-service/src:/app/src
-    environment:
-      FLASK_DEBUG: "1"
-      FLASK_ENV: development
-
-  inventory-service:
-    volumes:
-      - ./inventory-service/src:/app/src
-```
-
-**What it changes:**
-
-- **Volume mounts:** Source code directories are mounted into containers, so code changes are reflected immediately without rebuilding the image.
-- **Debug mode:** Flask runs in debug mode with auto-reloader enabled.
-- **No image rebuild needed:** Edit your Python files locally and the Flask dev server auto-restarts.
-
----
-
-## 5. Scenario 1 — Complete Ticket Purchase Flow
-
-> Demonstrates: **pessimistic locking**, **distributed transactions**, **async recovery via RabbitMQ DLX**
-
-### Happy Path — Success
-
-| Step | From → To | Action |
-|---|---|---|
-| 1 | Client → Orchestrator | `POST /api/reserve {seat_id, user_id}` |
-| 2 | Orchestrator → Inventory | gRPC `ReserveSeat(seat_id, user_id)` — runs `SELECT FOR UPDATE NOWAIT`. Seat status → `HELD`, `held_until = NOW + 5min` |
-| 3 | Orchestrator → RabbitMQ | Publish TTL message to `seat.hold.queue` with 5min expiry |
-| 4 | Orchestrator → Client | `200 OK` — seat locked, `order_id` returned |
-| 5 | Client → Orchestrator | `POST /api/pay {order_id}` |
-| 6 | Orchestrator → User Svc | `POST /credits/deduct {user_id, amount}` — checks `credit_balance >= amount` |
-| 7 | Orchestrator → Order Svc | `POST /orders` — order record created with status `CONFIRMED` |
-| 8 | Orchestrator → Inventory | gRPC `ConfirmSeat(seat_id, user_id)` — status → `SOLD`, `owner_user_id` set. QR code generated (see Section 7.1). |
-| 9 | Orchestrator → Client | Booking confirmed — `order_id`, QR payload returned |
-
-### Abandonment Path — TTL Expiry
-
-| Step | Action |
-|---|---|
-| 1–4 | Same as Happy Path. Seat is `HELD`. |
-| 5 | TTL expires — RabbitMQ DLX routes message to `seat.release.queue` |
-| 6 | RabbitMQ → Inventory: consumer calls `ReleaseSeat(seat_id)` — status → `AVAILABLE`, `held_by_user_id` cleared |
-| 7 | Pending order status updated to `FAILED` |
-
-### High-Risk User Path — Mandatory OTP
-
-If `user.is_flagged = true`, the Orchestrator intercepts after step 2 and triggers 2FA before proceeding.
-
-| Step | Action |
-|---|---|
-| 2a | Orchestrator → User Svc: `GET /users/{user_id}/risk` — returns `is_flagged` |
-| 2b | User Svc → SMU API: `POST /sendOTP {phone}` — OTP sent to user |
-| 2c | Client → Orchestrator: `POST /api/verify-otp {otp_code}` |
-| 2d | User Svc → SMU API: `POST /verifyOTP {otp_code}` — verified |
-| 3 | Continue to RabbitMQ TTL publish and normal pay flow |
-
-### Compensation Matrix — Purchase Flow
-
-When a multi-step operation partially fails, the Orchestrator executes compensating actions in reverse order:
-
-| Failure Point | What Already Succeeded | Compensating Actions |
-|---|---|---|
-| `ReserveSeat` gRPC fails (`NOWAIT` lock) | Nothing | Return `SEAT_UNAVAILABLE` to client. Client re-picks seat. No compensation needed. |
-| RabbitMQ TTL publish fails | Seat is `HELD` | Call `ReleaseSeat` gRPC to release seat → `AVAILABLE`. Return error to client. |
-| Credit deduction fails (insufficient balance) | Seat `HELD`, TTL published | Return `INSUFFICIENT_CREDITS`. Seat remains held — DLX will auto-release on TTL expiry. |
-| Order creation fails | Credits deducted | 1. Refund credits → `POST /credits/refund {user_id, amount}`. 2. Seat remains held — DLX will auto-release. 3. Return `INTERNAL_ERROR`. |
-| `ConfirmSeat` gRPC fails | Credits deducted, Order created | 1. Refund credits → `POST /credits/refund {user_id, amount}`. 2. Update order status → `FAILED`. 3. Seat remains held — DLX will auto-release. 4. Return `INTERNAL_ERROR`. |
-| OTP verification fails (high-risk user) | Seat `HELD` | Keep seat held — user can retry OTP. After 3 failures: cancel flow, DLX auto-releases seat. |
-
----
-
-## 6. Scenario 2 — Secure P2P Ticket Transfer
-
-Either the seller (current ticket owner) or the buyer can initiate a transfer. Both parties must verify via SMU 2FA. Credits transfer from buyer to seller atomically.
-
-### Success Path
-
-| Step | From → To | Action |
-|---|---|---|
-| 1 | Initiator → Orchestrator | `POST /api/transfer/initiate {seat_id, seller_user_id, buyer_user_id, credits_amount}` |
-| 2 | Orchestrator validation | Verify: seller owns seat (`GetSeatOwner`), buyer has credits, no pending transfer for seat (partial unique index check), seat status == `SOLD` |
-| 3 | Orchestrator → Order Svc | Create transfer record — status: `INITIATED`, `initiated_by` recorded |
-| 4 | Orchestrator → User Svc | Trigger OTP for both seller and buyer via SMU API `POST /sendOTP` |
-| 5 | — | Transfer status → `PENDING_OTP`. Both users receive OTP. |
-| 6 | Client → Orchestrator | `POST /api/transfer/confirm {transfer_id, seller_otp, buyer_otp}` |
-| 7 | Orchestrator → User Svc | Verify both OTPs via SMU API `POST /verifyOTP` — both must pass |
-| 8 | Atomic Swap | User Svc: credit transfer (buyer → seller). Inventory gRPC: `UpdateOwner(seat_id, buyer_id)`. Order Svc: transfer status → `COMPLETED`. |
-| 9 | Orchestrator → Inventory | Generate new QR code for the new owner (see Section 7.1). Old owner's QRs become invalid (user_id mismatch). |
-| 10 | Result | Seller sees ticket under Sold Tickets. Buyer sees ticket under Purchased Tickets. |
-
-### Failure Cases
-
-| Case | Status | Handling |
-|---|---|---|
-| OTP mismatch / expired | `PENDING_OTP` | User can retry. After 3 failures, transfer auto-cancels → `FAILED` |
-| Buyer insufficient credits | `FAILED` | Checked before OTP is sent. User redirected to Stripe top-up |
-| Seller no longer owns seat | `FAILED` | Inventory gRPC `GetSeatOwner` check at step 2. Transfer blocked immediately |
-| Seat already has pending transfer | `FAILED` | Partial unique index enforces one active transfer per seat. Second attempt rejected → `TRANSFER_IN_PROGRESS` |
-| Self-transfer attempt | `FAILED` | `seller_user_id == buyer_user_id` blocked at step 2 → `SELF_TRANSFER` |
-| Fraud / phishing flag | `DISPUTED` | Either party calls `POST /api/transfer/dispute {transfer_id, reason}`. Credits frozen |
-| Undo / reverse transfer | `REVERSED` | `POST /api/transfer/reverse` — Inventory `UpdateOwner` back to seller. Credits returned to buyer |
-
-### Compensation Matrix — Transfer Flow
-
-| Failure Point | What Already Succeeded | Compensating Actions |
-|---|---|---|
-| Validation fails (ownership, credits, dup) | Nothing | Return error to client. No side effects. |
-| Transfer record creation fails | Validation passed | Return `INTERNAL_ERROR`. No side effects. |
-| OTP send fails | Transfer record created | Set transfer → `FAILED`. No side effects to undo. |
-| OTP verification fails (either party) | Transfer in `PENDING_OTP` | Allow retries. After 3 failures → set transfer → `FAILED`. |
-| Credit transfer fails | Both OTPs verified | Set transfer → `FAILED`. No ownership change occurred. |
-| `UpdateOwner` gRPC fails | Credits transferred | 1. Reverse credit transfer (return credits to buyer, deduct from seller). 2. Set transfer → `FAILED`. |
-| Transfer status update fails | Credits + ownership changed | Log critical error. Both credits and ownership already changed — system is consistent. Mark for manual audit. |
-
----
-
-## 7. Scenario 3 — Ticket Verification (QR Scan)
-
-Staff scans a QR via OutSystems Gatekeeper App. QR codes contain an encrypted payload with a **60-second valid timestamp** to prevent screenshot sharing. Every scan (pass or fail) is written to `entry_logs`.
-
-> **OutSystems Integration:** A ready-to-import Swagger 2.0 spec and step-by-step guide are in the [`outsystems/`](outsystems/) folder. See [`outsystems/README.md`](outsystems/README.md) for import instructions.
-
-### Verification Flow
-
-| Step | From → To | Action |
-|---|---|---|
-| 1 | Staff App → Orchestrator | `POST /api/verify {qr_payload, hall_id, staff_id}` |
-| 2 | Orchestrator | Decrypt QR payload using `QR_ENCRYPTION_KEY` → extract `seat_id`, `user_id`, `hall_id`, `generated_at` |
-| 3 | Orchestrator | Validate QR timestamp: `NOW - generated_at <= 60 seconds`. Reject if expired. |
-| 4 | Orchestrator (parallel) | Fan out to 3 services simultaneously |
-| 4a | → Inventory | gRPC `VerifyTicket(seat_id)` — returns status, owner, event_id |
-| 4b | → Order Svc | `GET /orders?seat_id=` — confirm `CONFIRMED` order exists |
-| 4c | → Event Svc | `GET /events/{event_id}` — returns expected `hall_id` |
-| 5 | Orchestrator | Run all business rule checks (see table below) |
-| 6 | On SUCCESS | gRPC `MarkCheckedIn(seat_id)` — status → `CHECKED_IN`. Write `entry_log` result = `SUCCESS` |
-| 7 | → Staff App | Return result + display message to OutSystems |
-
-### Business Rule Validation
-
-| Case | Result | System Logic |
-|---|---|---|
-| Valid entry | SUCCESS | `seat.status == SOLD` + no prior `CHECKED_IN` log + QR `user_id` matches `seat.owner_user_id` → mark `CHECKED_IN`, log entry |
-| Already scanned | REJECT | `entry_logs` has `SUCCESS` record for this `seat_id` → alert "Already Checked In". Log `DUPLICATE` |
-| Unpaid seat | REJECT | `seat.status == HELD` → alert "Incomplete Payment". Log `UNPAID` |
-| Ticket not found | REJECT | `seat_id` does not exist → alert "Possible Counterfeit". Log `NOT_FOUND` |
-| Wrong hall/venue | REJECT | QR `hall_id` ≠ `event.hall_id` → alert "Go to Hall X". Log `WRONG_HALL` |
-| Expired QR timestamp | REJECT | QR `generated_at` older than 60 seconds → alert "Expired QR — refresh ticket". Log `EXPIRED` |
-
-### 7.1 QR Code Specification
-
-#### Payload Structure
-
-The QR code contains an **encrypted JSON payload** with the following fields:
-
-```json
-{
-  "seat_id": "s1s2s3s4-e5e6-f7f8-g9g0-h1h2h3h4h5h6",
-  "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "hall_id": "HALL-A",
-  "generated_at": "2026-02-19T18:10:45Z"
-}
-```
-
-| Field | Purpose |
-|---|---|
-| `seat_id` | Identifies the specific seat/ticket being verified |
-| `user_id` | Binds the QR to the current owner — prevents use by a different person |
-| `hall_id` | Enables wrong-hall detection at scan time |
-| `generated_at` | ISO 8601 timestamp to the **second** — enforces 60-second TTL |
-
-#### Encryption — AES-256-GCM
-
-| Parameter | Value |
-|---|---|
-| Algorithm | AES-256-GCM (authenticated encryption) |
-| Key | `QR_ENCRYPTION_KEY` from environment (32 bytes) |
-| IV / Nonce | Random 12 bytes, generated fresh for each QR |
-| Output format | `base64(IV ∥ ciphertext ∥ auth_tag)` |
-
-**Why AES-256-GCM?**
-
-- **Confidentiality** — payload is encrypted; scanning the QR without the key reveals nothing.
-- **Integrity** — the GCM authentication tag detects any tampering with the payload. If even one bit is changed, decryption fails.
-- **Random IV** — every QR code is cryptographically unique, even for the same seat at the same second.
-
-#### Anti-Fraud Measures
-
-| Threat | Mitigation |
-|---|---|
-| Screenshot sharing | 60-second TTL on `generated_at`. Shared screenshots expire before they can be used. |
-| QR forwarding to another person | `user_id` in payload is checked against `seat.owner_user_id`. Mismatch → rejected. |
-| Payload tampering | AES-GCM authentication tag. Any modification invalidates the QR. |
-| QR duplication | Random 12-byte IV means no two encryptions produce the same output. |
-| Replay after transfer | On ticket transfer, a new QR is generated for the new owner. Old owner's `user_id` no longer matches, so old QR codes are immediately invalidated. |
-
-#### QR Generation Points
-
-| Event | Trigger | Who Generates |
-|---|---|---|
-| Purchase confirmation | Scenario 1, Step 8 (after `ConfirmSeat`) | Orchestrator encrypts payload, stores hash in `seats.qr_code_hash` |
-| Transfer completion | Scenario 2, Step 9 (after `UpdateOwner`) | Orchestrator encrypts new payload with new `user_id` |
-| Client QR refresh | `GET /api/tickets/{seat_id}/qr` | Orchestrator generates fresh payload with current `generated_at` timestamp |
-
-#### Client QR Refresh Flow
-
-The client app should poll `GET /api/tickets/{seat_id}/qr` every **~50 seconds** to keep the displayed QR code fresh (within the 60-second TTL window).
+### Standard service structure
+Every service and orchestrator follows the same internal layout:
 
 ```
-Client                         Orchestrator
-  │                                │
-  │─── GET /tickets/{id}/qr ─────→│
-  │                                │── Verify JWT user == seat owner
-  │                                │── Build payload {seat_id, user_id, hall_id, NOW()}
-  │                                │── Encrypt with AES-256-GCM
-  │←── {qr_payload, expires_at} ──│
-  │                                │
-  │── render QR code from payload  │
-  │── wait 50 seconds              │
-  │── repeat                       │
+user-service/
+├── Dockerfile
+├── requirements.txt
+├── .env
+├── app.py          <- Flask app factory, registers blueprints
+├── models.py       <- SQLAlchemy models
+├── routes.py       <- Flask route handlers
+└── migrations/     <- Flask-Migrate / Alembic migration files
 ```
 
-### Compensation — Verification Flow
+### Standard Dockerfile
+All services use the same base pattern:
 
-Scenario 3 is a read-heavy flow with only one write operation (`MarkCheckedIn`). Compensation is minimal:
-
-| Failure Point | Handling |
-|---|---|
-| QR decryption fails | Return `QR_INVALID`. Log for audit. No side effects. |
-| Any downstream service call fails | Return `SERVICE_UNAVAILABLE`. Staff retries scan. No side effects. |
-| `MarkCheckedIn` gRPC fails | Return error to staff. Staff retries scan. Seat remains `SOLD`. |
-| `entry_log` write fails | Non-critical. `MarkCheckedIn` already succeeded. Log error for manual audit. |
-
----
-
-## 8. RabbitMQ Configuration
-
-RabbitMQ handles the async seat auto-release (Scenario 1 abandonment). The DLX pattern ensures held seats are always released even if the Orchestrator crashes.
-
-### Queue Design
-
-| Queue / Exchange | Type | Purpose |
-|---|---|---|
-| `seat.hold.exchange` | direct | Main exchange. Published to when a seat is `HELD` |
-| `seat.hold.queue` | queue (TTL=300000ms) | Holds reservation messages. `x-message-ttl` = 5 minutes |
-| `seat.release.exchange` (DLX) | direct | Dead letter exchange — receives expired messages from hold queue |
-| `seat.release.queue` | queue | Consumed by Inventory Service to trigger `ReleaseSeat` |
-
-### Message Flow
-
-```
-Orchestrator ──publish──→ seat.hold.exchange ──route──→ seat.hold.queue
-                                                            │
-                                                     (TTL expires)
-                                                            │
-                                                            ▼
-                                                  seat.release.exchange (DLX)
-                                                            │
-                                                            ▼
-                                                    seat.release.queue
-                                                            │
-                                                            ▼
-                                              Inventory Service Consumer
-                                                    ReleaseSeat()
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 5000
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
 ```
 
-### Message Payload
+Use gunicorn with at least 4 workers in all environments. Flask's built-in dev server is
+single-threaded and will silently serialise concurrent requests. This matters critically
+for the Seat Inventory Service under load.
 
-Published by the Orchestrator when a seat is reserved:
+For the Seat Inventory Service, the Dockerfile needs a custom entrypoint that starts
+both the REST and gRPC servers:
 
-```json
-{
-  "seat_id": "s1s2s3s4-...",
-  "user_id": "f47ac10b-...",
-  "order_id": "o1o2o3o4-...",
-  "reserved_at": "2026-02-19T18:10:00Z"
-}
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 5000 50051
+CMD ["python", "server.py"]
 ```
 
-### Consumer Implementation
+### Base requirements.txt
+Every service shares this base set:
 
-The Inventory Service runs a **dedicated consumer thread** that listens to `seat.release.queue`. This consumer starts alongside the gRPC server on container startup.
+```
+flask==3.0.3
+flask-sqlalchemy==3.1.1
+flask-migrate==4.0.7
+psycopg2-binary==2.9.9
+python-dotenv==1.0.1
+gunicorn==22.0.0
+```
+
+Additional per-service dependencies are noted in each phase below.
+
+### Health check endpoint
+Every service must expose GET /health returning { "status": "ok" }. Add this to every
+service before anything else — it is required for Docker health checks and Kubernetes
+liveness probes.
 
 ```python
-# inventory-service/src/consumers/seat_release_consumer.py
-import json
-import pika
+@app.route('/health')
+def health():
+    return {"status": "ok"}, 200
+```
 
-def start_consumer(db_session_factory):
-    """Start the RabbitMQ consumer for seat auto-release.
-    Runs in a separate thread from the gRPC server.
-    """
+### Flask app factory pattern
+Use the application factory pattern so the app can be instantiated with different configs
+for testing versus production:
+
+```python
+# app.py
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from dotenv import load_dotenv
+import os
+
+db = SQLAlchemy()
+migrate = Migrate()
+
+def create_app():
+    load_dotenv()
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['DATABASE_URL']
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+    db.init_app(app)
+    migrate.init_app(app, db)
+
+    from routes import bp
+    app.register_blueprint(bp)
+
+    @app.route('/health')
+    def health():
+        return {"status": "ok"}, 200
+
+    return app
+
+app = create_app()
+```
+
+### docker-compose.yml pattern per service
+Each service gets its own isolated PostgreSQL container. Never share a database between
+two services — this defeats the purpose of the microservice architecture.
+
+```yaml
+user-service:
+  build: ./services/user-service
+  ports:
+    - "3001:5000"
+  environment:
+    DATABASE_URL: postgresql://postgres:password@user-db:5432/users
+  depends_on:
+    user-db:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
+user-db:
+  image: postgres:16-alpine
+  environment:
+    POSTGRES_DB: users
+    POSTGRES_PASSWORD: password
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres"]
+    interval: 5s
+    timeout: 5s
+    retries: 5
+```
+
+### Standard error response shape
+All services and orchestrators must return errors in the same envelope:
+
+```python
+def error_response(code, message, status_code):
+    return {"success": False, "error": {"code": code, "message": message}}, status_code
+
+def success_response(data, status_code=200):
+    return {"success": True, "data": data}, status_code
+```
+
+### Environment variables
+Define all keys in .env.example at the root from day one. Each service only references
+its own variables. Never share a single .env file across services.
+
+---
+
+## Phase 1 — Foundation Services
+
+These five services (User, Venue, Seat, Credit, Credit Transaction) have no outbound
+calls to other services. They only talk to their own PostgreSQL database. Build them first.
+
+### Build each service in this pattern:
+1. Scaffold the folder structure
+2. Write the SQLAlchemy model in models.py
+3. Run migrations: flask db init -> flask db migrate -m "initial" -> flask db upgrade
+4. Implement each route in routes.py
+5. Test each endpoint manually with Postman
+6. Add to docker-compose.yml and verify it boots cleanly
+
+### SQLAlchemy model pattern
+Use UUIDs as primary keys. Generate them in Python so tests never depend on the database
+for ID creation:
+
+```python
+# models.py
+from app import db
+import uuid
+from datetime import datetime
+
+class User(db.Model):
+    __tablename__ = 'users'
+    userId      = db.Column(db.String(36), primary_key=True,
+                            default=lambda: str(uuid.uuid4()))
+    email       = db.Column(db.String(255), unique=True, nullable=False)
+    password    = db.Column(db.String(255), nullable=False)
+    salt        = db.Column(db.String(255), nullable=False)
+    phoneNumber = db.Column(db.String(20), nullable=False)
+    role        = db.Column(db.String(20), nullable=False, default='user')
+    isFlagged   = db.Column(db.Boolean, nullable=False, default=False)
+    createdAt   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+```
+
+### Route handler pattern
+Keep route handlers thin. Validate input, call a function, return a response. Never put
+business logic directly in a route handler:
+
+```python
+# routes.py
+from flask import Blueprint, request, jsonify
+from models import User, db
+
+bp = Blueprint('users', __name__)
+
+@bp.route('/users', methods=['POST'])
+def create_user():
+    data = request.get_json()
+    required = ['email', 'password', 'salt', 'phoneNumber']
+    if not data or not all(k in data for k in required):
+        return jsonify({"error": {"code": "VALIDATION_ERROR",
+                                  "message": "Missing required fields"}}), 400
+
+    if User.query.filter_by(email=data['email']).first():
+        return jsonify({"error": {"code": "EMAIL_ALREADY_EXISTS",
+                                  "message": "Email already registered"}}), 409
+
+    user = User(
+        email=data['email'],
+        password=data['password'],
+        salt=data['salt'],
+        phoneNumber=data['phoneNumber']
+    )
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({
+        "userId": user.userId,
+        "email": user.email,
+        "role": user.role,
+        "createdAt": user.createdAt.isoformat()
+    }), 201
+```
+
+### Key notes per service
+
+**User Service — password handling**
+The User Service stores exactly what it receives — a pre-hashed password and salt. All
+bcrypt logic lives in the Auth Orchestrator. Add bcrypt to the Auth Orchestrator's
+requirements.txt, not here.
+
+**Credit Service — OutSystems, not Flask**
+The Credit Service is built and hosted in OutSystems, not as a Flask service. Do not
+scaffold a Flask service or create a Postgres container for it. Instead, the OutSystems
+team builds three REST endpoints that expose the same contract as the API reference PDF.
+Your only responsibilities here are to verify the endpoints work correctly via Postman,
+confirm the JSON response shapes match what your orchestrators expect, and add
+`CREDIT_SERVICE_URL` and `OUTSYSTEMS_API_KEY` to `.env.example`.
+
+Since OutSystems is external to your Docker network, all calls to it go over HTTPS.
+Create a dedicated helper in any orchestrator that touches Credit Service so the API
+key header is always injected consistently:
+
+```python
+def call_credit_service(method, path, **kwargs):
+    headers = kwargs.pop('headers', {})
+    headers['X-API-Key'] = os.environ['OUTSYSTEMS_API_KEY']
+    return call_service(
+        method,
+        f"{os.environ['CREDIT_SERVICE_URL']}{path}",
+        headers=headers,
+        **kwargs
+    )
+```
+
+Use `call_credit_service()` everywhere instead of the generic `call_service()` when
+calling credit endpoints. This keeps the API key injection in one place.
+
+**One thing to confirm with the OutSystems team before building orchestrators:**
+The PATCH /credits/<user_id> response must include the updated `creditBalance` in the
+response body. If it does not, your orchestrators will need an extra GET call after
+every balance update to confirm the new value. Aligning on this early saves rework.
+
+**Venue and Seat Services — seed data early**
+Seed at least 2 venues and their full seat rows during Phase 1. You will need this data
+in Phase 2. Add a seed.py script to each service and run it via docker compose exec:
+
+```python
+# seed.py
+from app import create_app
+from models import Venue, db
+
+app = create_app()
+with app.app_context():
+    db.session.add(Venue(
+        venueId='ven_001',
+        name='Esplanade Concert Hall',
+        capacity=1800,
+        address='1 Esplanade Dr',
+        postalCode='038981',
+        coordinates='1.2897,103.8555',
+        isActive=True
+    ))
+    db.session.commit()
+    print("Seeded venues")
+```
+
+---
+
+## Phase 2 — Event & Seat Inventory Services
+
+### Event Service
+The Event Service only creates the event record. It does not create seat inventory —
+that is triggered separately after the event is created. Keep the Event Service dumb.
+Seed at least 2 events pointing to your seeded venues.
+
+### Seat Inventory Service — most critical service in the system
+This service is the most technically demanding because it uses both REST and gRPC and
+handles pessimistic locking under concurrent requests.
+
+Additional requirements:
+
+```
+grpcio==1.64.0
+grpcio-tools==1.64.0
+```
+
+**The .proto file**
+Define the proto file at the repo root under proto/seat_inventory.proto. Both the server
+and every gRPC client must use the same generated stubs. Commit the generated files:
+
+```protobuf
+syntax = "proto3";
+
+service SeatInventoryService {
+  rpc HoldSeat      (HoldSeatRequest)      returns (HoldSeatResponse);
+  rpc ReleaseSeat   (ReleaseSeatRequest)   returns (ReleaseSeatResponse);
+  rpc SellSeat      (SellSeatRequest)      returns (SellSeatResponse);
+  rpc GetSeatStatus (GetSeatStatusRequest) returns (GetSeatStatusResponse);
+}
+
+message HoldSeatRequest {
+  string inventory_id          = 1;
+  string user_id               = 2;
+  int32  hold_duration_seconds = 3;
+}
+message HoldSeatResponse {
+  bool   success    = 1;
+  string status     = 2;
+  string held_until = 3;
+  string error_code = 4;
+}
+message ReleaseSeatRequest  { string inventory_id = 1; }
+message ReleaseSeatResponse { bool success = 1; }
+message SellSeatRequest     { string inventory_id = 1; }
+message SellSeatResponse    { bool success = 1; }
+message GetSeatStatusRequest  { string inventory_id = 1; }
+message GetSeatStatusResponse {
+  string inventory_id = 1;
+  string status       = 2;
+  string held_until   = 3;
+}
+```
+
+Generate Python stubs from the repo root:
+
+```bash
+python -m grpc_tools.protoc \
+  -I./proto \
+  --python_out=./services/seat-inventory-service \
+  --grpc_python_out=./services/seat-inventory-service \
+  ./proto/seat_inventory.proto
+```
+
+Copy the generated seat_inventory_pb2.py and seat_inventory_pb2_grpc.py into each
+orchestrator that calls this service.
+
+**Pessimistic locking with SQLAlchemy**
+Use with_for_update() to lock the row so two simultaneous requests cannot both succeed:
+
+```python
+from sqlalchemy import select
+from models import SeatInventory, db
+from datetime import datetime, timedelta
+
+def hold_seat(inventory_id, user_id, hold_duration_seconds):
+    with db.session.begin():
+        seat = db.session.execute(
+            select(SeatInventory)
+            .where(SeatInventory.inventoryId == inventory_id)
+            .with_for_update()      # row-level lock
+        ).scalar_one_or_none()
+
+        if seat is None:
+            return None, 'SEAT_NOT_FOUND'
+        if seat.status != 'available':
+            return None, 'SEAT_NOT_AVAILABLE'
+
+        seat.status = 'held'
+        seat.heldUntil = datetime.utcnow() + timedelta(seconds=hold_duration_seconds)
+        return seat, None
+```
+
+The second concurrent request blocks at with_for_update() until the first commits.
+If the first set the seat to held, the second finds status != 'available' and returns
+SEAT_NOT_AVAILABLE. This is correct behaviour.
+
+**Running both REST and gRPC servers**
+Use Python's threading module to run both servers in parallel:
+
+```python
+# server.py
+import threading
+import grpc
+from concurrent import futures
+from app import create_app
+from grpc_server import SeatInventoryServicer
+import seat_inventory_pb2_grpc
+
+def start_grpc():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    seat_inventory_pb2_grpc.add_SeatInventoryServiceServicer_to_server(
+        SeatInventoryServicer(), server
+    )
+    server.add_insecure_port('[::]:50051')
+    server.start()
+    server.wait_for_termination()
+
+grpc_thread = threading.Thread(target=start_grpc, daemon=True)
+grpc_thread.start()
+
+flask_app = create_app()
+flask_app.run(host='0.0.0.0', port=5000)
+```
+
+**Test concurrent holds explicitly**
+Write a test that fires two simultaneous HoldSeat requests for the same seat using
+Python's threading module. Assert exactly one succeeds and one returns SEAT_NOT_AVAILABLE.
+
+---
+
+## Phase 3 — Ticket, Marketplace & Transfer Services
+
+Build in this order: Ticket -> Ticket Log -> Marketplace -> Transfer.
+
+**Ticket Service — QR hash generation**
+The QR hash is generated by the QR Orchestrator, not here. The Ticket Service stores
+whatever hash and timestamp the orchestrator sends via PATCH /tickets/:ticketId.
+
+**Transfer Service — state store only**
+The Transfer Service does not enforce or validate status transitions. The Transfer
+Orchestrator is responsible for calling it with the correct status at each step. Never
+add transition validation logic to the Transfer Service.
+
+---
+
+## Phase 4 — External Wrappers
+
+### Stripe Wrapper
+Additional requirements:
+
+```
+stripe==9.9.0
+```
+
+**Development setup:**
+1. Create a free Stripe test account
+2. Copy your test secret key (sk_test_...) into .env
+3. Run: stripe listen --forward-to localhost:PORT/stripe/webhook
+4. Add the webhook signing secret output by the CLI to .env as STRIPE_WEBHOOK_SECRET
+
+**Creating a Payment Intent — attach userId in metadata:**
+
+```python
+import stripe, os
+stripe.api_key = os.environ['STRIPE_SECRET_KEY']
+
+def create_payment_intent(user_id, amount_credits):
+    intent = stripe.PaymentIntent.create(
+        amount=amount_credits * 100,    # Stripe uses smallest currency unit (cents)
+        currency='sgd',
+        metadata={'userId': user_id}
+    )
+    return intent.client_secret, intent.id
+```
+
+**Webhook verification — never skip this:**
+
+```python
+@bp.route('/stripe/webhook', methods=['POST'])
+def stripe_webhook():
+    payload   = request.get_data()
+    signature = request.headers.get('Stripe-Signature')
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, signature, os.environ['STRIPE_WEBHOOK_SECRET']
+        )
+    except stripe.error.SignatureVerificationError:
+        return {"error": "Invalid signature"}, 400
+
+    if event['type'] == 'payment_intent.succeeded':
+        intent  = event['data']['object']
+        user_id = intent['metadata']['userId']
+        credits = intent['amount'] // 100
+        # forward result to Credit Orchestrator
+    return {}, 200
+```
+
+### OTP Wrapper
+Keep this thin — two methods only: send (returns SID) and verify (returns True/False).
+This service stores nothing:
+
+```python
+import requests, os
+
+SMU_API_BASE = os.environ['SMU_API_BASE_URL']
+
+def send_otp(phone_number):
+    response = requests.post(f"{SMU_API_BASE}/send", json={"phone": phone_number})
+    response.raise_for_status()
+    return response.json()['sid']
+
+def verify_otp(sid, otp):
+    response = requests.post(f"{SMU_API_BASE}/verify", json={"sid": sid, "otp": otp})
+    response.raise_for_status()
+    return response.json()['valid']
+```
+
+---
+
+## Phase 5 — RabbitMQ Setup
+
+Add to docker-compose.yml using the management image — the UI at port 15672 is very
+useful for debugging queues during development:
+
+```yaml
+rabbitmq:
+  image: rabbitmq:3-management
+  ports:
+    - "5672:5672"
+    - "15672:15672"
+  environment:
+    RABBITMQ_DEFAULT_USER: guest
+    RABBITMQ_DEFAULT_PASS: guest
+  healthcheck:
+    test: ["CMD", "rabbitmq-diagnostics", "ping"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+```
+
+Additional requirements for any service using RabbitMQ:
+
+```
+pika==1.3.2
+```
+
+**Seat Hold TTL Queue with Dead Letter Exchange:**
+
+```python
+import pika, os, json
+
+def setup_queues():
     connection = pika.BlockingConnection(
-        pika.ConnectionParameters(host=RABBITMQ_HOST)
+        pika.URLParameters(os.environ['RABBITMQ_URL'])
     )
     channel = connection.channel()
 
-    def callback(ch, method, properties, body):
+    # DLX exchange and dead letter queue
+    channel.exchange_declare(exchange='seat-hold-dlx',
+                             exchange_type='direct', durable=True)
+    channel.queue_declare(queue='seat-hold-expired', durable=True)
+    channel.queue_bind(queue='seat-hold-expired',
+                       exchange='seat-hold-dlx', routing_key='expired')
+
+    # TTL queue — dead letters route to DLX
+    channel.queue_declare(queue='seat-hold-ttl', durable=True, arguments={
+        'x-dead-letter-exchange': 'seat-hold-dlx',
+        'x-dead-letter-routing-key': 'expired'
+    })
+    connection.close()
+
+def publish_hold_expiry(inventory_id, hold_duration_ms):
+    connection = pika.BlockingConnection(
+        pika.URLParameters(os.environ['RABBITMQ_URL'])
+    )
+    channel = connection.channel()
+    channel.basic_publish(
+        exchange='',
+        routing_key='seat-hold-ttl',
+        body=json.dumps({'inventoryId': inventory_id}),
+        properties=pika.BasicProperties(
+            expiration=str(hold_duration_ms),
+            delivery_mode=2     # persistent
+        )
+    )
+    connection.close()
+```
+
+**DLX consumer (run as background thread in Ticket Purchase Orchestrator):**
+
+```python
+def start_dlx_consumer():
+    connection = pika.BlockingConnection(
+        pika.URLParameters(os.environ['RABBITMQ_URL'])
+    )
+    channel = connection.channel()
+
+    def on_expired(ch, method, properties, body):
         data = json.loads(body)
-        seat_id = data["seat_id"]
-        order_id = data.get("order_id")
+        release_seat_grpc(data['inventoryId'])   # call Seat Inventory gRPC
+        ch.basic_ack(delivery_tag=method.delivery_tag)
 
+    channel.basic_consume(queue='seat-hold-expired',
+                          on_message_callback=on_expired)
+    channel.start_consuming()   # blocks — run in a thread
+```
+
+---
+
+## Phase 6 — Orchestrators
+
+Orchestrators are Flask services that make outbound HTTP calls to atomic services
+instead of talking to a database. Add requests to every orchestrator's requirements:
+
+```
+requests==2.32.3
+PyJWT==2.8.0
+bcrypt==4.1.3
+```
+
+### Internal service call helper
+Centralise outbound calls in a helper that handles timeouts and errors consistently:
+
+```python
+import requests, os
+
+def call_service(method, url, **kwargs):
+    try:
+        response = requests.request(method, url, timeout=5, **kwargs)
+        response.raise_for_status()
+        return response.json(), None
+    except requests.exceptions.Timeout:
+        return None, 'SERVICE_TIMEOUT'
+    except requests.exceptions.HTTPError as e:
+        return None, e.response.json().get('error', {}).get('code', 'SERVICE_ERROR')
+```
+
+### JWT middleware
+Build once in the Auth Orchestrator and copy to every orchestrator that needs auth:
+
+```python
+import jwt, os
+from functools import wraps
+from flask import request, jsonify
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({"error": {"code": "UNAUTHORIZED",
+                                      "message": "Missing token"}}), 401
         try:
-            # Release the seat back to AVAILABLE
-            release_seat(seat_id, db_session_factory)
+            payload = jwt.decode(token, os.environ['JWT_SECRET'], algorithms=['HS256'])
+            request.user = payload
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": {"code": "TOKEN_EXPIRED",
+                                      "message": "Token has expired"}}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": {"code": "UNAUTHORIZED",
+                                      "message": "Invalid token"}}), 401
+        return f(*args, **kwargs)
+    return decorated
 
-            # Update the pending order to FAILED (via HTTP call to Order Service)
-            if order_id:
-                update_order_status(order_id, "FAILED")
-
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info(f"Auto-released seat {seat_id} after TTL expiry")
-
-        except Exception as e:
-            logger.error(f"Failed to release seat {seat_id}: {e}")
-            # Negative ack — message will be redelivered
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(
-        queue="seat.release.queue",
-        on_message_callback=callback
-    )
-
-    logger.info("Seat release consumer started, waiting for messages...")
-    channel.start_consuming()
+def require_staff(f):
+    @wraps(f)
+    @require_auth
+    def decorated(*args, **kwargs):
+        if request.user.get('role') not in ('staff', 'admin'):
+            return jsonify({"error": {"code": "NOT_STAFF",
+                                      "message": "Staff access required"}}), 403
+        return f(*args, **kwargs)
+    return decorated
 ```
 
-**Startup pattern** in the Inventory Service main entry point:
+### 6.1 Auth Orchestrator — build this first
+Establishes the JWT pattern all other orchestrators reuse. Get this solid first.
+
+**Registration — compensate if credit init fails:**
 
 ```python
-# inventory-service/src/main.py
+@bp.route('/auth/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    salt   = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(data['password'].encode(), salt).decode()
+
+    user_data, err = call_service('POST', f"{USER_SERVICE}/users", json={
+        'email': data['email'], 'password': hashed,
+        'salt': salt.decode(), 'phoneNumber': data['phoneNumber']
+    })
+    if err:
+        return jsonify({"error": {"code": err}}), 400
+
+    # Initialise credit balance in OutSystems
+    _, credit_err = call_credit_service('POST', f"/credits",
+                                        json={'userId': user_data['userId']})
+    if credit_err:
+        # compensating action — remove the user we just created
+        call_service('DELETE', f"{USER_SERVICE}/users/{user_data['userId']}")
+        return jsonify({"error": {"code": "REGISTRATION_FAILED"}}), 500
+
+    return jsonify({"success": True, "data": user_data}), 201
+```
+
+**JWT payload — include venueId for staff users:**
+The Ticket Verification Orchestrator reads venueId directly from the JWT to prevent
+spoofing. Set it at login time for staff accounts:
+
+```python
+def generate_token(user, venue_id=None):
+    payload = {
+        'userId': user['userId'],
+        'email': user['email'],
+        'role': user['role'],
+        'exp': datetime.utcnow() + timedelta(hours=24)
+    }
+    if venue_id:
+        payload['venueId'] = venue_id
+    return jwt.encode(payload, os.environ['JWT_SECRET'], algorithm='HS256')
+```
+
+### 6.2 Event Orchestrator — build this second
+The only fully public orchestrator — no JWT middleware. It is read-only and a good smoke
+test that internal HTTP calls between services are working correctly.
+
+### 6.3 Credit Orchestrator
+The Stripe webhook endpoint must not use @require_auth — it is called by Stripe, not
+your frontend. Verify the Stripe signature instead (see Phase 4).
+
+**Calling OutSystems for balance updates:**
+Use `call_credit_service()` for all Credit Service calls. This helper wraps the generic
+`call_service()` and always injects the OutSystems API key header:
+
+```python
+def call_credit_service(method, path, **kwargs):
+    headers = kwargs.pop('headers', {})
+    headers['X-API-Key'] = os.environ['OUTSYSTEMS_API_KEY']
+    return call_service(
+        method,
+        f"{os.environ['CREDIT_SERVICE_URL']}{path}",
+        headers=headers,
+        **kwargs
+    )
+```
+
+The full webhook flow once Stripe confirms payment:
+
+```python
+# 1. Check idempotency — has this payment intent already been processed?
+existing, _ = call_service('GET',
+    f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{payment_intent_id}")
+if existing:
+    return jsonify({"success": True}), 200   # already processed, do nothing
+
+# 2. Get current balance from OutSystems
+credit_data, _ = call_credit_service('GET', f"/credits/{user_id}")
+current_balance = credit_data['creditBalance']
+
+# 3. Update balance in OutSystems (absolute value)
+call_credit_service('PATCH', f"/credits/{user_id}",
+    json={'creditBalance': current_balance + credits})
+
+# 4. Log to Credit Transaction Service
+call_service('POST', f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
+    'userId': user_id,
+    'delta': credits,
+    'reason': 'topup',
+    'referenceId': payment_intent_id
+})
+```
+
+**Idempotency — prevent double crediting:**
+Stripe may deliver the same webhook more than once. The idempotency check in step 1
+above guards against this — always perform it before any balance update.
+
+### 6.4 Ticket Purchase Orchestrator
+Set up the gRPC client using the generated stubs:
+
+```python
+import grpc
+import seat_inventory_pb2
+import seat_inventory_pb2_grpc
+import os
+
+_channel = grpc.insecure_channel(os.environ['SEAT_INVENTORY_GRPC_URL'])
+_stub    = seat_inventory_pb2_grpc.SeatInventoryServiceStub(_channel)
+
+def hold_seat_grpc(inventory_id, user_id, duration_seconds):
+    req = seat_inventory_pb2.HoldSeatRequest(
+        inventory_id=inventory_id,
+        user_id=user_id,
+        hold_duration_seconds=duration_seconds
+    )
+    return _stub.HoldSeat(req)
+```
+
+Start the DLX consumer as a background thread when the orchestrator starts:
+
+```python
+# inside create_app()
 import threading
+from dlx_consumer import start_dlx_consumer
 
-def main():
-    # Start gRPC server
-    grpc_server = create_grpc_server()
-    grpc_server.start()
-
-    # Start RabbitMQ consumer in a separate thread
-    consumer_thread = threading.Thread(
-        target=start_consumer,
-        args=(db_session_factory,),
-        daemon=True
-    )
-    consumer_thread.start()
-
-    grpc_server.wait_for_termination()
+t = threading.Thread(target=start_dlx_consumer, daemon=True)
+t.start()
 ```
 
-### definitions.json
-
-```json
-{
-  "exchanges": [
-    {"name": "seat.hold.exchange",    "type": "direct", "durable": true},
-    {"name": "seat.release.exchange", "type": "direct", "durable": true}
-  ],
-  "queues": [
-    {
-      "name": "seat.hold.queue",
-      "durable": true,
-      "arguments": {
-        "x-message-ttl": 300000,
-        "x-dead-letter-exchange": "seat.release.exchange"
-      }
-    },
-    {"name": "seat.release.queue", "durable": true}
-  ],
-  "bindings": [
-    {"source": "seat.hold.exchange",    "destination": "seat.hold.queue"},
-    {"source": "seat.release.exchange", "destination": "seat.release.queue"}
-  ]
-}
-```
-
----
-
-## 9. External APIs Reference
-
-### SMU Lab Notification API
-
-**Base URL:** `https://smuedu-dev.outsystemsenterprise.com/SMULab_Notification/rest/Notification`
-
-Called exclusively from `user-service/src/services/otp_service.py`. All requests use `Content-Type: application/json`.
-
-**Authentication:** Include the API key in an HTTP header on every request:
-
-```
-X-Contacts-Key: <SMU_API_KEY from env>
-```
-
-#### POST /SendOTP
-
-Triggers an OTP SMS to the user's mobile number via Twilio. Returns a `VerificationSid` which **must** be stored temporarily (e.g., in-memory or Redis) and passed to `/VerifyOTP` to complete verification.
-
-**Request:**
-
-```json
-{ "Mobile": "+6591234567" }
-```
-
-**Response:**
-
-```json
-{
-  "VerificationSid": "VE1234abcd...",
-  "Success": true,
-  "ErrorMessage": ""
-}
-```
-
-> **Note:** SMS content (OTP message template) is managed by the SMU Lab platform — the caller only provides the mobile number. You do **not** specify the OTP text; the platform generates and sends it.
-
-#### POST /VerifyOTP
-
-Verifies an OTP submitted by the user. Requires the `VerificationSid` returned from `/SendOTP`.
-
-**Request:**
-
-```json
-{
-  "VerificationSid": "VE1234abcd...",
-  "Code": "123456"
-}
-```
-
-**Response:**
-
-```json
-{
-  "Success": true,
-  "Status": "approved",
-  "ErrorMessage": ""
-}
-```
-
-| `Status` value | Meaning |
-|---|---|
-| `approved` | OTP is correct — proceed |
-| `pending` | OTP not yet submitted / wrong code |
-| `expired` | OTP TTL exceeded |
-
-#### POST /SendSMS
-
-Send an arbitrary SMS to a mobile number.
-
-**Request:**
-
-```json
-{ "mobile": "+6591234567", "message": "Your ticket transfer has been initiated." }
-```
-
-**Response:**
-
-```json
-{ "status": "queued" }
-```
-
-> **Note:** SMS template content for TicketRemaster notifications (e.g., transfer alerts) is **TBD** — agree on message text with team before implementing.
-
-#### POST /SendEmail
-
-Send an email via SendGrid.
-
-**Request:**
-
-```json
-{
-  "emailAddress": "user@example.com",
-  "emailSubject": "Your TicketRemaster booking",
-  "emailBody": "<h1>Booking confirmed</h1>..."
-}
-```
-
-**Response:**
-
-```json
-{ "status": "sent" }
-```
-
-> **Note:** Email templates for TicketRemaster (booking confirmation, transfer notification, etc.) are **TBD** — agree on content and HTML templates with team before implementing.
-
-#### OTP Flow — Implementation Pattern
+**Credit check against OutSystems:**
+When confirming a purchase, fetch the buyer's balance from OutSystems using
+`call_credit_service()` before deducting. After a successful purchase, update the
+balance in OutSystems with the new absolute value and then log the movement to your
+Credit Transaction Service:
 
 ```python
-# otp_service.py
-import requests
+# Check balance
+credit_data, _ = call_credit_service('GET', f"/credits/{user_id}")
+if credit_data['creditBalance'] < ticket_price:
+    return jsonify({"error": {"code": "INSUFFICIENT_CREDITS"}}), 402
 
-SMU_BASE = os.environ["SMU_API_URL"]  # https://smuedu-dev.outsystemsenterprise.com/SMULab_Notification/rest/Notification
+# Deduct in OutSystems
+call_credit_service('PATCH', f"/credits/{user_id}",
+    json={'creditBalance': credit_data['creditBalance'] - ticket_price})
 
-def send_otp(mobile: str) -> str:
-    """Send OTP and return VerificationSid to store for later verification."""
-    resp = requests.post(f"{SMU_BASE}/SendOTP", json={"Mobile": mobile})
-    resp.raise_for_status()
-    data = resp.json()
-    if not data["Success"]:
-        raise RuntimeError(f"OTP send failed: {data['ErrorMessage']}")
-    return data["VerificationSid"]  # Store this! Required for VerifyOTP.
-
-def verify_otp(verification_sid: str, code: str) -> bool:
-    """Verify OTP code. Returns True on success."""
-    resp = requests.post(f"{SMU_BASE}/VerifyOTP", json={"VerificationSid": verification_sid, "Code": code})
-    resp.raise_for_status()
-    data = resp.json()
-    return data["Success"] and data["Status"] == "approved"
+# Log to Credit Transaction Service
+call_service('POST', f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
+    'userId': user_id,
+    'delta': -ticket_price,
+    'reason': 'ticket_purchase',
+    'referenceId': ticket_id
+})
 ```
 
-> **Storage of VerificationSid:** The `VerificationSid` must survive the round-trip between `/SendOTP` and the later `/VerifyOTP` call. Store it on the transfer/order record in the DB, or in a short-TTL Redis key keyed by `user_id`.
-
-### Stripe API (Credit Top-Up)
-
-Called from `user-service/src/services/credit_service.py`.
-
-| Step | Action |
-|---|---|
-| 1 | User requests top-up → User Svc creates Stripe Payment Intent |
-| 2 | Frontend collects card details via Stripe.js (never touches your backend) |
-| 3 | Stripe sends webhook `POST /api/webhooks/stripe` to User Svc on `payment.succeeded` |
-| 4 | User Svc updates `credit_balance` in `users_db` only after webhook verified |
-
----
-
-## 10. Environment Variables
-
-Copy `.env.example` to `.env` before running.
-
-```env
-# ── Database passwords ──────────────────────────────────────────
-INVENTORY_DB_PASS=change_me
-USER_DB_PASS=change_me
-ORDER_DB_PASS=change_me
-EVENT_DB_PASS=change_me
-
-# ── RabbitMQ ────────────────────────────────────────────────────
-RABBITMQ_HOST=rabbitmq
-RABBITMQ_PORT=5672
-RABBITMQ_USER=guest
-RABBITMQ_PASS=guest
-
-# ── External APIs ───────────────────────────────────────────────
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-SMU_API_URL=https://smunotification.yourlaburl.com
-SMU_API_KEY=your_smu_api_key
-
-# ── Service URLs (used by Orchestrator) ─────────────────────────
-INVENTORY_SERVICE_URL=inventory-service:50051    # gRPC port
-USER_SERVICE_URL=http://user-service:5000
-ORDER_SERVICE_URL=http://order-service:5001
-EVENT_SERVICE_URL=http://event-service:5002
-
-# ── Security ────────────────────────────────────────────────────
-JWT_SECRET=your_jwt_secret_here
-QR_ENCRYPTION_KEY=your_32_byte_key_here
-```
-
----
-
-## 11. Authentication & Authorization
-
-### Why Not Roll Your Own?
-
-Rolling custom JWT authentication from scratch introduces security risks: token validation bugs, missing expiry checks, improper signature verification, and lack of refresh/blocklist support. Use a battle-tested library instead.
-
-### Recommended Library: Flask-JWT-Extended
-
-[Flask-JWT-Extended](https://flask-jwt-extended.readthedocs.io/) handles:
-
-- **JWT creation** — access + refresh tokens with configurable expiry
-- **Token validation** — `@jwt_required()` decorator on protected routes
-- **Custom claims** — embed `user_id`, `role` in the token payload
-- **Token refresh** — secure refresh flow without re-login
-- **Token blocklisting** — for logout / token revocation
+Never hardcode the hold duration — use an environment variable so it can be set to
+10 seconds in test and 10 minutes in production:
 
 ```bash
-pip install flask-jwt-extended
+SEAT_HOLD_DURATION_SECONDS=600   # production
+SEAT_HOLD_DURATION_SECONDS=10    # test
 ```
 
-### JWT Token Structure
 
-```json
-{
-  "sub": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "role": "customer",
-  "iat": 1708300000,
-  "exp": 1708300900,
-  "type": "access"
-}
-```
-
-| Claim | Description |
-|---|---|
-| `sub` | User ID (UUID) — the subject of the token |
-| `role` | `customer` or `staff` — determines API access |
-| `iat` | Issued at (Unix timestamp) |
-| `exp` | Expires at — 15 minutes for access, 7 days for refresh |
-| `type` | `access` or `refresh` |
-
-### Token Lifecycle
-
-```
-User                    User Service                  Kong Gateway
-  │                         │                              │
-  │── POST /auth/login ────→│                              │
-  │                         │── validate credentials       │
-  │                         │── generate access (15min)    │
-  │                         │── generate refresh (7 days)  │
-  │←── {access, refresh} ──│                              │
-  │                         │                              │
-  │── GET /api/events ─────────────────────────────────────→│
-  │                         │                 validate JWT ─│
-  │                         │               extract claims ─│
-  │                         │       forward to Orchestrator ─│
-  │←── events data ────────────────────────────────────────│
-  │                         │                              │
-  │── (access expires)      │                              │
-  │── POST /auth/refresh ──→│                              │
-  │                         │── validate refresh token     │
-  │                         │── issue new access token     │
-  │←── {new access} ───────│                              │
-```
-
-### Kong JWT Plugin
-
-Kong validates JWTs at the gateway level before requests reach the Orchestrator. This offloads auth from service code.
-
-```yaml
-# kong.yml — JWT plugin configuration
-plugins:
-  - name: jwt
-    config:
-      key_claim_name: sub
-      secret_is_base64: false
-```
-
-**Public routes** (no JWT required): `/api/auth/login`, `/api/auth/register`, `/api/webhooks/stripe`
-
-### Role-Based Access
-
-| Role | Endpoints Accessible |
-|---|---|
-| `customer` | Reserve, pay, transfer, view tickets, refresh QR, manage credits |
-| `staff` | QR verification scan (`POST /api/verify`) via OutSystems |
-
-### CORS Configuration
-
-> **Note:** CORS headers are set on the **backend** (API Gateway), not the frontend. The frontend merely makes requests — the server must include the appropriate `Access-Control-Allow-*` headers.
-
-Configure Kong's CORS plugin:
-
-```yaml
-# kong.yml — CORS plugin
-plugins:
-  - name: cors
-    config:
-      origins:
-        - "http://localhost:3000"
-        - "https://yourdomain.com"
-      methods:
-        - GET
-        - POST
-        - PATCH
-        - DELETE
-        - OPTIONS
-      headers:
-        - Authorization
-        - Content-Type
-      credentials: true
-      max_age: 3600
-```
-
----
-
-## 12. Concurrency Handling
-
-TicketRemaster uses a **two-phase locking strategy** — optimistic during browsing, pessimistic during checkout and payment.
-
-### Phase 1 — Selection (Optimistic, No Locks)
-
-Users browse events and view seat maps freely. No database locks are placed during browsing. Seat availability is displayed in near-real-time but is **not guaranteed** until checkout — another user may reserve the same seat between the time it's displayed and checked out.
-
-### Phase 2 — Checkout / Reservation (Pessimistic Locking)
-
-When a user clicks "Checkout" / "Reserve":
-
-1. Orchestrator calls Inventory gRPC `ReserveSeat(seat_id, user_id)`
-2. Inventory executes `SELECT FOR UPDATE NOWAIT` on the seat row
-3. **Lock acquired:** seat status → `HELD`, `held_until = NOW + 5min`, `held_by_user_id` set
-4. **`NOWAIT` fails** (another transaction holds the lock): immediate gRPC error
-   - Orchestrator returns `SEAT_UNAVAILABLE` to client
-   - Client displays "This seat is no longer available. Please select another."
-   - **No compensation needed** — nothing was changed
-
-### Phase 3 — Payment (Strict Pessimistic Locking)
-
-Credit deduction uses a database-level transaction with row-level locking:
-
-```sql
-BEGIN;
-  SELECT credit_balance FROM users WHERE user_id = $1 FOR UPDATE;
-  -- Application checks: balance >= amount
-  UPDATE users SET credit_balance = credit_balance - $2 WHERE user_id = $1;
-COMMIT;
-```
-
-The `FOR UPDATE` lock on the user row prevents two concurrent purchases from double-spending the same credits. If the transaction fails at any point, it rolls back automatically — no partial deduction.
-
-### Phase 4 — Completion
-
-Once payment is confirmed:
-
-- The reservation is converted into a permanent sale (`HELD` → `SOLD`)
-- The pessimistic lock is released (transaction commits)
-- The DLX TTL message is now irrelevant (seat is `SOLD`, not `HELD`)
-
-### Transfer Concurrency
-
-A seller **cannot** initiate two transfers for the same seat:
-
-1. **Database enforcement:** A UNIQUE partial index prevents duplicates:
-
-   ```sql
-   CREATE UNIQUE INDEX idx_one_active_transfer_per_seat
-     ON transfers (seat_id)
-     WHERE status IN ('INITIATED', 'PENDING_OTP');
-   ```
-
-2. **Application check:** Before creating a transfer, the Orchestrator queries for existing active transfers on the seat.
-3. **Frontend:** Disable the transfer button while a transfer is pending.
-4. **Backend fallback:** If a duplicate request reaches the backend (race condition), the unique index causes a constraint violation → return `TRANSFER_IN_PROGRESS`.
-
----
-
-## 13. Logging & Observability
-
-### Structured JSON Logging
-
-All services use Python's `logging` module with **JSON-formatted output** for machine parseability and compatibility with log aggregation tools.
+### 6.5 QR Orchestrator
+The QR_SECRET must be a long random string (32+ characters) stored as an environment
+variable — never hardcode it. Generate one with: python -c "import secrets; print(secrets.token_hex(32))"
 
 ```python
-import json
-import logging
+import hashlib, os
+from datetime import datetime
 
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        log_data = {
-            "timestamp": self.formatTime(record, datefmt="%Y-%m-%dT%H:%M:%S%z"),
-            "level": record.levelname,
-            "service": SERVICE_NAME,
-            "correlation_id": getattr(record, "correlation_id", None),
-            "message": record.getMessage(),
-        }
-        if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_data)
-
-# Usage
-handler = logging.StreamHandler()
-handler.setFormatter(JSONFormatter())
-logger = logging.getLogger(SERVICE_NAME)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+def generate_qr_hash(ticket_id):
+    timestamp = datetime.utcnow().isoformat()
+    raw = f"{ticket_id}|{timestamp}|{os.environ['QR_SECRET']}"
+    return hashlib.sha256(raw.encode()).hexdigest(), timestamp
 ```
 
-### Correlation IDs
+The 60-second TTL is enforced at scan time by the Ticket Verification Orchestrator.
+The QR Orchestrator only generates and stores the hash.
 
-Each incoming request to the Orchestrator generates a unique **correlation ID** (UUID). This ID is:
+### 6.6 Marketplace Orchestrator
+Before creating a listing, check the ticket status is exactly 'active'. Reject anything
+in pending_transfer, listed, used, or expired state:
 
-1. Generated at the API Gateway (Kong) or Orchestrator on request entry
-2. Passed to all downstream service calls:
-   - **REST:** `X-Correlation-ID` HTTP header
-   - **gRPC:** metadata key `correlation-id`
-3. Included in every log line across all services
+```python
+if ticket['status'] != 'active':
+    return jsonify({"error": {"code": "TICKET_NOT_ELIGIBLE",
+                              "message": "Ticket cannot be listed in its current state"}}), 400
+```
 
-This allows **tracing a single user request** across all services for debugging.
+### 6.7 Transfer Orchestrator — most complex in the system
+Build this last among the orchestrators. It has the most steps and requires compensating
+logic if anything fails mid-transfer.
 
-### Log Levels
+**Atomicity of the final transfer step — saga pattern:**
+Since the transfer touches six separate atomic services, a database transaction is not
+available. Compensate in reverse order if any step fails:
 
-| Level | Usage |
-|---|---|
-| `DEBUG` | Detailed internal state (development only, disabled in production) |
-| `INFO` | Request received/sent, business events, state transitions |
-| `WARNING` | Recoverable issues — retries, fallbacks, DLX auto-release |
-| `ERROR` | Failed operations, unhandled exceptions, compensation actions |
-| `CRITICAL` | Service health compromised, database unreachable |
+```python
+def execute_transfer(transfer_id, buyer_id, seller_id,
+                     credit_amount, ticket_id, listing_id,
+                     buyer_balance, seller_balance):
+    completed = []
+    try:
+        # Steps 1-2: update balances in OutSystems
+        call_credit_service('PATCH', f"/credits/{buyer_id}",
+                     json={'creditBalance': buyer_balance - credit_amount})
+        completed.append('buyer_deducted')
 
-### What to Log
+        # Step 2: credit seller in OutSystems
+        call_credit_service('PATCH', f"/credits/{seller_id}",
+                     json={'creditBalance': seller_balance + credit_amount})
+        completed.append('seller_credited')
 
-| Event | Level | Example |
-|---|---|---|
-| Incoming request | INFO | `POST /api/reserve seat_id=abc corr_id=xyz` |
-| Outgoing service call | INFO | `→ Inventory gRPC ReserveSeat seat_id=abc` |
-| Service response | INFO | `← Inventory OK in 12ms` |
-| Business event | INFO | `Seat abc HELD for user def, TTL 5min` |
-| State transition | INFO | `Order o123 status: PENDING → CONFIRMED` |
-| Compensation action | WARNING | `Compensating: refunding 350.00 credits to user def` |
-| DLX auto-release | WARNING | `Auto-released seat abc after TTL expiry` |
-| Unhandled error | ERROR | Full stack trace with correlation ID |
+        # Step 3-4: log both movements to your Credit Transaction Service
+        call_service('POST', f"{CREDIT_TXN_SERVICE}/credit-transactions",
+                     json={'userId': buyer_id, 'delta': -credit_amount,
+                           'reason': 'p2p_sent', 'referenceId': transfer_id})
+        completed.append('buyer_txn_logged')
 
-### Docker Log Aggregation
+        call_service('POST', f"{CREDIT_TXN_SERVICE}/credit-transactions",
+                     json={'userId': seller_id, 'delta': credit_amount,
+                           'reason': 'p2p_received', 'referenceId': transfer_id})
+        completed.append('seller_txn_logged')
 
-All services log to **stdout/stderr**. Docker captures these automatically.
+        # Steps 5-7: update ticket, listing, and transfer state
+        call_service('PATCH', f"{TICKET_SERVICE}/tickets/{ticket_id}",
+                     json={'ownerId': buyer_id, 'status': 'active'})
+        completed.append('ticket_transferred')
 
-```bash
-# Tail logs for a specific service
-docker compose logs -f orchestrator-service
+        call_service('PATCH', f"{MARKETPLACE_SERVICE}/listings/{listing_id}",
+                     json={'status': 'completed'})
 
-# Tail all services
-docker compose logs -f
+        call_service('PATCH', f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
+                     json={'status': 'completed',
+                           'completedAt': datetime.utcnow().isoformat()})
 
-# Search logs for a correlation ID
-docker compose logs | grep "correlation_id.*abc123"
+    except Exception as e:
+        # compensate in reverse order — restore OutSystems balances
+        if 'seller_credited' in completed:
+            call_credit_service('PATCH', f"/credits/{seller_id}",
+                         json={'creditBalance': seller_balance})
+        if 'buyer_deducted' in completed:
+            call_credit_service('PATCH', f"/credits/{buyer_id}",
+                         json={'creditBalance': buyer_balance})
+        call_service('PATCH', f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
+                     json={'status': 'failed'})
+        raise e
+```
+
+**Re-check buyer credits at execution time:**
+The buyer's balance was checked at initiation. They may have spent credits since then.
+Always re-fetch from OutSystems immediately before deducting:
+
+```python
+buyer_credit, _ = call_credit_service('GET', f"/credits/{buyer_id}")
+if buyer_credit['creditBalance'] < credit_amount:
+    return jsonify({"error": {"code": "INSUFFICIENT_CREDITS"}}), 402
+```
+
+**Prevent double execution:**
+Before executing, assert status is still pending_seller_otp and sellerOtpVerified is False:
+
+```python
+if transfer['status'] != 'pending_seller_otp' or transfer['sellerOtpVerified']:
+    return jsonify({"error": {"code": "WRONG_TRANSFER_STATUS"}}), 400
+```
+
+### 6.8 Ticket Verification Orchestrator
+The staff's venueId must come from the JWT — never from the request body. If the
+frontend could pass it, a malicious staff member could verify tickets at any venue.
+
+**Check order — perform in this exact sequence:**
+1. Look up ticket by QR hash
+2. Check QR TTL (60 seconds) — log 'expired' if stale
+3. Validate event is active
+4. Confirm seat status is sold
+5. Confirm ticket status is active
+6. Check for duplicate scan — log 'duplicate' if already checked in
+7. Check venue match — log 'wrong_venue' and return redirect if mismatch
+8. All pass: update ticket to 'used', log 'checked_in'
+
+Putting venue match last ensures expired or used tickets return the correct error rather
+than a confusing venue redirect.
+
+The venueId for the staff member is read from the JWT:
+
+```python
+@bp.route('/verify/scan', methods=['POST'])
+@require_staff
+def scan_ticket():
+    qr_hash        = request.get_json().get('qrHash')
+    staff_venue_id = request.user.get('venueId')   # from JWT, not request body
+    # ...
 ```
 
 ---
 
-## 14. Database Migration & Seeding Strategy
+## Phase 7 — End-to-End Testing
 
-### Strategy: Init SQL Scripts
+Test each scenario as a complete flow using your Postman collection. Do not
+test individual endpoints in isolation here — test the full journey end to end.
 
-Each service has an `init.sql` file in its root directory that:
+**Scenario 2b (hold expiry):**
+Set SEAT_HOLD_DURATION_SECONDS=10 in your test environment so you do not wait 10 minutes.
+Verify the seat status returns to 'available' automatically after 10 seconds.
 
-1. Creates tables using `CREATE TABLE IF NOT EXISTS` — safe to re-run
-2. Seeds test data using `INSERT ... ON CONFLICT DO NOTHING` — idempotent
+**Scenario 3 (P2P transfer):**
+Use two separate user accounts. Step through the full flow manually — initiate as buyer,
+verify OTP as buyer, accept as seller, verify OTP as seller — and confirm credits and
+ticket ownership change correctly at each step.
 
-### Docker Integration
+**Scenario 4 (verification):**
+Get a fresh QR hash, immediately scan it (should succeed). Wait 61 seconds and scan
+again (should return QR_EXPIRED). Scan the original successful hash again (should
+return DUPLICATE_SCAN).
 
-PostgreSQL automatically executes `.sql` files placed in `/docker-entrypoint-initdb.d/` on **first container startup** (when the data volume is empty).
+---
+
+## Phase 8 — Docker & Kubernetes
+
+### Docker Compose checklist before Kompose
+Ensure your docker-compose.yml:
+- Has healthcheck defined for every service and database container
+- Uses named volumes for all PostgreSQL containers
+- Has all inter-service URLs using Docker service names, not localhost
+- Has restart: unless-stopped on all services
+- Has SEAT_HOLD_DURATION_SECONDS as an env var, not hardcoded
+
+### After Kompose — manual fixes required
+
+**1. Secrets**
+Kompose puts env var values as plaintext in Deployment YAML. Move sensitive values to
+Kubernetes Secret objects:
 
 ```yaml
-# In docker-compose.yml — each DB mounts its service's init.sql
-seats-db:
-  volumes:
-    - seats_data:/var/lib/postgresql/data
-    - ./inventory-service/init.sql:/docker-entrypoint-initdb.d/init.sql
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+stringData:
+  JWT_SECRET: "your-secret-here"
+  STRIPE_SECRET_KEY: "sk_live_..."
+  QR_SECRET: "your-qr-secret-here"
+  STRIPE_WEBHOOK_SECRET: "whsec_..."
 ```
 
-### Data Persistence Rules
+Reference in each Deployment:
 
-| Command | Effect on Data |
-|---|---|
-| `docker compose down` | Containers stop. **Data persists** in named volumes. |
-| `docker compose up` | Containers restart. Data is still there. `init.sql` does NOT re-run. |
-| `docker compose down -v` | Containers stop. **Volumes deleted** — clean slate. |
-| `docker compose up` (after `-v`) | Fresh containers. `init.sql` runs, tables created, seed data inserted. |
-
-### Seed Data Requirements
-
-| Database | Seed Data |
-|---|---|
-| events_db | 1 venue (Singapore Indoor Stadium), 1–2 events with pricing tiers |
-| seats_db | 20+ seats per event across rows A–D, all status `AVAILABLE` |
-| users_db | 2 test users: one normal, one with `is_flagged = true`. Both with credit balances. |
-| orders_db | Empty — populated during testing |
-
-### Example Seed (events_db)
-
-```sql
--- event-service/init.sql
-CREATE TABLE IF NOT EXISTS venues (
-    venue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    address TEXT,
-    total_halls INT DEFAULT 1,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS events (
-    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    venue_id UUID REFERENCES venues(venue_id),
-    hall_id VARCHAR(20) NOT NULL,
-    event_date TIMESTAMP NOT NULL,
-    total_seats INT NOT NULL,
-    pricing_tiers JSONB NOT NULL
-);
-
--- Seed data
-INSERT INTO venues (venue_id, name, address, total_halls)
-VALUES ('a0a0a0a0-0000-0000-0000-000000000001', 'Singapore Indoor Stadium', '2 Stadium Walk, Singapore 397691', 3)
-ON CONFLICT DO NOTHING;
-
-INSERT INTO events (event_id, name, venue_id, hall_id, event_date, total_seats, pricing_tiers)
-VALUES (
-    'e0e0e0e0-0000-0000-0000-000000000001',
-    'Taylor Swift Eras Tour SG',
-    'a0a0a0a0-0000-0000-0000-000000000001',
-    'HALL-A',
-    '2026-06-15 19:00:00',
-    5000,
-    '{"CAT1": 350, "CAT2": 200, "CAT3": 120}'
-)
-ON CONFLICT DO NOTHING;
+```yaml
+env:
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: app-secrets
+        key: JWT_SECRET
 ```
 
----
+**2. Health check probes**
+Add to every Deployment:
 
-## 15. Testing Strategy
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 5000
+  initialDelaySeconds: 15
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 5000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
 
-### Tools
+**3. Resource limits**
+Add to every Deployment as a baseline — tune later based on observed usage:
 
-| Tool | Purpose |
-|---|---|
-| `pytest` | Unit and integration tests — run inside Docker containers |
-| Postman | Manual API testing and shared team collection |
-| `curl` | Quick ad-hoc endpoint checks |
-| `k6` | Optional load testing for concurrency scenarios |
+```yaml
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "500m"
+```
 
-### Postman Workspace
+**4. HorizontalPodAutoscaler**
+Add for seat-inventory-service and ticket-purchase-orchestrator:
 
-Maintain a **shared Postman workspace** for the team so everyone can test against the same collection without duplicating curl commands.
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: seat-inventory-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: seat-inventory-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+```
 
-**Setup:**
+**5. Ingress**
+Replace NodePort services on orchestrators with ClusterIP and route all external traffic
+through a single Ingress resource:
 
-1. Create a Postman workspace named `TicketRemaster`
-2. Create a collection per scenario: `Auth`, `Purchase Flow`, `Transfer Flow`, `Verification`
-3. Set a collection-level variable `baseUrl = http://localhost:8000` (local) / production URL
-4. Set a collection-level variable `accessToken` — update it after each `/login` call using a Postman test script:
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ticketremaster-ingress
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-orchestrator
+                port:
+                  number: 5000
+          - path: /events
+            pathType: Prefix
+            backend:
+              service:
+                name: event-orchestrator
+                port:
+                  number: 5000
+          - path: /purchase
+            pathType: Prefix
+            backend:
+              service:
+                name: ticket-purchase-orchestrator
+                port:
+                  number: 5000
+          - path: /credits
+            pathType: Prefix
+            backend:
+              service:
+                name: credit-orchestrator
+                port:
+                  number: 5000
+          - path: /marketplace
+            pathType: Prefix
+            backend:
+              service:
+                name: marketplace-orchestrator
+                port:
+                  number: 5000
+          - path: /transfer
+            pathType: Prefix
+            backend:
+              service:
+                name: transfer-orchestrator
+                port:
+                  number: 5000
+          - path: /tickets
+            pathType: Prefix
+            backend:
+              service:
+                name: qr-orchestrator
+                port:
+                  number: 5000
+          - path: /verify
+            pathType: Prefix
+            backend:
+              service:
+                name: ticket-verification-orchestrator
+                port:
+                  number: 5000
+```
 
-   ```js
-   // In the /auth/login request → Tests tab
-   const json = pm.response.json();
-   pm.collectionVariables.set("accessToken", json.data.access_token);
-   ```
-
-5. All protected requests use `Authorization: Bearer {{accessToken}}`
-6. Export the collection to `postman/TicketRemaster.postman_collection.json` and commit to the repo
-
-### Running Tests Locally
-
-Use `docker compose run` to run tests inside the container for consistency.
+### Testing on Minikube
 
 ```bash
-# Run all tests for a specific service
-docker compose run --rm user-service pytest
-
-# Run tests with coverage report
-docker compose run --rm user-service pytest --cov=src
-
-# Run tests for all services
-docker compose run --rm orchestrator-service pytest
-docker compose run --rm order-service pytest
-docker compose run --rm event-service pytest
-docker compose run --rm inventory-service pytest
+minikube start
+eval $(minikube docker-env)    # point Docker CLI at Minikube's daemon
+docker compose build           # build all images into Minikube's daemon
+kubectl apply -f k8s/          # apply all manifests
+minikube tunnel                # expose Ingress at localhost
 ```
 
-### Manual API Testing
-
-```bash
-# Register a new user
-curl -X POST http://localhost:8000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "password123", "phone": "+6591234567"}'
-
-# Login (save the access_token for subsequent requests)
-curl -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "password123"}'
-```
-
-### End-to-End Scenarios
-
-Refer to `TASKS.md` Phase 9 for a full checklist of scenarios to test manually or automate.
-
----
-
-## 15. Development Guidelines for AI Agents
-
-**Critical Rules for AI Coding Assistants:**
-
-1. **Follow the Plan:** Strictly follow the sequence defined in `TASKS.md`. Do not skip phases unless explicitly instructed.
-2. **No Random Artifacts:** Do **NOT** create random markdown files (e.g., `audit.md`, `plan.md`, `notes.md`) in the source code repository. Keep the repository clean.
-    - If you must create documentation, use the designated artifact system or update existing files like `walkthrough.md`.
-3. **Update TASKS.md:** You **MUST** update `TASKS.md` immediately after completing a task or phase. Mark items as `[x]` to maintain an accurate progress log for the user and future agents.
-4. **Clean Code:** Remove debug prints and temporary comments before finishing a task.
