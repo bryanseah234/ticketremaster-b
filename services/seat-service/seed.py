@@ -1,3 +1,5 @@
+import math
+
 from app import create_app, db
 from models import Seat
 
@@ -7,7 +9,14 @@ def iter_rows_a_to_z():
         yield chr(char_code)
 
 
-def seed_venue(venue_id, max_seat_per_row):
+VENUE_CAPACITIES = {
+    'ven_001': 1800,
+    'ven_002': 12000,
+}
+
+
+def seed_venue(venue_id, capacity):
+    seats_per_row = math.ceil(capacity / 26)
     existing_seat_numbers = {
         seat_number
         for (seat_number,) in db.session.query(Seat.seatNumber)
@@ -16,8 +25,11 @@ def seed_venue(venue_id, max_seat_per_row):
     }
 
     to_create = []
+    created_count = 0
     for row in iter_rows_a_to_z():
-        for seat_index in range(1, max_seat_per_row + 1):
+        for seat_index in range(1, seats_per_row + 1):
+            if created_count >= capacity:
+                break
             seat_number = f'{row}{seat_index}'
             if seat_number in existing_seat_numbers:
                 continue
@@ -28,6 +40,10 @@ def seed_venue(venue_id, max_seat_per_row):
                     rowNumber=row,
                 )
             )
+            created_count += 1
+
+        if created_count >= capacity:
+            break
 
     if to_create:
         db.session.bulk_save_objects(to_create)
@@ -38,12 +54,8 @@ def seed_venue(venue_id, max_seat_per_row):
 app = create_app()
 
 with app.app_context():
-    # ven_001 target capacity is 1800; this deterministic layout seeds 26 x 69 = 1794 seats.
-    created_venue_1 = seed_venue('ven_001', 69)
-
-    # ven_002 target capacity is 12000; for demo/local development we seed 26 x 20 = 520 seats.
-    # Full seeding can scale by increasing per-row seats and adding multi-letter row labels.
-    created_venue_2 = seed_venue('ven_002', 20)
+    created_venue_1 = seed_venue('ven_001', VENUE_CAPACITIES['ven_001'])
+    created_venue_2 = seed_venue('ven_002', VENUE_CAPACITIES['ven_002'])
 
     db.session.commit()
     print(

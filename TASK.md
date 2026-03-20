@@ -36,27 +36,27 @@ Each follows the same pattern: scaffold → model → migrate → routes → see
 - [x] Verify boots cleanly with `docker compose up`
 
 ### 1.2 Venue Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `venues` table migration
-- [ ] Write `seed.py` — seed at least 2 venues with capacity, coordinates, address
-- [ ] Run `seed.py` via `docker compose exec` and verify records exist
-- [ ] Implement `GET /venues` — list all active venues
-- [ ] Implement `GET /venues/<venue_id>` — get by ID
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `venues` table migration
+- [x] Write `seed.py` — seed at least 2 venues with capacity, coordinates, address
+- [x] Run `seed.py` via `docker compose exec` and verify records exist
+- [x] Implement `GET /venues` — list all active venues
+- [x] Implement `GET /venues/<venue_id>` — get by ID
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 1.3 Seat Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `seats` table migration
-- [ ] Write `seed.py` — seed all seats for each seeded venue (rows A–Z, seats 1–N based on venue capacity)
-- [ ] Run `seed.py` and verify seat records exist for all venues
-- [ ] Implement `GET /seats/venue/<venue_id>` — get all seats for a venue
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `seats` table migration
+- [x] Write `seed.py` — seed all seats for each seeded venue (rows A–Z, seats 1–N based on venue capacity)
+- [x] Run `seed.py` and verify seat records exist for all venues
+- [x] Implement `GET /seats/venue/<venue_id>` — get all seats for a venue
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 1.4 Credit Service (OutSystems — external)
 - [ ] Build `POST /credits` endpoint in OutSystems — initialise zero balance record for a new user
@@ -70,15 +70,15 @@ Each follows the same pattern: scaffold → model → migrate → routes → see
 - [ ] Do NOT add Credit Service to `docker-compose.yml` — it is an external OutSystems service
 
 ### 1.5 Credit Transaction Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `credit_txns` table migration
-- [ ] Implement `POST /credit-transactions` — log a credit movement (delta, reason, referenceId)
-- [ ] Implement `GET /credit-transactions/user/<user_id>` — get history (paginated)
-- [ ] Implement `GET /credit-transactions/reference/<reference_id>` — look up by referenceId (for Stripe idempotency check)
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `credit_txns` table migration
+- [x] Implement `POST /credit-transactions` — log a credit movement (delta, reason, referenceId)
+- [x] Implement `GET /credit-transactions/user/<user_id>` — get history (paginated)
+- [x] Implement `GET /credit-transactions/reference/<reference_id>` — look up by referenceId (for Stripe idempotency check)
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ---
 
@@ -174,21 +174,21 @@ Depends on: User Service, Event Service, Venue Service, Seat Inventory Service
 ## Phase 4 — External Wrappers
 
 ### 4.1 Stripe Wrapper
-- [ ] Scaffold service
-- [ ] Add `stripe` to `requirements.txt`
-- [ ] Implement `GET /health`
-- [ ] Implement `POST /stripe/create-payment-intent` — create Payment Intent, attach userId in metadata
-- [ ] Implement `POST /stripe/webhook` — verify Stripe signature, extract userId and credits, forward result
+- [x] Scaffold service
+- [x] Add `stripe` to `requirements.txt`
+- [x] Implement `GET /health`
+- [x] Implement `POST /stripe/create-payment-intent` — create Payment Intent, attach userId in metadata
+- [x] Implement `POST /stripe/webhook` — verify Stripe signature, extract userId and credits, forward result
 - [ ] Test with Stripe CLI: `stripe listen --forward-to localhost:PORT/stripe/webhook`
-- [ ] Verify webhook signature rejection works (send a request without a valid signature)
-- [ ] Add to `docker-compose.yml`
+- [x] Verify webhook signature rejection works (send a request without a valid signature)
+- [x] Add to `docker-compose.yml`
 
 ### 4.2 OTP Wrapper
-- [ ] Scaffold service
-- [ ] Implement `GET /health`
-- [ ] Implement `POST /otp/send` — call SMU Notification API, return SID
-- [ ] Implement `POST /otp/verify` — call SMU Notification API with SID + OTP, return pass/fail
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Implement `GET /health`
+- [x] Implement `POST /otp/send` — call SMU Notification API, return SID
+- [x] Implement `POST /otp/verify` — call SMU Notification API with SID + OTP, return pass/fail
+- [x] Add to `docker-compose.yml`
 
 ---
 
@@ -196,10 +196,10 @@ Depends on: User Service, Event Service, Venue Service, Seat Inventory Service
 
 Depends on: All atomic services running
 
-- [ ] Add RabbitMQ (`rabbitmq:3-management`) to `docker-compose.yml` with ports 5672 and 15672
-- [ ] Add `pika` to `requirements.txt` of any service that publishes or consumes
-- [ ] Write `queue_setup.py` — declares Seat Hold TTL Queue, DLX exchange, dead letter queue, and Seller Notification Queue
-- [ ] Call `queue_setup.py` on startup of Ticket Purchase Orchestrator and Transfer Orchestrator
+- [x] Add RabbitMQ (`rabbitmq:3-management`) to `docker-compose.yml` with ports 5672 and 15672
+- [x] Add `pika` to `requirements.txt` of any service that publishes or consumes
+- [x] Write `queue_setup.py` — declares Seat Hold TTL Queue, DLX exchange, dead letter queue, and Seller Notification Queue
+- [x] Call `queue_setup.py` on startup of Ticket Purchase Orchestrator and Transfer Orchestrator
 - [ ] Verify TTL expiry and DLX routing manually via RabbitMQ management UI (http://localhost:15672)
 - [ ] Verify Seller Notification Queue publishes and consumes correctly
 
