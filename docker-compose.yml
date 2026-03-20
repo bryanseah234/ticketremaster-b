@@ -43,10 +43,32 @@ services:
     volumes:
       - user-service-db-data:/var/lib/postgresql/data
 
+  event-service:
+    <<: *service-defaults
+    build:
+      context: ./services/event-service
+    ports:
+      - "5002:5000"
+    environment:
+      EVENT_SERVICE_DATABASE_URL: ${EVENT_SERVICE_DATABASE_URL}
+    depends_on:
+      event-service-db:
+        condition: service_healthy
+
+  event-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${EVENT_SERVICE_DB_NAME}
+      POSTGRES_USER: ${EVENT_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${EVENT_SERVICE_DB_PASSWORD}
+    volumes:
+      - event-service-db-data:/var/lib/postgresql/data
+
 networks:
   ticketremaster:
     driver: bridge
 
 volumes:
   user-service-db-data:
+  event-service-db-data:
 
