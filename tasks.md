@@ -30,6 +30,7 @@ Each follows the same pattern: scaffold → model → migrate → routes → see
 - [x] Implement `POST /users` - create user (stores pre-hashed password and salt - no bcrypt here)
 - [x] Implement `GET /users/<user_id>` - get by ID
 - [x] Implement `GET /users/by-email/<email>` - get by email
+- [x] Implement `PATCH /users/<user_id>` - partial update (email, password, salt, phoneNumber, role, isFlagged)
 - [x] Write unit tests
 - [x] Add service and its own Postgres container to `docker-compose.yml`
 - [x] Verify boots cleanly with `docker compose up`
