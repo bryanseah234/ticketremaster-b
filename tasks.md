@@ -5,15 +5,15 @@
 
 ## Phase 0 — Project Setup
 
-- [ ] Initialise monorepo folder structure (one folder per service and per orchestrator)
-- [ ] Create `proto/seat_inventory.proto` — shared gRPC contract at repo root
-- [ ] Set up shared `docker-compose.yml` at root level
-- [ ] Set up shared `.env.example` with all environment variable keys
-- [ ] Create a base `Dockerfile` template to reuse across all services
-- [ ] Create a base `requirements.txt` with shared dependencies (flask, flask-sqlalchemy, flask-migrate, psycopg2-binary, python-dotenv, gunicorn)
-- [ ] Set up a shared Postman or Bruno collection for API testing
-- [ ] Initialise a Git repository with a `.gitignore` (include `.env`, `__pycache__`, `*.pyc`, `migrations/`)
-- [ ] Generate gRPC Python stubs from `proto/seat_inventory.proto` using `grpc_tools.protoc` and commit the generated files
+- [x] Initialise monorepo folder structure (one folder per service and per orchestrator)
+- [x] Create `proto/seat_inventory.proto` - shared gRPC contract at repo root
+- [x] Set up shared `docker-compose.yml` at root level
+- [x] Set up shared `.env.example` with all environment variable keys
+- [x] Create a base `Dockerfile` template to reuse across all services
+- [x] Create a base `requirements.txt` with shared dependencies (flask, flask-sqlalchemy, flask-migrate, psycopg2-binary, python-dotenv, gunicorn)
+- [x] Set up a shared Postman collection for API testing
+- [x] Initialise a Git repository with a `.gitignore` (include `.env`, `__pycache__`, `*.pyc`, `migrations/`)
+- [x] Generate gRPC Python stubs from `proto/seat_inventory.proto` using `grpc_tools.protoc` and commit the generated files
 
 ---
 
@@ -23,17 +23,16 @@ These services have no dependencies on other services and can be built first.
 Each follows the same pattern: scaffold → model → migrate → routes → seed → test → docker-compose.
 
 ### 1.1 User Service
-- [ ] Scaffold service (`app.py`, `models.py`, `routes.py`, `requirements.txt`, `Dockerfile`)
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `users` table migration (`flask db init` → `flask db migrate` → `flask db upgrade`)
-- [ ] Implement `POST /users` — create user (stores pre-hashed password and salt — no bcrypt here)
-- [ ] Implement `GET /users/<user_id>` — get by ID
-- [ ] Implement `GET /users/by-email/<email>` — get by email
-- [ ] Implement `PATCH /users/<user_id>` — partial update
-- [ ] Write unit tests
-- [ ] Add service and its own Postgres container to `docker-compose.yml`
-- [ ] Verify boots cleanly with `docker compose up`
+- [x] Scaffold service (`app.py`, `models.py`, `routes.py`, `requirements.txt`, `Dockerfile`)
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `users` table migration (`flask db init` -> `flask db migrate` -> `flask db upgrade`)
+- [x] Implement `POST /users` - create user (stores pre-hashed password and salt - no bcrypt here)
+- [x] Implement `GET /users/<user_id>` - get by ID
+- [x] Implement `GET /users/by-email/<email>` - get by email
+- [x] Write unit tests
+- [x] Add service and its own Postgres container to `docker-compose.yml`
+- [x] Verify boots cleanly with `docker compose up`
 
 ### 1.2 Venue Service
 - [ ] Scaffold service
@@ -340,7 +339,7 @@ Depends on: Ticket Service, Event Service, Seat Inventory Service, Venue Service
 
 ## Phase 7 — End-to-End Testing
 
-Run all tests using your Postman or Bruno collection against the full stack running via `docker compose up`.
+Run all tests using your Postman collection against the full stack running via `docker compose up`.
 
 - [ ] Test Scenario 1: Full credit top-up flow (Stripe test mode — initiate → Stripe UI → webhook → balance updated)
 - [ ] Test Scenario 2: Full ticket purchase flow (browse events → view seat map → hold seat → confirm purchase → ticket created)
@@ -378,3 +377,10 @@ Run all tests using your Postman or Bruno collection against the full stack runn
 - [ ] Change all orchestrator Services from NodePort to ClusterIP
 - [ ] Create `k8s/ingress.yaml` — single Ingress routing /auth, /events, /purchase, /credits, /marketplace, /transfer, /tickets, /verify to their respective orchestrators
 - [ ] Test full stack on Minikube (`minikube start` → `eval $(minikube docker-env)` → `docker compose build` → `kubectl apply -f k8s/` → `minikube tunnel`)
+
+
+
+
+
+
+

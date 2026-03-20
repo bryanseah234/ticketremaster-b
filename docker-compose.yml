@@ -1,0 +1,52 @@
+name: ticketremaster
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  env_file:
+    - .env
+  networks:
+    - ticketremaster
+
+x-postgres-defaults: &postgres-defaults
+  image: postgres:16-alpine
+  restart: unless-stopped
+  env_file:
+    - .env
+  networks:
+    - ticketremaster
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 10s
+
+services:
+  user-service:
+    <<: *service-defaults
+    build:
+      context: ./services/user-service
+    ports:
+      - "5000:5000"
+    environment:
+      USER_SERVICE_DATABASE_URL: ${USER_SERVICE_DATABASE_URL:-postgresql://ticketremaster:change_me@user-service-db:5432/user_service}
+    depends_on:
+      user-service-db:
+        condition: service_healthy
+
+  user-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${USER_SERVICE_DB_NAME:-user_service}
+      POSTGRES_USER: ${USER_SERVICE_DB_USER:-ticketremaster}
+      POSTGRES_PASSWORD: ${USER_SERVICE_DB_PASSWORD:-change_me}
+    volumes:
+      - user-service-db-data:/var/lib/postgresql/data
+
+networks:
+  ticketremaster:
+    driver: bridge
+
+volumes:
+  user-service-db-data:
+
