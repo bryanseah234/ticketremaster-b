@@ -171,6 +171,109 @@ services:
     volumes:
       - transfer-service-db-data:/var/lib/postgresql/data
 
+  venue-service:
+    <<: *service-defaults
+    build:
+      context: ./services/venue-service
+    ports:
+      - "5008:5000"
+    environment:
+      VENUE_SERVICE_DATABASE_URL: ${VENUE_SERVICE_DATABASE_URL}
+    depends_on:
+      venue-service-db:
+        condition: service_healthy
+
+  venue-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${VENUE_SERVICE_DB_NAME}
+      POSTGRES_USER: ${VENUE_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${VENUE_SERVICE_DB_PASSWORD}
+    volumes:
+      - venue-service-db-data:/var/lib/postgresql/data
+
+  seat-service:
+    <<: *service-defaults
+    build:
+      context: ./services/seat-service
+    ports:
+      - "5009:5000"
+    environment:
+      SEAT_SERVICE_DATABASE_URL: ${SEAT_SERVICE_DATABASE_URL}
+    depends_on:
+      seat-service-db:
+        condition: service_healthy
+
+  seat-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${SEAT_SERVICE_DB_NAME}
+      POSTGRES_USER: ${SEAT_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${SEAT_SERVICE_DB_PASSWORD}
+    volumes:
+      - seat-service-db-data:/var/lib/postgresql/data
+
+  credit-transaction-service:
+    <<: *service-defaults
+    build:
+      context: ./services/credit-transaction-service
+    ports:
+      - "5010:5000"
+    environment:
+      CREDIT_TRANSACTION_SERVICE_DATABASE_URL: ${CREDIT_TRANSACTION_SERVICE_DATABASE_URL}
+    depends_on:
+      credit-transaction-service-db:
+        condition: service_healthy
+
+  credit-transaction-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${CREDIT_TRANSACTION_SERVICE_DB_NAME}
+      POSTGRES_USER: ${CREDIT_TRANSACTION_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${CREDIT_TRANSACTION_SERVICE_DB_PASSWORD}
+    volumes:
+      - credit-transaction-service-db-data:/var/lib/postgresql/data
+
+  stripe-wrapper:
+    <<: *service-defaults
+    build:
+      context: ./services/stripe-wrapper
+    ports:
+      - "5011:5000"
+    environment:
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+
+  otp-wrapper:
+    <<: *service-defaults
+    build:
+      context: ./services/otp-wrapper
+    ports:
+      - "5012:5000"
+    environment:
+      SMU_API_URL: ${SMU_API_URL}
+      SMU_API_KEY: ${SMU_API_KEY}
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    networks:
+      - ticketremaster
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
 networks:
   ticketremaster:
     driver: bridge
@@ -183,4 +286,8 @@ volumes:
   ticket-log-service-db-data:
   marketplace-service-db-data:
   transfer-service-db-data:
+  venue-service-db-data:
+  seat-service-db-data:
+  credit-transaction-service-db-data:
+  rabbitmq-data:
 
