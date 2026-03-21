@@ -36,27 +36,27 @@ Each follows the same pattern: scaffold → model → migrate → routes → see
 - [x] Verify boots cleanly with `docker compose up`
 
 ### 1.2 Venue Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `venues` table migration
-- [ ] Write `seed.py` — seed at least 2 venues with capacity, coordinates, address
-- [ ] Run `seed.py` via `docker compose exec` and verify records exist
-- [ ] Implement `GET /venues` — list all active venues
-- [ ] Implement `GET /venues/<venue_id>` — get by ID
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `venues` table migration
+- [x] Write `seed.py` — seed at least 2 venues with capacity, coordinates, address
+- [x] Run `seed.py` via `docker compose exec` and verify records exist
+- [x] Implement `GET /venues` — list all active venues
+- [x] Implement `GET /venues/<venue_id>` — get by ID
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 1.3 Seat Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `seats` table migration
-- [ ] Write `seed.py` — seed all seats for each seeded venue (rows A–Z, seats 1–N based on venue capacity)
-- [ ] Run `seed.py` and verify seat records exist for all venues
-- [ ] Implement `GET /seats/venue/<venue_id>` — get all seats for a venue
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `seats` table migration
+- [x] Write `seed.py` — seed all seats for each seeded venue (rows A–Z, seats 1–N based on venue capacity)
+- [x] Run `seed.py` and verify seat records exist for all venues
+- [x] Implement `GET /seats/venue/<venue_id>` — get all seats for a venue
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 1.4 Credit Service (OutSystems — external)
 - [ ] Build `POST /credits` endpoint in OutSystems — initialise zero balance record for a new user
@@ -70,15 +70,15 @@ Each follows the same pattern: scaffold → model → migrate → routes → see
 - [ ] Do NOT add Credit Service to `docker-compose.yml` — it is an external OutSystems service
 
 ### 1.5 Credit Transaction Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `credit_txns` table migration
-- [ ] Implement `POST /credit-transactions` — log a credit movement (delta, reason, referenceId)
-- [ ] Implement `GET /credit-transactions/user/<user_id>` — get history (paginated)
-- [ ] Implement `GET /credit-transactions/reference/<reference_id>` — look up by referenceId (for Stripe idempotency check)
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `credit_txns` table migration
+- [x] Implement `POST /credit-transactions` — log a credit movement (delta, reason, referenceId)
+- [x] Implement `GET /credit-transactions/user/<user_id>` — get history (paginated)
+- [x] Implement `GET /credit-transactions/reference/<reference_id>` — look up by referenceId (for Stripe idempotency check)
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ---
 
@@ -87,35 +87,35 @@ Each follows the same pattern: scaffold → model → migrate → routes → see
 Depends on: Venue Service, Seat Service (seeded data must exist)
 
 ### 2.1 Event Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `events` table migration
-- [ ] Write `seed.py` — seed at least 2 events pointing to seeded venues
-- [ ] Run `seed.py` and verify event records exist
-- [ ] Implement `GET /events` — list all events
-- [ ] Implement `GET /events/<event_id>` — get by ID
-- [ ] Implement `POST /events` — create event (admin only)
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `events` table migration
+- [x] Write `seed.py` — seed at least 2 events pointing to seeded venues
+- [x] Run `seed.py` and verify event records exist
+- [x] Implement `GET /events` — list all events
+- [x] Implement `GET /events/<event_id>` — get by ID
+- [x] Implement `POST /events` — create event (admin only)
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 2.2 Seat Inventory Service
-- [ ] Scaffold service (`app.py`, `models.py`, `routes.py`, `grpc_server.py`, `server.py`, `requirements.txt`, `Dockerfile`)
-- [ ] Add `grpcio` and `grpcio-tools` to `requirements.txt`
-- [ ] Copy generated gRPC stubs (`seat_inventory_pb2.py`, `seat_inventory_pb2_grpc.py`) into this service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `seat_inventory` table migration
-- [ ] Write `seed.py` — create one inventory record per seat per event (status: available)
-- [ ] Run `seed.py` and verify inventory records exist
-- [ ] Implement gRPC `HoldSeat` — with `SELECT FOR UPDATE` pessimistic lock
-- [ ] Implement gRPC `ReleaseSeat`
-- [ ] Implement gRPC `SellSeat`
-- [ ] Implement gRPC `GetSeatStatus`
-- [ ] Implement `GET /inventory/event/<event_id>` — seat map (REST)
-- [ ] Implement `server.py` — starts gRPC server (port 50051) and Flask REST server (port 5000) in parallel threads
-- [ ] Write unit tests including concurrent hold race condition test (two simultaneous HoldSeat requests for same seat — assert only one succeeds)
-- [ ] Add to `docker-compose.yml` exposing both ports 5000 and 50051
+- [x] Scaffold service (`app.py`, `models.py`, `routes.py`, `grpc_server.py`, `server.py`, `requirements.txt`, `Dockerfile`)
+- [x] Add `grpcio` and `grpcio-tools` to `requirements.txt`
+- [x] Copy generated gRPC stubs (`seat_inventory_pb2.py`, `seat_inventory_pb2_grpc.py`) into this service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `seat_inventory` table migration
+- [x] Write `seed.py` — create one inventory record per seat per event (status: available)
+- [x] Run `seed.py` and verify inventory records exist
+- [x] Implement gRPC `HoldSeat` — with `SELECT FOR UPDATE` pessimistic lock
+- [x] Implement gRPC `ReleaseSeat`
+- [x] Implement gRPC `SellSeat`
+- [x] Implement gRPC `GetSeatStatus`
+- [x] Implement `GET /inventory/event/<event_id>` — seat map (REST)
+- [x] Implement `server.py` — starts gRPC server (port 50051) and Flask REST server (port 5000) in parallel threads
+- [x] Write unit tests including concurrent hold race condition test (two simultaneous HoldSeat requests for same seat — assert only one succeeds)
+- [x] Add to `docker-compose.yml` exposing both ports 5000 and 50051
 
 ---
 
@@ -124,71 +124,71 @@ Depends on: Venue Service, Seat Service (seeded data must exist)
 Depends on: User Service, Event Service, Venue Service, Seat Inventory Service
 
 ### 3.1 Ticket Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `tickets` table migration
-- [ ] Implement `POST /tickets` — create ticket record (generates initial qrHash placeholder)
-- [ ] Implement `GET /tickets/<ticket_id>` — get by ID
-- [ ] Implement `GET /tickets/owner/<owner_id>` — get all tickets by owner
-- [ ] Implement `GET /tickets/qr/<qr_hash>` — look up by QR hash
-- [ ] Implement `PATCH /tickets/<ticket_id>` — partial update (status, ownerId, qrHash, qrTimestamp)
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `tickets` table migration
+- [x] Implement `POST /tickets` — create ticket record (generates initial qrHash placeholder)
+- [x] Implement `GET /tickets/<ticket_id>` — get by ID
+- [x] Implement `GET /tickets/owner/<owner_id>` — get all tickets by owner
+- [x] Implement `GET /tickets/qr/<qr_hash>` — look up by QR hash
+- [x] Implement `PATCH /tickets/<ticket_id>` — partial update (status, ownerId, qrHash, qrTimestamp)
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 3.2 Ticket Log Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `ticket_logs` table migration
-- [ ] Implement `POST /ticket-logs` — create scan log entry
-- [ ] Implement `GET /ticket-logs/ticket/<ticket_id>` — get all scan logs for a ticket
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `ticket_logs` table migration
+- [x] Implement `POST /ticket-logs` — create scan log entry
+- [x] Implement `GET /ticket-logs/ticket/<ticket_id>` — get all scan logs for a ticket
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 3.3 Marketplace Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `listings` table migration
-- [ ] Implement `POST /listings` — create listing (status: active)
-- [ ] Implement `GET /listings` — get all active listings
-- [ ] Implement `GET /listings/<listing_id>` — get by ID
-- [ ] Implement `PATCH /listings/<listing_id>` — update status (active / completed / cancelled)
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `listings` table migration
+- [x] Implement `POST /listings` — create listing (status: active)
+- [x] Implement `GET /listings` — get all active listings
+- [x] Implement `GET /listings/<listing_id>` — get by ID
+- [x] Implement `PATCH /listings/<listing_id>` — update status (active / completed / cancelled)
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ### 3.4 Transfer Service
-- [ ] Scaffold service
-- [ ] Set up Flask app factory with SQLAlchemy and Flask-Migrate
-- [ ] Implement `GET /health`
-- [ ] Create `transfers` table migration
-- [ ] Implement `POST /transfers` — create transfer record
-- [ ] Implement `GET /transfers/<transfer_id>` — get by ID
-- [ ] Implement `PATCH /transfers/<transfer_id>` — update fields (status, OTP flags, SIDs, completedAt)
-- [ ] Write unit tests
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Set up Flask app factory with SQLAlchemy and Flask-Migrate
+- [x] Implement `GET /health`
+- [x] Create `transfers` table migration
+- [x] Implement `POST /transfers` — create transfer record
+- [x] Implement `GET /transfers/<transfer_id>` — get by ID
+- [x] Implement `PATCH /transfers/<transfer_id>` — update fields (status, OTP flags, SIDs, completedAt)
+- [x] Write unit tests
+- [x] Add to `docker-compose.yml`
 
 ---
 
 ## Phase 4 — External Wrappers
 
 ### 4.1 Stripe Wrapper
-- [ ] Scaffold service
-- [ ] Add `stripe` to `requirements.txt`
-- [ ] Implement `GET /health`
-- [ ] Implement `POST /stripe/create-payment-intent` — create Payment Intent, attach userId in metadata
-- [ ] Implement `POST /stripe/webhook` — verify Stripe signature, extract userId and credits, forward result
+- [x] Scaffold service
+- [x] Add `stripe` to `requirements.txt`
+- [x] Implement `GET /health`
+- [x] Implement `POST /stripe/create-payment-intent` — create Payment Intent, attach userId in metadata
+- [x] Implement `POST /stripe/webhook` — verify Stripe signature, extract userId and credits, forward result
 - [ ] Test with Stripe CLI: `stripe listen --forward-to localhost:PORT/stripe/webhook`
-- [ ] Verify webhook signature rejection works (send a request without a valid signature)
-- [ ] Add to `docker-compose.yml`
+- [x] Verify webhook signature rejection works (send a request without a valid signature)
+- [x] Add to `docker-compose.yml`
 
 ### 4.2 OTP Wrapper
-- [ ] Scaffold service
-- [ ] Implement `GET /health`
-- [ ] Implement `POST /otp/send` — call SMU Notification API, return SID
-- [ ] Implement `POST /otp/verify` — call SMU Notification API with SID + OTP, return pass/fail
-- [ ] Add to `docker-compose.yml`
+- [x] Scaffold service
+- [x] Implement `GET /health`
+- [x] Implement `POST /otp/send` — call SMU Notification API, return SID
+- [x] Implement `POST /otp/verify` — call SMU Notification API with SID + OTP, return pass/fail
+- [x] Add to `docker-compose.yml`
 
 ---
 
@@ -196,12 +196,12 @@ Depends on: User Service, Event Service, Venue Service, Seat Inventory Service
 
 Depends on: All atomic services running
 
-- [ ] Add RabbitMQ (`rabbitmq:3-management`) to `docker-compose.yml` with ports 5672 and 15672
-- [ ] Add `pika` to `requirements.txt` of any service that publishes or consumes
-- [ ] Write `queue_setup.py` — declares Seat Hold TTL Queue, DLX exchange, dead letter queue, and Seller Notification Queue
-- [ ] Call `queue_setup.py` on startup of Ticket Purchase Orchestrator and Transfer Orchestrator
-- [ ] Verify TTL expiry and DLX routing manually via RabbitMQ management UI (http://localhost:15672)
-- [ ] Verify Seller Notification Queue publishes and consumes correctly
+- [x] Add RabbitMQ (`rabbitmq:3-management`) to `docker-compose.yml` with ports 5672 and 15672
+- [x] Add `pika` to `requirements.txt` of any service that publishes or consumes
+- [x] Write `queue_setup.py` — declares Seat Hold TTL Queue, DLX exchange, dead letter queue, and Seller Notification Queue
+- [x] Call `queue_setup.py` on startup of Ticket Purchase Orchestrator and Transfer Orchestrator
+- [x] Verify TTL expiry and DLX routing manually via RabbitMQ management UI (http://localhost:15672)
+- [x] Verify Seller Notification Queue publishes and consumes correctly
 
 ---
 
