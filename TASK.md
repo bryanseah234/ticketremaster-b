@@ -95,7 +95,7 @@ Depends on: Venue Service, Seat Service (seeded data must exist)
 - [x] Run `seed.py` and verify event records exist
 - [x] Implement `GET /events` — list all events
 - [x] Implement `GET /events/<event_id>` — get by ID
-- [ ] Implement `POST /events` — create event (admin only)
+- [x] Implement `POST /events` — create event (admin only)
 - [x] Write unit tests
 - [x] Add to `docker-compose.yml`
 
@@ -200,8 +200,8 @@ Depends on: All atomic services running
 - [x] Add `pika` to `requirements.txt` of any service that publishes or consumes
 - [x] Write `queue_setup.py` — declares Seat Hold TTL Queue, DLX exchange, dead letter queue, and Seller Notification Queue
 - [x] Call `queue_setup.py` on startup of Ticket Purchase Orchestrator and Transfer Orchestrator
-- [ ] Verify TTL expiry and DLX routing manually via RabbitMQ management UI (http://localhost:15672)
-- [ ] Verify Seller Notification Queue publishes and consumes correctly
+- [x] Verify TTL expiry and DLX routing manually via RabbitMQ management UI (http://localhost:15672)
+- [x] Verify Seller Notification Queue publishes and consumes correctly
 
 ---
 
