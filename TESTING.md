@@ -70,11 +70,26 @@ Recommended order:
 12. `11 Stripe Wrapper`
 13. `12 OTP Wrapper`
 14. `13 RabbitMQ (Phase 5 Checks)`
+15. `14 OutSystems Credit Service (Phase 1.4 External)`
 
 What “correct” looks like:
 - Most create/update calls return **200/201** and a JSON object containing a generated ID (`userId`, `eventId`, `ticketId`, `listingId`, `transferId`, etc.).
 - GET-by-ID calls return **200** and the same ID you just created.
 - Request chaining works when environment values are populated after prior requests.
+
+### Run with Postman CLI (recommended for repeatable checks)
+
+From repo root:
+
+```powershell
+postman collection run .\postman\TicketRemaster.postman_collection.json -e .\postman\TicketRemaster.local.postman_environment.json --reporters cli
+```
+
+If you want to stop on first failure:
+
+```powershell
+postman collection run .\postman\TicketRemaster.postman_collection.json -e .\postman\TicketRemaster.local.postman_environment.json --bail failure --reporters cli
+```
 
 ## 5) External service validation
 
@@ -184,15 +199,15 @@ If `SMU_API_KEY` or `SMU_API_URL` is wrong, expected wrapper behavior:
   - `OTP_SEND_FAILED` for `/otp/send`
   - `OTP_VERIFY_FAILED` for `/otp/verify`
 
-## 5.3 Phase 1.4 OutSystems Credit Service (external, manual Postman folder)
+## 5.3 Phase 1.4 OutSystems Credit Service (external, included in shared Postman collection)
 
-The shared collection does not include 1.4 requests yet. Create a local Postman folder named **OutSystems Credit Service** with these requests.
+The shared collection already includes folder **14 OutSystems Credit Service (Phase 1.4 External)**.
 
 Before testing, add environment variables:
 - `credit_service_url` = your OutSystems base URL (same value as `.env` `CREDIT_SERVICE_URL`)
 - `outsystems_api_key` = your OutSystems key (same value as `.env` `OUTSYSTEMS_API_KEY`)
 
-Add header to all 3 requests:
+Headers already configured in collection:
 - `X-API-Key: {{outsystems_api_key}}`
 - `Content-Type: application/json`
 
@@ -260,3 +275,47 @@ docker compose up -d --build
 ```
 
 Use reset only when you intentionally want a fresh database state.
+
+## 8) Troubleshooting JSONError / HTML 500 responses
+
+Symptom seen in Postman or Postman CLI:
+
+```text
+JSONError: Unexpected token '<' at 1:1
+<!doctype html>
+```
+
+This means the endpoint returned HTML instead of JSON, usually from an unhandled server exception.
+
+Expected error format from TicketRemaster services:
+
+```json
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "Unhandled internal server error.",
+    "status": 500,
+    "traceId": "f3a6f8ea-....",
+    "details": {
+      "method": "POST",
+      "path": "/stripe/webhook",
+      "timestamp": "2026-03-21T...",
+      "resolution": "Check error.code, request payload, and service logs using traceId.",
+      "exceptionType": "ValueError",
+      "exceptionMessage": "...",
+      "stackTrace": ["Traceback ..."]
+    }
+  }
+}
+```
+
+When a request fails:
+- Copy `error.traceId`.
+- Check service logs:
+
+```powershell
+docker compose logs --no-color --tail=200 <service-name>
+```
+
+- Match the failing route using `details.path` and `details.method`.
+- Apply `details.resolution`, then re-run the specific folder/request before running the full collection.
