@@ -1,233 +1,293 @@
+name: ticketremaster
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  env_file:
+    - .env
+  networks:
+    - ticketremaster
+
+x-postgres-defaults: &postgres-defaults
+  image: postgres:18-alpine
+  restart: unless-stopped
+  env_file:
+    - .env
+  networks:
+    - ticketremaster
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 10s
+
 services:
-
-  # ── Databases ──────────────────────────────────────────────
-  seats-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: seats_db
-      POSTGRES_USER: inventory_user
-      POSTGRES_PASSWORD: ${INVENTORY_DB_PASS}
-    ports:
-      - "5433:5432"
-    volumes:
-      - seats_db_data:/var/lib/postgresql/data
-      - ./inventory-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U inventory_user -d seats_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  users-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: users_db
-      POSTGRES_USER: user_svc_user
-      POSTGRES_PASSWORD: ${USER_DB_PASS}
-    ports:
-      - "5434:5432"
-    volumes:
-      - users_db_data:/var/lib/postgresql/data
-      - ./user-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user_svc_user -d users_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  orders-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: orders_db
-      POSTGRES_USER: order_svc_user
-      POSTGRES_PASSWORD: ${ORDER_DB_PASS}
-    ports:
-      - "5435:5432"
-    volumes:
-      - orders_db_data:/var/lib/postgresql/data
-      - ./order-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U order_svc_user -d orders_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  events-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: events_db
-      POSTGRES_USER: event_svc_user
-      POSTGRES_PASSWORD: ${EVENT_DB_PASS}
-    ports:
-      - "5436:5432"
-    volumes:
-      - events_db_data:/var/lib/postgresql/data
-      - ./event-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U event_svc_user -d events_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # ── Messaging ──────────────────────────────────────────────
-  rabbitmq:
-    build: ./rabbitmq
-    hostname: rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    # environment:
-    #   RABBITMQ_DEFAULT_USER: guest
-    #   RABBITMQ_DEFAULT_PASS: guest
-
-    volumes:
-      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
-      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
-  # ── Microservices ───────────────────────────────────────────
-  inventory-service:
-    build: ./inventory-service
-    depends_on:
-      seats-db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      DB_HOST: seats-db
-      DB_NAME: seats_db
-      DB_USER: inventory_user
-      DB_PASS: ${INVENTORY_DB_PASS}
-      RABBITMQ_HOST: rabbitmq
-      ORDER_SERVICE_URL: http://order-service:5001
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 45s
-
   user-service:
-    build: ./user-service
-    depends_on:
-      users-db:
-        condition: service_healthy
+    <<: *service-defaults
+    build:
+      context: ./services/user-service
     ports:
       - "5000:5000"
     environment:
-      DB_HOST: users-db
-      DB_NAME: users_db
-      DB_USER: user_svc_user
-      DB_PASS: ${USER_DB_PASS}
-      STRIPE_KEY: ${STRIPE_SECRET_KEY}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-      SMU_API_URL: ${SMU_API_URL}
-      SMU_API_KEY: ${SMU_API_KEY}
-      JWT_SECRET: ${JWT_SECRET}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-  order-service:
-    build: ./order-service
-    ports:
-      - "5001:5001"
+      USER_SERVICE_DATABASE_URL: ${USER_SERVICE_DATABASE_URL:-postgresql://ticketremaster:change_me@user-service-db:5432/user_service}
     depends_on:
-      orders-db:
+      user-service-db:
         condition: service_healthy
+
+  user-service-db:
+    <<: *postgres-defaults
     environment:
-      ORDER_DB_PASS: ${ORDER_DB_PASS}
-      ORDER_DB_HOST: orders-db
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      POSTGRES_DB: ${USER_SERVICE_DB_NAME:-user_service}
+      POSTGRES_USER: ${USER_SERVICE_DB_USER:-ticketremaster}
+      POSTGRES_PASSWORD: ${USER_SERVICE_DB_PASSWORD:-change_me}
+    volumes:
+      - user-service-db-data:/var/lib/postgresql/data
 
   event-service:
-    build: ./event-service
-    depends_on:
-      events-db:
-        condition: service_healthy
+    <<: *service-defaults
+    build:
+      context: ./services/event-service
     ports:
-      - "5002:5002"
+      - "5002:5000"
     environment:
-      DB_HOST: events-db
-      DB_NAME: events_db
-      DB_USER: event_svc_user
-      DB_PASS: ${EVENT_DB_PASS}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-  orchestrator-service:
-    build: ./orchestrator-service
+      EVENT_SERVICE_DATABASE_URL: ${EVENT_SERVICE_DATABASE_URL}
     depends_on:
-      inventory-service:
+      event-service-db:
         condition: service_healthy
-      user-service:
-        condition: service_healthy
-      order-service:
-        condition: service_healthy
-      event-service:
-        condition: service_healthy
-    environment:
-      INVENTORY_SERVICE_URL: inventory-service:50051
-      USER_SERVICE_URL: http://user-service:5000
-      ORDER_SERVICE_URL: http://order-service:5001
-      EVENT_SERVICE_URL: http://event-service:5002
-      RABBITMQ_HOST: rabbitmq
-      JWT_SECRET: ${JWT_SECRET}
-      QR_ENCRYPTION_KEY: ${QR_ENCRYPTION_KEY}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
 
-  api-gateway:
-    image: kong:latest
-    depends_on:
-      orchestrator-service:
-        condition: service_healthy
-    ports:
-      - "8000:8000"
-      - "8001:8001"
+  event-service-db:
+    <<: *postgres-defaults
     environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      POSTGRES_DB: ${EVENT_SERVICE_DB_NAME}
+      POSTGRES_USER: ${EVENT_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${EVENT_SERVICE_DB_PASSWORD}
     volumes:
-      - ./api-gateway/kong.yml:/etc/kong/kong.yml
+      - event-service-db-data:/var/lib/postgresql/data
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
+  seat-inventory-service:
+    <<: *service-defaults
+    build:
+      context: ./services/seat-inventory-service
+    ports:
+      - "5003:5000"
+      - "50051:50051"
+    environment:
+      SEAT_INVENTORY_SERVICE_DATABASE_URL: ${SEAT_INVENTORY_SERVICE_DATABASE_URL}
+      SEAT_INVENTORY_GRPC_PORT: ${SEAT_INVENTORY_GRPC_PORT:-50051}
     depends_on:
-      - api-gateway
-    command: ["tunnel", "--no-autoupdate", "run", "--protocol", "http2", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+      seat-inventory-service-db:
+        condition: service_healthy
+
+  seat-inventory-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${SEAT_INVENTORY_SERVICE_DB_NAME}
+      POSTGRES_USER: ${SEAT_INVENTORY_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${SEAT_INVENTORY_SERVICE_DB_PASSWORD}
+    volumes:
+      - seat-inventory-service-db-data:/var/lib/postgresql/data
+
+  ticket-service:
+    <<: *service-defaults
+    build:
+      context: ./services/ticket-service
+    ports:
+      - "5004:5000"
+    environment:
+      TICKET_SERVICE_DATABASE_URL: ${TICKET_SERVICE_DATABASE_URL}
+    depends_on:
+      ticket-service-db:
+        condition: service_healthy
+
+  ticket-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${TICKET_SERVICE_DB_NAME}
+      POSTGRES_USER: ${TICKET_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${TICKET_SERVICE_DB_PASSWORD}
+    volumes:
+      - ticket-service-db-data:/var/lib/postgresql/data
+
+  ticket-log-service:
+    <<: *service-defaults
+    build:
+      context: ./services/ticket-log-service
+    ports:
+      - "5005:5000"
+    environment:
+      TICKET_LOG_SERVICE_DATABASE_URL: ${TICKET_LOG_SERVICE_DATABASE_URL}
+    depends_on:
+      ticket-log-service-db:
+        condition: service_healthy
+
+  ticket-log-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${TICKET_LOG_SERVICE_DB_NAME}
+      POSTGRES_USER: ${TICKET_LOG_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${TICKET_LOG_SERVICE_DB_PASSWORD}
+    volumes:
+      - ticket-log-service-db-data:/var/lib/postgresql/data
+
+  marketplace-service:
+    <<: *service-defaults
+    build:
+      context: ./services/marketplace-service
+    ports:
+      - "5006:5000"
+    environment:
+      MARKETPLACE_SERVICE_DATABASE_URL: ${MARKETPLACE_SERVICE_DATABASE_URL}
+    depends_on:
+      marketplace-service-db:
+        condition: service_healthy
+
+  marketplace-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${MARKETPLACE_SERVICE_DB_NAME}
+      POSTGRES_USER: ${MARKETPLACE_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${MARKETPLACE_SERVICE_DB_PASSWORD}
+    volumes:
+      - marketplace-service-db-data:/var/lib/postgresql/data
+
+  transfer-service:
+    <<: *service-defaults
+    build:
+      context: ./services/transfer-service
+    ports:
+      - "5007:5000"
+    environment:
+      TRANSFER_SERVICE_DATABASE_URL: ${TRANSFER_SERVICE_DATABASE_URL}
+    depends_on:
+      transfer-service-db:
+        condition: service_healthy
+
+  transfer-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${TRANSFER_SERVICE_DB_NAME}
+      POSTGRES_USER: ${TRANSFER_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${TRANSFER_SERVICE_DB_PASSWORD}
+    volumes:
+      - transfer-service-db-data:/var/lib/postgresql/data
+
+  venue-service:
+    <<: *service-defaults
+    build:
+      context: ./services/venue-service
+    ports:
+      - "5008:5000"
+    environment:
+      VENUE_SERVICE_DATABASE_URL: ${VENUE_SERVICE_DATABASE_URL}
+    depends_on:
+      venue-service-db:
+        condition: service_healthy
+
+  venue-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${VENUE_SERVICE_DB_NAME}
+      POSTGRES_USER: ${VENUE_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${VENUE_SERVICE_DB_PASSWORD}
+    volumes:
+      - venue-service-db-data:/var/lib/postgresql/data
+
+  seat-service:
+    <<: *service-defaults
+    build:
+      context: ./services/seat-service
+    ports:
+      - "5009:5000"
+    environment:
+      SEAT_SERVICE_DATABASE_URL: ${SEAT_SERVICE_DATABASE_URL}
+    depends_on:
+      seat-service-db:
+        condition: service_healthy
+
+  seat-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${SEAT_SERVICE_DB_NAME}
+      POSTGRES_USER: ${SEAT_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${SEAT_SERVICE_DB_PASSWORD}
+    volumes:
+      - seat-service-db-data:/var/lib/postgresql/data
+
+  credit-transaction-service:
+    <<: *service-defaults
+    build:
+      context: ./services/credit-transaction-service
+    ports:
+      - "5010:5000"
+    environment:
+      CREDIT_TRANSACTION_SERVICE_DATABASE_URL: ${CREDIT_TRANSACTION_SERVICE_DATABASE_URL}
+    depends_on:
+      credit-transaction-service-db:
+        condition: service_healthy
+
+  credit-transaction-service-db:
+    <<: *postgres-defaults
+    environment:
+      POSTGRES_DB: ${CREDIT_TRANSACTION_SERVICE_DB_NAME}
+      POSTGRES_USER: ${CREDIT_TRANSACTION_SERVICE_DB_USER}
+      POSTGRES_PASSWORD: ${CREDIT_TRANSACTION_SERVICE_DB_PASSWORD}
+    volumes:
+      - credit-transaction-service-db-data:/var/lib/postgresql/data
+
+  stripe-wrapper:
+    <<: *service-defaults
+    build:
+      context: ./services/stripe-wrapper
+    ports:
+      - "5011:5000"
+    environment:
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+
+  otp-wrapper:
+    <<: *service-defaults
+    build:
+      context: ./services/otp-wrapper
+    ports:
+      - "5012:5000"
+    environment:
+      SMU_API_URL: ${SMU_API_URL}
+      SMU_API_KEY: ${SMU_API_KEY}
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    networks:
+      - ticketremaster
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+networks:
+  ticketremaster:
+    driver: bridge
+
 volumes:
-  seats_db_data:
-  users_db_data:
-  orders_db_data:
-  events_db_data:
+  user-service-db-data:
+  event-service-db-data:
+  seat-inventory-service-db-data:
+  ticket-service-db-data:
+  ticket-log-service-db-data:
+  marketplace-service-db-data:
+  transfer-service-db-data:
+  venue-service-db-data:
+  seat-service-db-data:
+  credit-transaction-service-db-data:
+  rabbitmq-data:
+
