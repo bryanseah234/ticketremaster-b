@@ -70,8 +70,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.userId) { pm.environment.set('user_id', body.userId); }"
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.userId) { pm.environment.set('user_id', body.userId); }",
+                  "}"
                 ]
               }
             }
@@ -86,9 +89,49 @@
             "url": "{{user_service_url}}/users"
           }
         },
-        { "name": "List Users", "request": { "method": "GET", "url": "{{user_service_url}}/users" } },
+        {
+          "name": "List Users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const users = pm.response.json();",
+                  "  if (Array.isArray(users)) {",
+                  "    const targetEmail = pm.environment.get('user_email');",
+                  "    const matched = users.find((u) => u.email === targetEmail) || users[0];",
+                  "    if (matched && matched.userId) { pm.environment.set('user_id', matched.userId); }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{user_service_url}}/users" }
+        },
         { "name": "Get User By ID", "request": { "method": "GET", "url": "{{user_service_url}}/users/{{user_id}}" } },
-        { "name": "Get User By Email", "request": { "method": "GET", "url": "{{user_service_url}}/users/by-email/{{user_email}}" } },
+        {
+          "name": "Get User By Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.userId) { pm.environment.set('user_id', body.userId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{user_service_url}}/users/by-email/{{user_email}}" }
+        },
         {
           "name": "Patch User",
           "request": {
@@ -103,7 +146,28 @@
     {
       "name": "02 Venue Service",
       "item": [
-        { "name": "List Venues", "request": { "method": "GET", "url": "{{venue_service_url}}/venues" } },
+        {
+          "name": "List Venues",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  const venues = Array.isArray(body.venues) ? body.venues : [];",
+                  "  const seededVenue = venues.find((v) => v.venueId === 'ven_001');",
+                  "  const venueId = (seededVenue || venues[0] || {}).venueId;",
+                  "  if (venueId) { pm.environment.set('venue_id', venueId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{venue_service_url}}/venues" }
+        },
         { "name": "Get Venue By ID", "request": { "method": "GET", "url": "{{venue_service_url}}/venues/{{venue_id}}" } }
       ]
     },
@@ -116,7 +180,28 @@
     {
       "name": "04 Event Service",
       "item": [
-        { "name": "List Events", "request": { "method": "GET", "url": "{{event_service_url}}/events" } },
+        {
+          "name": "List Events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  const events = Array.isArray(body.events) ? body.events : [];",
+                  "  const seededEvent = events.find((e) => e.eventId === 'evt_001');",
+                  "  const eventId = (seededEvent || events[0] || {}).eventId;",
+                  "  if (eventId) { pm.environment.set('event_id', eventId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{event_service_url}}/events" }
+        },
         {
           "name": "Create Event",
           "event": [
@@ -125,8 +210,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.eventId) { pm.environment.set('event_id', body.eventId); }"
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.eventId) { pm.environment.set('event_id', body.eventId); }",
+                  "}"
                 ]
               }
             }
@@ -147,7 +235,27 @@
     {
       "name": "05 Seat Inventory Service",
       "item": [
-        { "name": "Inventory By Event", "request": { "method": "GET", "url": "{{seat_inventory_service_url}}/inventory/event/{{event_id}}" } }
+        {
+          "name": "Inventory By Event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  const inventory = Array.isArray(body.inventory) ? body.inventory : [];",
+                  "  const inventoryId = (inventory[0] || {}).inventoryId;",
+                  "  if (inventoryId) { pm.environment.set('inventory_id', inventoryId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{seat_inventory_service_url}}/inventory/event/{{event_id}}" }
+        }
       ]
     },
     {
@@ -161,9 +269,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.ticketId) { pm.environment.set('ticket_id', body.ticketId); }",
-                  "if (body.qrHash) { pm.environment.set('ticket_qr_hash', body.qrHash); }"
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.ticketId) { pm.environment.set('ticket_id', body.ticketId); }",
+                  "  if (body.qrHash) { pm.environment.set('ticket_qr_hash', body.qrHash); }",
+                  "}"
                 ]
               }
             }
@@ -221,8 +332,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.listingId) { pm.environment.set('listing_id', body.listingId); }"
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.listingId) { pm.environment.set('listing_id', body.listingId); }",
+                  "}"
                 ]
               }
             }
@@ -261,8 +375,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.transferId) { pm.environment.set('transfer_id', body.transferId); }"
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.transferId) { pm.environment.set('transfer_id', body.transferId); }",
+                  "}"
                 ]
               }
             }
@@ -429,8 +546,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.userId) { pm.environment.set('outsystems_test_user_id', body.userId); }"
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.userId) { pm.environment.set('outsystems_test_user_id', body.userId); }",
+                  "}"
                 ]
               }
             }

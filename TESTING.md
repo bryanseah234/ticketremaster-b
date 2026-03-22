@@ -51,6 +51,31 @@ Quick smoke check:
    - `otp_wrapper_url=http://localhost:5012`
    - others as needed from the environment file.
 
+## 3.1) Seed-data baseline used by Postman
+
+The shared local environment assumes seeded baseline data:
+- `user_email=admin1@ticketremaster.local`
+- `venue_id=ven_001`
+- `event_id=evt_001`
+
+Before running the full collection, run migrations and seeds so these references exist:
+
+```powershell
+docker compose run --rm user-service python -m flask --app app.py db upgrade -d migrations
+docker compose run --rm venue-service python -m flask --app app.py db upgrade -d migrations
+docker compose run --rm seat-service python -m flask --app app.py db upgrade -d migrations
+docker compose run --rm event-service python -m flask --app app.py db upgrade -d migrations
+docker compose run --rm seat-inventory-service python -m flask --app app.py db upgrade -d migrations
+
+docker compose run --rm user-service python seed.py
+docker compose run --rm venue-service python seed.py
+docker compose run --rm seat-service python seed.py
+docker compose run --rm event-service python seed.py
+docker compose run --rm seat-inventory-service python seed.py
+```
+
+The collection auto-captures `user_id`, `venue_id`, `event_id`, and `inventory_id` from responses at runtime.
+
 ## 4) Run the core collection in dependency order
 
 Run folders top-to-bottom so IDs are captured into environment variables.
@@ -154,6 +179,14 @@ Expected:
 
 ## 5.2 Phase 4.2 OTP Wrapper (SMU Notification API key check)
 
+SMU Notification endpoints are POST-only. Opening endpoint URLs directly in a browser sends GET and returns:
+
+```json
+{"Message":"The requested resource does not support http method 'GET'."}
+```
+
+That response is expected for browser checks and does not indicate wrapper failure.
+
 ### A) Send OTP
 Run request: **12 OTP Wrapper → Send OTP**
 
@@ -198,6 +231,10 @@ If `SMU_API_KEY` or `SMU_API_URL` is wrong, expected wrapper behavior:
 - Error code:
   - `OTP_SEND_FAILED` for `/otp/send`
   - `OTP_VERIFY_FAILED` for `/otp/verify`
+
+OTP wrapper → SMU mapping used by this repo:
+- `/otp/send` calls `POST <SMU_API_URL>/SendOTP` with body `{ "Mobile": "<phoneNumber>" }`
+- `/otp/verify` calls `POST <SMU_API_URL>/VerifyOTP` with body `{ "VerificationSid": "<sid>", "Code": "<otp>" }`
 
 ## 5.3 Phase 1.4 OutSystems Credit Service (external, included in shared Postman collection)
 

@@ -37,7 +37,7 @@ def test_send_otp_success(client, monkeypatch):
         captured['headers'] = headers
         captured['json'] = json
         captured['timeout'] = timeout
-        return FakeResponse({'verification_sid': 'sid_123'})
+        return FakeResponse({'VerificationSid': 'sid_123', 'Success': True})
 
     monkeypatch.setattr('routes.requests.post', fake_post)
 
@@ -45,9 +45,9 @@ def test_send_otp_success(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json() == {'sid': 'sid_123'}
-    assert captured['url'] == 'https://smu.example.com/Notification/SendSMS'
-    assert captured['headers'] == {'X-API-KEY': 'fake-api-key'}
-    assert captured['json'] == {'phoneNumber': '+6591234567'}
+    assert captured['url'] == 'https://smu.example.com/Notification/SendOTP'
+    assert captured['headers'] == {'X-API-Key': 'fake-api-key'}
+    assert captured['json'] == {'Mobile': '+6591234567'}
     assert captured['timeout'] == 10
 
 
@@ -80,7 +80,7 @@ def test_verify_otp_success(client, monkeypatch):
         captured['headers'] = headers
         captured['json'] = json
         captured['timeout'] = timeout
-        return FakeResponse({'verified': True})
+        return FakeResponse({'Success': True})
 
     monkeypatch.setattr('routes.requests.post', fake_post)
 
@@ -88,15 +88,27 @@ def test_verify_otp_success(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json() == {'verified': True}
-    assert captured['url'] == 'https://smu.example.com/Notification/VerifySMS'
-    assert captured['headers'] == {'X-API-KEY': 'fake-api-key'}
-    assert captured['json'] == {'sid': 'sid_123', 'otp': '123456'}
+    assert captured['url'] == 'https://smu.example.com/Notification/VerifyOTP'
+    assert captured['headers'] == {'X-API-Key': 'fake-api-key'}
+    assert captured['json'] == {'VerificationSid': 'sid_123', 'Code': '123456'}
     assert captured['timeout'] == 10
 
 
 def test_verify_otp_returns_false(client, monkeypatch):
     def fake_post(*args, **kwargs):
-        return FakeResponse({'verified': False})
+        return FakeResponse({'Success': False})
+
+    monkeypatch.setattr('routes.requests.post', fake_post)
+
+    response = client.post('/otp/verify', json={'sid': 'sid_123', 'otp': '000000'})
+
+    assert response.status_code == 200
+    assert response.get_json() == {'verified': False}
+
+
+def test_verify_otp_returns_false_on_upstream_400(client, monkeypatch):
+    def fake_post(*args, **kwargs):
+        return FakeResponse({'Errors': ['invalid code']}, status_code=400)
 
     monkeypatch.setattr('routes.requests.post', fake_post)
 

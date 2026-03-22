@@ -16,7 +16,7 @@ def build_smu_url(path):
 
 
 def smu_headers():
-    return {'X-API-KEY': current_app.config['SMU_API_KEY']}
+    return {'X-API-Key': current_app.config['SMU_API_KEY']}
 
 
 @bp.get('/health')
@@ -32,9 +32,9 @@ def send_otp():
 
     try:
         response = requests.post(
-            build_smu_url('/SendSMS'),
+            build_smu_url('/SendOTP'),
             headers=smu_headers(),
-            json={'phoneNumber': data['phoneNumber']},
+            json={'Mobile': data['phoneNumber']},
             timeout=10,
         )
         response.raise_for_status()
@@ -47,6 +47,8 @@ def send_otp():
         sid = payload.get('verificationSid')
     if sid is None:
         sid = payload.get('sid')
+    if sid is None:
+        sid = payload.get('VerificationSid')
 
     if sid is None:
         return error_response(502, 'OTP_SEND_FAILED', 'SMU response missing verification SID')
@@ -62,11 +64,13 @@ def verify_otp():
 
     try:
         response = requests.post(
-            build_smu_url('/VerifySMS'),
+            build_smu_url('/VerifyOTP'),
             headers=smu_headers(),
-            json={'sid': data['sid'], 'otp': data['otp']},
+            json={'VerificationSid': data['sid'], 'Code': data['otp']},
             timeout=10,
         )
+        if response.status_code == 400:
+            return jsonify({'verified': False}), 200
         response.raise_for_status()
         payload = response.json()
     except (requests.RequestException, ValueError) as exc:
@@ -79,5 +83,7 @@ def verify_otp():
         verified = payload.get('isVerified')
     if verified is None:
         verified = payload.get('success')
+    if verified is None:
+        verified = payload.get('Success')
 
     return jsonify({'verified': bool(verified)}), 200

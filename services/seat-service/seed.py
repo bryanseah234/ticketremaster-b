@@ -12,6 +12,14 @@ def iter_rows_a_to_z():
 VENUE_CAPACITIES = {
     'ven_001': 1800,
     'ven_002': 12000,
+    'ven_003': 5272,
+    'ven_004': 19500,
+    'ven_005': 2679,
+    'ven_006': 14471,
+    'ven_007': 20300,
+    'ven_008': 2361,
+    'ven_009': 8500,
+    'ven_010': 18000,
 }
 
 
@@ -54,11 +62,15 @@ def seed_venue(venue_id, capacity):
 app = create_app()
 
 with app.app_context():
-    created_venue_1 = seed_venue('ven_001', VENUE_CAPACITIES['ven_001'])
-    created_venue_2 = seed_venue('ven_002', VENUE_CAPACITIES['ven_002'])
+    created_counts = {
+        venue_id: seed_venue(venue_id, capacity)
+        for venue_id, capacity in VENUE_CAPACITIES.items()
+    }
+    total_created = sum(created_counts.values())
 
     db.session.commit()
-    print(
-        'Seed complete. '
-        f'Created {created_venue_1} seat(s) for ven_001 and {created_venue_2} seat(s) for ven_002.'
+    per_venue_summary = ', '.join(
+        f'{venue_id}:{count}'
+        for venue_id, count in sorted(created_counts.items())
     )
+    print(f'Seed complete. Created {total_created} seat(s). Per venue -> {per_venue_summary}')
