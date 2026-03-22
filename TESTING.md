@@ -5,6 +5,12 @@ This guide explains how to import and run the shared Postman tests, plus how to 
 - **4.1 Stripe Wrapper (with Stripe CLI)**
 - **4.2 OTP Wrapper (SMU Notification API)**
 
+Related references:
+- Root docs index: [README.md](README.md)
+- Postman asset notes: [postman/README.md](postman/README.md)
+- Stripe wrapper service guide: [services/stripe-wrapper/README.md](services/stripe-wrapper/README.md)
+- OTP wrapper service guide: [services/otp-wrapper/README.md](services/otp-wrapper/README.md)
+
 ## 1) Prerequisites
 
 - Docker Desktop running

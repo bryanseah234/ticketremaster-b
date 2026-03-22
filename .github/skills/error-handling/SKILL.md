@@ -1,59 +1,61 @@
 ---
 name: error-handling
-description: How to handle and return errors in all TicketRemaster services. Covers the standard error envelope, error codes by category, HTTP status mapping, and exception handling patterns.
+description: Error response and propagation patterns for TicketRemaster services and orchestrators.
 ---
 
 # Error Handling Patterns
 
 ## When to Use
 
-Use this skill whenever returning errors from any endpoint or handling exceptions in orchestrator flows. All services MUST use the same error format.
+Use this skill whenever an endpoint returns non-2xx or when an orchestrator maps downstream failures into frontend-safe responses.
 
-## Standard Error Response Envelope
+## Response Shape
 
 ```python
-# ALWAYS use this format for errors
 return jsonify({
-    "success": False,
-    "error_code": "SEAT_UNAVAILABLE",
-    "message": "This seat is currently held by another user."
+    "error": {
+        "code": "SEAT_UNAVAILABLE",
+        "message": "Seat is already held or sold."
+    }
 }), 409
 ```
 
-## Error Codes by Category
+## Common Error Families
 
-### Seat / Inventory Errors (Orchestrator ↔ Inventory)
+### Inventory/Ticket
 
 | Code | HTTP | Meaning |
 |---|---|---|
 | `SEAT_UNAVAILABLE` | 409 | Seat is HELD or SOLD |
 | `SEAT_NOT_FOUND` | 404 | Seat ID doesn't exist |
-| `SEAT_ALREADY_CHECKED_IN` | 409 | Entry log already has SUCCESS |
+| `TICKET_NOT_FOUND` | 404 | Ticket lookup failed |
+| `ALREADY_CHECKED_IN` | 409 | Duplicate scan attempt |
 
-### User / Auth Errors (Orchestrator ↔ User Service)
+### Auth/User
 
 | Code | HTTP | Meaning |
 |---|---|---|
 | `AUTH_INVALID_CREDENTIALS` | 401 | Wrong email/password |
 | `AUTH_TOKEN_EXPIRED` | 401 | JWT has expired |
 | `AUTH_MISSING_TOKEN` | 401 | No auth header |
-| `INSUFFICIENT_CREDITS` | 402 | User balance < ticket price |
+| `AUTH_FORBIDDEN` | 403 | Role not allowed for route |
 | `USER_NOT_FOUND` | 404 | User ID doesn't exist |
 
-### Order Errors (Orchestrator ↔ Order Service)
+### Payment/Credit/Transfer
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| `ORDER_NOT_FOUND` | 404 | Order ID doesn't exist |
-| `PAYMENT_HOLD_EXPIRED` | 410 | 5-min TTL elapsed |
+| `INSUFFICIENT_CREDITS` | 402 | Balance too low |
+| `PAYMENT_HOLD_EXPIRED` | 410 | Hold TTL elapsed |
 | `DUPLICATE_TRANSFER` | 409 | Active transfer exists for seat |
+| `PAYMENT_ALREADY_PROCESSED` | 409 | Idempotency guard hit |
 
-### Verification Errors (Scenario 3)
+### QR/Verification
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| `QR_INVALID` | 400 | AES decryption failed |
-| `QR_EXPIRED` | 400 | Timestamp > 60 seconds old |
+| `QR_INVALID` | 400 | Decryption/format failed |
+| `QR_EXPIRED` | 400 | TTL exceeded |
 | `WRONG_HALL` | 400 | Presented hall ≠ expected hall |
 
 ### System Errors
@@ -63,60 +65,41 @@ return jsonify({
 | `SERVICE_UNAVAILABLE` | 503 | Downstream service unreachable |
 | `INTERNAL_ERROR` | 500 | Unexpected exception |
 
-## Flask Exception Handler Pattern
-
-Register global error handlers in `create_app()`:
+## Flask Exception Mapping
 
 ```python
-from werkzeug.exceptions import HTTPException
-
-def create_app():
-    app = Flask(__name__)
-
-    @app.errorhandler(Exception)
-    def handle_exception(e):
-        if isinstance(e, HTTPException):
-            return jsonify({
-                "success": False,
-                "error_code": "HTTP_ERROR",
-                "message": e.description,
-            }), e.code
-
-        # Unexpected error — log and return 500
-        app.logger.exception("Unhandled exception")
-        return jsonify({
-            "success": False,
-            "error_code": "INTERNAL_ERROR",
-            "message": "An internal error occurred.",
-        }), 500
-
-    return app
+@app.errorhandler(Exception)
+def handle_exception(exc):
+    current_app.logger.exception("Unhandled exception")
+    return jsonify({
+        "error": {
+            "code": "INTERNAL_ERROR",
+            "message": "Unhandled internal server error."
+        }
+    }), 500
 ```
 
-## Orchestrator Exception Handling
-
-In orchestrator flows, catch specific error codes from downstream services:
+## Orchestrator Propagation Pattern
 
 ```python
-response = httpx.post(f"{USER_SVC}/credits/deduct", json=payload)
+response = requests.post(url, json=payload, timeout=5)
 
 if response.status_code != 200:
-    error = response.json()
-    if error.get("error_code") == "INSUFFICIENT_CREDITS":
-        # Compensate: release seat
-        inventory_stub.ReleaseSeat(release_request)
-        raise InsufficientCreditsError(error.get("message"))
+    body = response.json()
+    code = body.get("error", {}).get("code", "SERVICE_UNAVAILABLE")
+    return jsonify({"error": {"code": code, "message": "Flow failed"}}), response.status_code
 ```
 
 ## Must-Do Rules
 
-1. **Never expose stack traces** in production responses
-2. **Always include `error_code`** — clients use this for programmatic handling
-3. **Always include `message`** — this is shown to end users
-4. **Log full exception details** server-side with `logger.exception()`
-5. **Return `success: false`** — never omit this field on errors
+1. Never return raw tracebacks to clients.
+2. Keep error code naming stable across modules.
+3. Log full exception context server-side.
+4. Preserve downstream error semantics where useful for client retries.
 
 ## References
 
-- `API.md` Section 3 — Full error code reference
-- `INSTRUCTIONS.md` Section 10 — Logging & Observability
+- [../../../TESTING.md](../../../TESTING.md)
+- [../../../INSTRUCTION.md](../../../INSTRUCTION.md)
+- [../flask-service/SKILL.md](../flask-service/SKILL.md)
+- [../orchestrator-flow/SKILL.md](../orchestrator-flow/SKILL.md)

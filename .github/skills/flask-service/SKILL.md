@@ -1,153 +1,80 @@
 ---
 name: flask-service
-description: How to add REST endpoints to any Flask-based microservice (User, Order, Event, Orchestrator). Covers app factory, blueprints, health checks, Flasgger docs, and standard response format.
+description: How to add or update REST endpoints in TicketRemaster Flask services/orchestrators with repo-specific response, health, and routing patterns.
 ---
 
-# Adding REST Endpoints to a Flask Service
+# Flask Service Endpoint Pattern
 
 ## When to Use
 
-Use this skill when adding a new REST endpoint to any of the Flask services: `user-service`, `order-service`, `event-service`, or `orchestrator-service`.
+Use this skill when you add or update HTTP endpoints in `services/*` or `orchestrators/*`.
 
 ## Project Conventions
 
-- Every service uses the **app factory pattern** (`create_app()` in `src/app.py`)
-- Routes are organised into **Flask Blueprints** (one per domain area)
-- All responses follow the **standard envelope** from `API.md` Section 2
-- All endpoints must have **Flasgger YAML docstrings** for Swagger UI
-- Dependencies are pinned in `requirements.txt` with exact versions
-- Formatting: `black` (line length 88), linting: `flake8`, imports: `isort`
+- Keep route handlers in `routes.py` for each module.
+- Keep app bootstrap in `app.py`.
+- Expose `GET /health` for every service and orchestrator.
+- Return JSON responses consistently and include stable error codes on failures.
+- Keep module-specific dependencies in local `requirements.txt`.
 
 ## Step-by-Step
 
-### 1. Create or edit the Blueprint file
-
-Blueprints live in `src/routes/` (orchestrator) or directly in `src/app.py` (simpler services).
+### 1. Add endpoint in `routes.py`
 
 ```python
-# Example: orchestrator-service/src/routes/purchase_routes.py
 from flask import Blueprint, jsonify, request
 
-purchase_bp = Blueprint("purchase", __name__)
+bp = Blueprint("tickets", __name__)
 
-@purchase_bp.route("/api/reserve", methods=["POST"])
-def reserve_seat():
-    """
-    Reserve a seat for checkout
-    ---
-    tags:
-      - Purchase Flow
-    security:
-      - Bearer: []
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          required:
-            - seat_id
-            - user_id
-          properties:
-            seat_id:
-              type: string
-              format: uuid
-            user_id:
-              type: string
-              format: uuid
-    responses:
-      200:
-        description: Seat reserved successfully
-      409:
-        description: Seat unavailable
-    """
-    data = request.get_json()
-    seat_id = data.get("seat_id")
-    user_id = data.get("user_id")
-
-    # Business logic here...
-
-    return jsonify({
-        "success": True,
-        "data": {
-            "order_id": "...",
-            "seat_id": seat_id,
-            "status": "HELD",
-            "held_until": "...",
-            "ttl_seconds": 300,
-            "message": "Seat reserved. Complete payment within 5 minutes."
-        }
-    }), 200
+@bp.get("/tickets/<ticket_id>")
+def get_ticket(ticket_id):
+    return jsonify({"ticketId": ticket_id}), 200
 ```
 
-### 2. Register the Blueprint in `app.py`
+### 2. Register blueprint in `app.py`
 
 ```python
 def create_app():
     app = Flask(__name__)
-
-    from src.routes.purchase_routes import purchase_bp
-    app.register_blueprint(purchase_bp)
-
+    from routes import bp
+    app.register_blueprint(bp)
     return app
 ```
 
-### 3. Standard Response Format
-
-Always use this envelope:
+### 3. Keep success and error shape predictable
 
 ```python
-# Success
-return jsonify({"success": True, "data": {...}}), 200
+return jsonify({"data": result}), 200
+```
 
-# Error
+```python
 return jsonify({
-    "success": False,
-    "error_code": "SEAT_UNAVAILABLE",
-    "message": "This seat is currently held by another user."
-}), 409
+    "error": {
+        "code": "RESOURCE_NOT_FOUND",
+        "message": "Ticket not found."
+    }
+}), 404
 ```
 
-See `error-handling` skill for the full error code reference.
+See [../error-handling/SKILL.md](../error-handling/SKILL.md).
 
-### 4. Health Check Pattern
-
-Every service MUST expose `GET /health`:
+### 4. Keep health endpoint explicit
 
 ```python
-@app.route("/health")
+@app.get("/health")
 def health():
-    # Check downstream dependencies
-    db_ok = check_db_connection()
-    return jsonify({
-        "status": "healthy" if db_ok else "unhealthy",
-        "service": "user-service",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "checks": {"database": "connected" if db_ok else "disconnected"},
-    }), 200 if db_ok else 503
+    return jsonify({"status": "ok", "service": "ticket-service"}), 200
 ```
 
-### 5. Dockerfile Pattern
+### 5. Wire tests and compose checks
 
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY src/ ./src/
-EXPOSE <port>
-CMD ["python", "-m", "src.app"]
-```
-
-| Service | Port |
-|---|---|
-| User Service | 5000 |
-| Order Service | 5001 |
-| Event Service | 5002 |
-| Orchestrator | 5003 |
+- Add/extend pytest cases in module `tests/`.
+- Verify route works with service-specific README command.
+- Add request to shared Postman collection when endpoint is externally tested.
 
 ## References
 
-- `API.md` — Full endpoint contracts and error codes
-- `CONTRIBUTING.md` — Code conventions
-- `INSTRUCTIONS.md` Section 13 — Flasgger/Swagger setup
+- [../../../services/README.md](../../../services/README.md)
+- [../../../orchestrators/README.md](../../../orchestrators/README.md)
+- [../../../TESTING.md](../../../TESTING.md)
+- [../../../INSTRUCTION.md](../../../INSTRUCTION.md)

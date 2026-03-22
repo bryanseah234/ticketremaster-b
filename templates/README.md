@@ -1,18 +1,38 @@
 # Service Setup Template
 
-Use `shared/requirements.txt` as the starting point for each Python service.
+This folder provides reusable Dockerfile templates for scaffolding new services with repo-consistent runtime settings.
 
-Files to copy when scaffolding a standard service:
-- `templates/Dockerfile.service` -> `services/<name>/Dockerfile`
-- `shared/requirements.txt` -> `services/<name>/requirements.txt`
+## Available Templates
 
-Files to copy when scaffolding the Seat Inventory Service:
+- `Dockerfile.service` — default Flask service/orchestrator image template
+- `Dockerfile.seat-inventory` — specialized template for seat inventory runtime layout
+
+## Scaffolding Map
+
+### Standard atomic service or orchestrator
+- `templates/Dockerfile.service` -> `services/<name>/Dockerfile` or `orchestrators/<name>/Dockerfile`
+- `shared/requirements.txt` -> `<module>/requirements.txt`
+
+### Seat inventory service
 - `templates/Dockerfile.seat-inventory` -> `services/seat-inventory-service/Dockerfile`
 - `shared/requirements.txt` -> `services/seat-inventory-service/requirements.txt`
 
-Recommended first files per service:
+## Suggested First Files
+
 - `app.py`
-- `models.py`
+- `models.py` for data-owning services
 - `routes.py`
-- `migrations/`
+- `migrations/` for PostgreSQL-backed services
+
+Orchestrators should also add:
+- `middleware.py`
+- service-call helper modules for outbound HTTP/gRPC calls
+
+## Related Docs
+
+- Shared dependencies and gRPC assets: [../shared/README.md](../shared/README.md)
+- Service index: [../services/README.md](../services/README.md)
+- Orchestrator index: [../orchestrators/README.md](../orchestrators/README.md)
+- Implementation sequence: [../INSTRUCTION.md](../INSTRUCTION.md)
+- Root documentation hub: [../README.md](../README.md)
 

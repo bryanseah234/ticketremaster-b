@@ -14,6 +14,27 @@ Seed-data note for shared testing:
 - The collection also auto-captures and refreshes `user_id`, `venue_id`, `event_id`, and `inventory_id` from live responses so chained requests do not depend on empty placeholders.
 - For stable team runs, apply migrations and run all service seed scripts before running the full collection.
 
+Collection coverage:
+- Health checks
+- User, Venue, Seat, Event, Seat Inventory
+- Ticket, Ticket Log, Marketplace, Transfer
+- Credit Transaction
+- Stripe Wrapper and OTP Wrapper
+- RabbitMQ management endpoints
+- OutSystems Credit Service external checks
+
+Run from repo root:
+
+```powershell
+postman collection run .\postman\TicketRemaster.postman_collection.json -e .\postman\TicketRemaster.local.postman_environment.json --reporters cli
+```
+
+Related docs:
+- End-to-end testing and troubleshooting: [../TESTING.md](../TESTING.md)
+- Project documentation hub: [../README.md](../README.md)
+- Stripe-specific test details: [../services/stripe-wrapper/README.md](../services/stripe-wrapper/README.md)
+- OTP-specific test details: [../services/otp-wrapper/README.md](../services/otp-wrapper/README.md)
+
 Suggested collection growth:
 - `Health` for `GET /health` checks
 - `Auth`, `Events`, `Purchase`, `Credits`, `Marketplace`, `Transfer`, `Tickets`, `Verify`

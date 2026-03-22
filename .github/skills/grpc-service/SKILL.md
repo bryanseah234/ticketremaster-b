@@ -1,151 +1,62 @@
 ---
 name: grpc-service
-description: How to add or modify gRPC RPCs in the Inventory Service. Covers proto definition, stub generation, service implementation with SQLAlchemy, SELECT FOR UPDATE NOWAIT pattern, and the RabbitMQ DLX consumer.
+description: TicketRemaster gRPC guidance for Seat Inventory proto changes, stub generation, and safe consumption from orchestrators.
 ---
 
-# Adding gRPC RPCs to the Inventory Service
+# gRPC Service Pattern
 
 ## When to Use
 
-Use this skill when adding new RPCs, modifying existing ones, or working with the Inventory Service's gRPC server, seat locking, or RabbitMQ consumer.
+Use this skill when updating `proto/seat_inventory.proto`, regenerating Python stubs, or wiring gRPC calls in inventory-dependent modules.
 
 ## Architecture Context
 
-The Inventory Service is the ONLY gRPC service. All other services use REST. It owns `seats_db` with the `seats` and `entry_logs` tables.
+- Seat Inventory is the primary gRPC contract in this repository.
+- Generated stubs are stored in `shared/grpc/`.
+- Consumer modules must copy both generated files together.
 
-- **gRPC server** runs on port `50051`
-- **HTTP health endpoint** runs on port `8080` (Flask sidecar)
-- **RabbitMQ consumer** runs in a separate daemon thread
-- All three start from `src/main.py`
+## Proto Update Flow
 
-## Step-by-Step: Adding a New RPC
-
-### 1. Define in `inventory.proto`
+### 1. Edit proto contract
 
 ```protobuf
-// inventory-service/src/proto/inventory.proto
 syntax = "proto3";
-package inventory;
+package seatinventory;
 
-service InventoryService {
-  rpc NewRpcName (NewRpcRequest) returns (NewRpcResponse);
-}
-
-message NewRpcRequest {
-  string seat_id = 1;
-}
-
-message NewRpcResponse {
-  bool success = 1;
+service SeatInventoryService {
+  rpc HoldSeat (HoldSeatRequest) returns (HoldSeatResponse);
 }
 ```
 
-### 2. Generate Python stubs
+### 2. Regenerate stubs into shared folder
 
-```bash
-python -m grpc_tools.protoc \
-  -I src/proto \
-  --python_out=src/proto \
-  --grpc_python_out=src/proto \
-  src/proto/inventory.proto
+```powershell
+python -m grpc_tools.protoc -I .\proto --python_out=.\shared\grpc --grpc_python_out=.\shared\grpc .\proto\seat_inventory.proto
 ```
 
-This generates:
+### 3. Copy to target module
 
-- `inventory_pb2.py` — message classes
-- `inventory_pb2_grpc.py` — server/client stubs
+Copy both:
+- `shared/grpc/seat_inventory_pb2.py`
+- `shared/grpc/seat_inventory_pb2_grpc.py`
 
-### 3. Implement the RPC handler
-
-Place logic in the appropriate service file under `src/services/`:
-
-| File | Responsible For |
-|---|---|
-| `lock_service.py` | `ReserveSeat` (pessimistic locking) |
-| `ownership_service.py` | `ConfirmSeat`, `UpdateOwner`, `GetSeatOwner` |
-| `verification_service.py` | `VerifyTicket`, `MarkCheckedIn` |
-
-### 4. Pessimistic Locking Pattern
-
-The `ReserveSeat` RPC uses `SELECT FOR UPDATE NOWAIT` to prevent two users from reserving the same seat:
+## Consumption Pattern
 
 ```python
-from sqlalchemy import text
+import grpc
+from shared.grpc import seat_inventory_pb2, seat_inventory_pb2_grpc
 
-def reserve_seat(seat_id, user_id, session):
-    try:
-        row = session.execute(
-            text("""
-                SELECT * FROM seats
-                WHERE seat_id = :seat_id AND status = 'AVAILABLE'
-                FOR UPDATE NOWAIT
-            """),
-            {"seat_id": seat_id}
-        ).fetchone()
+channel = grpc.insecure_channel("localhost:50051")
+stub = seat_inventory_pb2_grpc.SeatInventoryServiceStub(channel)
 
-        if not row:
-            return None  # Seat not available
-
-        session.execute(
-            text("""
-                UPDATE seats
-                SET status = 'HELD',
-                    held_by_user_id = :user_id,
-                    held_until = NOW() + INTERVAL '5 minutes',
-                    updated_at = NOW()
-                WHERE seat_id = :seat_id
-            """),
-            {"seat_id": seat_id, "user_id": user_id}
-        )
-        session.commit()
-        return row
-
-    except Exception:
-        session.rollback()
-        raise  # NOWAIT raises immediately if row is locked
-```
-
-### 5. Seat State Machine
-
-```
-AVAILABLE ──reserve──→ HELD ──confirm──→ SOLD ──check-in──→ CHECKED_IN
-    ↑                    │
-    └───release/DLX──────┘
-```
-
-Only valid transitions:
-
-- `AVAILABLE → HELD` (ReserveSeat)
-- `HELD → AVAILABLE` (ReleaseSeat / DLX auto-release)
-- `HELD → SOLD` (ConfirmSeat)
-- `SOLD → CHECKED_IN` (MarkCheckedIn)
-- `SOLD → SOLD` with new `owner_user_id` (UpdateOwner — P2P transfer)
-
-### 6. Entry Log Writes
-
-Every QR scan writes to `entry_logs` regardless of outcome:
-
-```python
-session.execute(
-    text("""
-        INSERT INTO entry_logs (log_id, seat_id, scanned_at,
-            scanned_by_staff_id, result, hall_id_presented, hall_id_expected)
-        VALUES (:log_id, :seat_id, NOW(), :staff_id, :result,
-            :hall_presented, :hall_expected)
-    """),
-    {
-        "log_id": str(uuid4()),
-        "seat_id": seat_id,
-        "staff_id": staff_id,
-        "result": result,  # SUCCESS | DUPLICATE | WRONG_HALL | UNPAID | NOT_FOUND | EXPIRED
-        "hall_presented": hall_from_qr,
-        "hall_expected": hall_from_event,
-    }
+response = stub.HoldSeat(
+    seat_inventory_pb2.HoldSeatRequest(inventoryId="inv_001", userId="usr_001")
 )
 ```
 
 ## References
 
-- `INSTRUCTIONS.md` Section 3 — `seats_db` schema
-- `INSTRUCTIONS.md` Section 8 — RabbitMQ consumer code
-- `TASKS.md` Phase 6 — Full implementation checklist
+- [../../../shared/grpc/README.md](../../../shared/grpc/README.md)
+- [../../../INSTRUCTION.md](../../../INSTRUCTION.md)
+- [../../../TASK.md](../../../TASK.md)
+- [../orchestrator-flow/SKILL.md](../orchestrator-flow/SKILL.md)
