@@ -7,6 +7,14 @@ x-service-defaults: &service-defaults
   networks:
     - ticketremaster
 
+x-flask-healthcheck: &flask-healthcheck
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 15s
+
 x-postgres-defaults: &postgres-defaults
   image: postgres:18-alpine
   restart: unless-stopped
@@ -23,7 +31,7 @@ x-postgres-defaults: &postgres-defaults
 
 services:
   user-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/user-service
     ports:
@@ -44,7 +52,7 @@ services:
       - user-service-db-data:/var/lib/postgresql/data
 
   event-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/event-service
     ports:
@@ -65,7 +73,7 @@ services:
       - event-service-db-data:/var/lib/postgresql/data
 
   seat-inventory-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/seat-inventory-service
     ports:
@@ -88,7 +96,7 @@ services:
       - seat-inventory-service-db-data:/var/lib/postgresql/data
 
   ticket-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/ticket-service
     ports:
@@ -109,7 +117,7 @@ services:
       - ticket-service-db-data:/var/lib/postgresql/data
 
   ticket-log-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/ticket-log-service
     ports:
@@ -130,7 +138,7 @@ services:
       - ticket-log-service-db-data:/var/lib/postgresql/data
 
   marketplace-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/marketplace-service
     ports:
@@ -151,7 +159,7 @@ services:
       - marketplace-service-db-data:/var/lib/postgresql/data
 
   transfer-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/transfer-service
     ports:
@@ -172,7 +180,7 @@ services:
       - transfer-service-db-data:/var/lib/postgresql/data
 
   venue-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/venue-service
     ports:
@@ -193,7 +201,7 @@ services:
       - venue-service-db-data:/var/lib/postgresql/data
 
   seat-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/seat-service
     ports:
@@ -214,7 +222,7 @@ services:
       - seat-service-db-data:/var/lib/postgresql/data
 
   credit-transaction-service:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/credit-transaction-service
     ports:
@@ -235,7 +243,7 @@ services:
       - credit-transaction-service-db-data:/var/lib/postgresql/data
 
   stripe-wrapper:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/stripe-wrapper
     ports:
@@ -245,7 +253,7 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
 
   otp-wrapper:
-    <<: *service-defaults
+    <<: [*service-defaults, *flask-healthcheck]
     build:
       context: ./services/otp-wrapper
     ports:
@@ -274,6 +282,190 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
 
+  auth-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/auth-orchestrator
+    ports:
+      - "6000:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      USER_SERVICE_URL: http://user-service:5000
+      CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
+      OUTSYSTEMS_API_KEY: ${OUTSYSTEMS_API_KEY}
+    depends_on:
+      user-service:
+        condition: service_healthy
+
+  event-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/event-orchestrator
+    ports:
+      - "6001:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      EVENT_SERVICE_URL: http://event-service:5000
+      VENUE_SERVICE_URL: http://venue-service:5000
+      SEAT_SERVICE_URL: http://seat-service:5000
+      SEAT_INVENTORY_SERVICE_URL: http://seat-inventory-service:5000
+    depends_on:
+      event-service:
+        condition: service_healthy
+      venue-service:
+        condition: service_healthy
+      seat-service:
+        condition: service_healthy
+      seat-inventory-service:
+        condition: service_healthy
+
+  credit-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/credit-orchestrator
+    ports:
+      - "6002:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
+      OUTSYSTEMS_API_KEY: ${OUTSYSTEMS_API_KEY}
+      STRIPE_WRAPPER_URL: http://stripe-wrapper:5000
+      CREDIT_TRANSACTION_SERVICE_URL: http://credit-transaction-service:5000
+    depends_on:
+      credit-transaction-service:
+        condition: service_healthy
+      stripe-wrapper:
+        condition: service_healthy
+
+  ticket-purchase-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/ticket-purchase-orchestrator
+    ports:
+      - "6003:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SEAT_INVENTORY_GRPC_HOST: seat-inventory-service
+      SEAT_INVENTORY_GRPC_PORT: ${SEAT_INVENTORY_GRPC_PORT:-50051}
+      SEAT_INVENTORY_SERVICE_URL: http://seat-inventory-service:5000
+      TICKET_SERVICE_URL: http://ticket-service:5000
+      EVENT_SERVICE_URL: http://event-service:5000
+      CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
+      OUTSYSTEMS_API_KEY: ${OUTSYSTEMS_API_KEY}
+      CREDIT_TRANSACTION_SERVICE_URL: http://credit-transaction-service:5000
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      SEAT_HOLD_DURATION_SECONDS: ${SEAT_HOLD_DURATION_SECONDS:-600}
+    depends_on:
+      ticket-service:
+        condition: service_healthy
+      seat-inventory-service:
+        condition: service_healthy
+      credit-transaction-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  qr-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/qr-orchestrator
+    ports:
+      - "6004:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      QR_SECRET: ${QR_SECRET}
+      QR_TTL_SECONDS: ${QR_TTL_SECONDS:-60}
+      TICKET_SERVICE_URL: http://ticket-service:5000
+      EVENT_SERVICE_URL: http://event-service:5000
+      VENUE_SERVICE_URL: http://venue-service:5000
+      SEAT_INVENTORY_SERVICE_URL: http://seat-inventory-service:5000
+    depends_on:
+      ticket-service:
+        condition: service_healthy
+
+  marketplace-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/marketplace-orchestrator
+    ports:
+      - "6005:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      TICKET_SERVICE_URL: http://ticket-service:5000
+      MARKETPLACE_SERVICE_URL: http://marketplace-service:5000
+      EVENT_SERVICE_URL: http://event-service:5000
+      VENUE_SERVICE_URL: http://venue-service:5000
+      SEAT_INVENTORY_SERVICE_URL: http://seat-inventory-service:5000
+    depends_on:
+      ticket-service:
+        condition: service_healthy
+      marketplace-service:
+        condition: service_healthy
+
+  transfer-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/transfer-orchestrator
+    ports:
+      - "6007:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      MARKETPLACE_SERVICE_URL: http://marketplace-service:5000
+      TRANSFER_SERVICE_URL: http://transfer-service:5000
+      OTP_WRAPPER_URL: http://otp-wrapper:5000
+      CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
+      OUTSYSTEMS_API_KEY: ${OUTSYSTEMS_API_KEY}
+      CREDIT_TRANSACTION_SERVICE_URL: http://credit-transaction-service:5000
+      TICKET_SERVICE_URL: http://ticket-service:5000
+      USER_SERVICE_URL: http://user-service:5000
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+    depends_on:
+      transfer-service:
+        condition: service_healthy
+      marketplace-service:
+        condition: service_healthy
+      ticket-service:
+        condition: service_healthy
+      credit-transaction-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      otp-wrapper:
+        condition: service_healthy
+
+  ticket-verification-orchestrator:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./orchestrators/ticket-verification-orchestrator
+    ports:
+      - "6008:5000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      QR_TTL_SECONDS: ${QR_TTL_SECONDS:-60}
+      TICKET_SERVICE_URL: http://ticket-service:5000
+      TICKET_LOG_SERVICE_URL: http://ticket-log-service:5000
+      EVENT_SERVICE_URL: http://event-service:5000
+      VENUE_SERVICE_URL: http://venue-service:5000
+      SEAT_INVENTORY_SERVICE_URL: http://seat-inventory-service:5000
+    depends_on:
+      ticket-service:
+        condition: service_healthy
+      ticket-log-service:
+        condition: service_healthy
+      event-service:
+        condition: service_healthy
+      venue-service:
+        condition: service_healthy
+      seat-inventory-service:
+        condition: service_healthy
+
+
 networks:
   ticketremaster:
     driver: bridge
@@ -290,4 +482,3 @@ volumes:
   seat-service-db-data:
   credit-transaction-service-db-data:
   rabbitmq-data:
-
