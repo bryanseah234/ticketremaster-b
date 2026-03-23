@@ -7,6 +7,11 @@ from models import User
 bp = Blueprint('users', __name__)
 
 
+@bp.get('/health')
+def health():
+    return jsonify({'status': 'ok'}), 200
+
+
 REQUIRED_FIELDS = ('email', 'password', 'salt', 'phoneNumber')
 UPDATABLE_FIELDS = {'email', 'password', 'salt', 'phoneNumber', 'role', 'isFlagged'}
 
