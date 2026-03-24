@@ -72,6 +72,34 @@ def _publish_hold_ttl(inventory_id, user_id, hold_token):
         logger.warning("Failed to publish hold TTL message: %s", exc)
 
 
+# ── GET /tickets ─────────────────────────────────────────────────────────────
+
+@bp.get("/tickets")
+@require_auth
+def get_my_tickets():
+    user_id = request.user["userId"]
+    data, err = call_service("GET", f"{TICKET_SERVICE}/tickets/owner/{user_id}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not fetch tickets.", 503)
+    tickets = data.get("tickets", [])
+
+    # Enrich each ticket with event details
+    event_cache = {}
+    for ticket in tickets:
+        event_id = ticket.get("eventId")
+        if event_id and event_id not in event_cache:
+            event_data, e_err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
+            event_cache[event_id] = event_data if not e_err else {}
+        if event_id:
+            ev = event_cache.get(event_id, {})
+            ticket["event"] = {
+                "name": ev.get("name"),
+                "event_date": ev.get("date") or ev.get("eventDate"),
+            }
+
+    return jsonify({"data": tickets}), 200
+
+
 # ── POST /purchase/hold/<inventory_id> ───────────────────────────────────────
 
 @bp.post("/purchase/hold/<inventory_id>")
