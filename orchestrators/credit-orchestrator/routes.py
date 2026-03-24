@@ -56,6 +56,52 @@ def initiate_topup():
     }}), 200
 
 
+# ── POST /credits/topup/confirm ──────────────────────────────────────────────
+
+@bp.post("/credits/topup/confirm")
+@require_auth
+def confirm_topup():
+    body = request.get_json(silent=True) or {}
+    payment_intent_id = body.get("paymentIntentId")
+    if not payment_intent_id:
+        return _error("VALIDATION_ERROR", "paymentIntentId is required.", 400)
+
+    result, err = call_service("POST", f"{STRIPE_WRAPPER}/stripe/retrieve-payment-intent", json={"paymentIntentId": payment_intent_id})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not verify payment.", 503)
+
+    user_id = result.get("userId")
+    credits = int(result.get("credits", 0))
+
+    if str(user_id) != str(request.user["userId"]):
+        return _error("FORBIDDEN", "Payment does not belong to this user.", 403)
+
+    # Idempotency — guard against double credit
+    existing, _ = call_service("GET", f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{payment_intent_id}")
+    if existing:
+        return jsonify({"data": {"status": "already_processed"}}), 200
+
+    credit_data, err = call_credit_service("GET", f"/credits/{user_id}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve balance.", 503)
+
+    current_balance = credit_data.get("creditBalance") or 0
+    new_balance = current_balance + credits
+
+    _, err = call_credit_service("PATCH", f"/credits/{user_id}", json={"creditBalance": new_balance})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not update balance.", 503)
+
+    call_service("POST", f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
+        "userId": user_id,
+        "delta": credits,
+        "reason": "topup",
+        "referenceId": payment_intent_id,
+    })
+
+    return jsonify({"data": {"status": "confirmed", "new_balance": new_balance}}), 200
+
+
 # ── POST /credits/topup/webhook ───────────────────────────────────────────────
 
 @bp.post("/credits/topup/webhook")
@@ -95,7 +141,8 @@ def stripe_webhook():
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not retrieve balance.", 503)
 
-    new_balance = credit_data["creditBalance"] + credits
+    current_balance = credit_data.get("creditBalance") or 0
+    new_balance = current_balance + credits
 
     # Update balance in OutSystems
     _, err = call_credit_service("PATCH", f"/credits/{user_id}", json={"creditBalance": new_balance})

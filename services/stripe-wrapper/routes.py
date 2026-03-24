@@ -47,6 +47,28 @@ def create_payment_intent():
     )
 
 
+@bp.post('/stripe/retrieve-payment-intent')
+def retrieve_payment_intent():
+    payload = request.get_json(silent=True) or {}
+    payment_intent_id = payload.get('paymentIntentId')
+    if not payment_intent_id:
+        return _validation_error('paymentIntentId is required.')
+
+    stripe.api_key = current_app.config['STRIPE_SECRET_KEY']
+    intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+    if intent.get('status') != 'succeeded':
+        return jsonify({'error': {'code': 'PAYMENT_NOT_SUCCEEDED', 'message': 'Payment has not succeeded.'}}), 400
+
+    metadata = intent.get('metadata', {})
+    return jsonify({
+        'userId': metadata.get('userId'),
+        'credits': metadata.get('credits'),
+        'paymentIntentId': intent.get('id'),
+        'status': intent.get('status'),
+    }), 200
+
+
 @bp.post('/stripe/webhook')
 def stripe_webhook():
     payload = request.get_data(cache=False, as_text=False)

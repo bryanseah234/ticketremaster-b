@@ -149,6 +149,17 @@ services:
                 - apikey
               hide_credentials: true
               run_on_preflight: false
+      - name: purchase-route
+        paths:
+          - /purchase
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
 
   - name: qr-orchestrator
     url: http://qr-orchestrator:5000
@@ -156,7 +167,7 @@ services:
       - name: qr-route
         paths:
           - /qr
-        strip_path: false
+        strip_path: true
         plugins:
           - name: key-auth
             config:
