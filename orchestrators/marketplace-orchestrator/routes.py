@@ -89,7 +89,7 @@ def list_ticket():
     listing_data, err = call_service("POST", f"{MARKETPLACE_SERVICE}/listings", json={
         "ticketId": ticket_id,
         "sellerId": user_id,
-        "price":    ticket["price"],
+        "price":    body.get("price") or ticket["price"],
     })
     if err:
         # Compensate — revert ticket status

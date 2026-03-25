@@ -63,6 +63,19 @@ def create_transfer():
     ), 201
 
 
+@bp.get('/transfers')
+def list_transfers():
+    seller_id = request.args.get('sellerId')
+    status    = request.args.get('status')
+    if not seller_id:
+        return error_response(400, 'VALIDATION_ERROR', 'sellerId query param required')
+    query = Transfer.query.filter_by(sellerId=seller_id)
+    if status:
+        query = query.filter_by(status=status)
+    transfers = query.order_by(Transfer.createdAt.desc()).all()
+    return jsonify({'transfers': [t.to_dict() for t in transfers]}), 200
+
+
 @bp.get('/transfers/<transfer_id>')
 def get_transfer(transfer_id):
     transfer = db.session.get(Transfer, transfer_id)

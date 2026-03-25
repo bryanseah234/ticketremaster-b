@@ -133,6 +133,32 @@ def hold_seat(inventory_id):
     }}), 200
 
 
+# ── DELETE /purchase/hold/<inventory_id> ─────────────────────────────────────
+
+@bp.delete("/purchase/hold/<inventory_id>")
+@require_auth
+def release_hold(inventory_id):
+    user_id = request.user["userId"]
+    body = request.get_json(silent=True) or {}
+    hold_token = body.get("holdToken", "")
+
+    try:
+        stub = _grpc_stub()
+        resp = stub.ReleaseSeat(seat_inventory_pb2.ReleaseSeatRequest(
+            inventory_id=inventory_id,
+            user_id=user_id,
+            hold_token=hold_token,
+        ))
+    except grpc.RpcError as exc:
+        logger.error("gRPC ReleaseSeat error: %s", exc)
+        return _error("SERVICE_UNAVAILABLE", "Seat inventory service unavailable.", 503)
+
+    if not resp.success:
+        return _error(resp.error_code or "RELEASE_FAILED", "Could not release seat hold.", 409)
+
+    return jsonify({"data": {"inventoryId": inventory_id, "status": "available"}}), 200
+
+
 # ── POST /purchase/confirm/<inventory_id> ────────────────────────────────────
 
 @bp.post("/purchase/confirm/<inventory_id>")
