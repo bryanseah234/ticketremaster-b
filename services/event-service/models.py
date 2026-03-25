@@ -26,9 +26,9 @@ class Event(db.Model):
             'date': self.date.isoformat(),
             'type': self.type,
             'price': self.price,
+            'image': self.image,
         }
         if not summary:
             payload['description'] = self.description
-            payload['image'] = self.image
         payload['createdAt'] = self.createdAt.isoformat()
         return payload

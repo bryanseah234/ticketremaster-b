@@ -1,10 +1,8 @@
 """
 Seller Notification Consumer.
 
-Consumes seller_notification_queue messages published after buyer OTP verification.
-Since seller notification is implemented via frontend polling (GET /transfer/<id>),
-the status was already set to pending_seller_acceptance in buyer-verify.
-This consumer acks the message — the status change is the notification mechanism.
+Consumes seller_notification_queue messages published after a buyer initiates a transfer.
+Seller notification is handled via frontend polling (GET /transfer/pending).
 """
 import json
 import logging
@@ -38,13 +36,10 @@ def start_seller_consumer():
 
             def on_notification(ch, method, _properties, body):
                 try:
-                    data = json.loads(body)
-                    logger.info(
-                        "Seller notified: transfer=%s seller=%s",
-                        data.get("transferId"), data.get("sellerId"),
-                    )
-                    # Transfer status is already pending_seller_acceptance —
-                    # frontend polls GET /transfer/<id> to see the status change.
+                    data        = json.loads(body)
+                    transfer_id = data.get("transferId", "")
+                    seller_id   = data.get("sellerId", "")
+                    logger.info("Seller notification queued: transfer=%s seller=%s", transfer_id, seller_id)
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                 except Exception as exc:
                     logger.error("Seller consumer handler error: %s", exc)

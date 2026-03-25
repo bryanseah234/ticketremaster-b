@@ -117,6 +117,7 @@ def create_app(test_config=None):
             raise RuntimeError("SMU_API_KEY must be set for otp-wrapper.")
         app.config["SMU_API_KEY"] = smu_api_key
 
+
     from routes import bp as otp_wrapper_bp
 
     app.register_blueprint(otp_wrapper_bp)

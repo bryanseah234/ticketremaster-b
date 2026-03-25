@@ -379,6 +379,50 @@ def get_transfer(transfer_id):
     return jsonify({"data": transfer}), 200
 
 
+# ── POST /transfer/<id>/resend-otp ───────────────────────────────────────────
+
+@bp.post("/transfer/<transfer_id>/resend-otp")
+@require_auth
+def resend_otp(transfer_id):
+    user_id = request.user["userId"]
+
+    transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
+    if err:
+        return _error("TRANSFER_NOT_FOUND", "Transfer not found.", 404)
+    if user_id not in (transfer["buyerId"], transfer["sellerId"]):
+        return _error("AUTH_FORBIDDEN", "Access denied.", 403)
+
+    status = transfer.get("status")
+
+    if status == "pending_buyer_otp" and transfer["buyerId"] == user_id:
+        # Resend OTP to buyer
+        buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not retrieve user details.", 503)
+        otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                       json={"phoneNumber": buyer["phoneNumber"]})
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
+                     json={"buyerVerificationSid": otp_result["sid"]})
+        return jsonify({"data": {"message": "OTP resent to your phone."}}), 200
+
+    elif status == "pending_seller_otp" and transfer["sellerId"] == user_id:
+        # Resend OTP to seller
+        seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not retrieve user details.", 503)
+        otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                       json={"phoneNumber": seller["phoneNumber"]})
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
+                     json={"sellerVerificationSid": otp_result["sid"]})
+        return jsonify({"data": {"message": "OTP resent to your phone."}}), 200
+
+    return _error("VALIDATION_ERROR", "OTP resend is not available for the current transfer state.", 400)
+
+
 # ── POST /transfer/<id>/cancel ────────────────────────────────────────────────
 
 @bp.post("/transfer/<transfer_id>/cancel")
