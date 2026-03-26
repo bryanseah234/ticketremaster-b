@@ -16,6 +16,7 @@ TICKET_SERVICE      = os.environ.get("TICKET_SERVICE_URL",      "http://ticket-s
 MARKETPLACE_SERVICE = os.environ.get("MARKETPLACE_SERVICE_URL", "http://marketplace-service:5000")
 EVENT_SERVICE       = os.environ.get("EVENT_SERVICE_URL",       "http://event-service:5000")
 SEAT_INV_SERVICE    = os.environ.get("SEAT_INVENTORY_SERVICE_URL", "http://seat-inventory-service:5000")
+USER_SERVICE        = os.environ.get("USER_SERVICE_URL",        "http://user-service:5000")
 
 
 def _error(code, message, status):
@@ -35,13 +36,17 @@ def browse():
     for listing in listings_data.get("listings", []):
         ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}")
         event,  _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}") if ticket else (None, None)
+        seller, _ = call_service("GET", f"{USER_SERVICE}/users/{listing['sellerId']}")
+        seller_email = seller.get("email") if seller else None
+        seller_display = seller_email.split("@")[0] if seller_email else None
         enriched.append({
-            "listingId":  listing["listingId"],
-            "ticketId":   listing["ticketId"],
-            "sellerId":   listing["sellerId"],
-            "price":      listing["price"],
-            "status":     listing["status"],
-            "createdAt":  listing["createdAt"],
+            "listingId":   listing["listingId"],
+            "ticketId":    listing["ticketId"],
+            "sellerId":    listing["sellerId"],
+            "sellerName":  seller_display,
+            "price":       listing["price"],
+            "status":      listing["status"],
+            "createdAt":   listing["createdAt"],
             "event": {
                 "eventId": event["eventId"],
                 "name":    event["name"],

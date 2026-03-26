@@ -183,7 +183,7 @@ services:
       - name: scan-route
         paths:
           - /scan
-        strip_path: false
+        strip_path: true
         plugins:
           - name: key-auth
             config:
