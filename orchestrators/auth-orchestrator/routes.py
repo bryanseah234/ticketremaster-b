@@ -49,6 +49,7 @@ def register():
         "email": data["email"],
         "password": hashed,
         "salt": salt.decode(),
+        "role": data["role"],
         "phoneNumber": data["phoneNumber"],
         "venueId": data.get("venueId"),
     })

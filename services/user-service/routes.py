@@ -44,6 +44,7 @@ def create_user():
         phoneNumber=data['phoneNumber'],
         role=data.get('role', 'user'),
         isFlagged=data.get('isFlagged', False),
+        venueId=data.get('venueId')
     )
     db.session.add(user)
     db.session.commit()
