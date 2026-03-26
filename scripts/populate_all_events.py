@@ -128,12 +128,12 @@ EVENTS = [
 ]
 
 # ── DB connections (uses host-mapped ports from docker-compose.yml) ───────────
-event_conn = psycopg2.connect(host="localhost", port=5437, dbname="event_service",
-                               user="ticketremaster", password="localpass")
-seat_conn  = psycopg2.connect(host="localhost", port=5434, dbname="seat_service",
-                               user="ticketremaster", password="localpass")
-inv_conn   = psycopg2.connect(host="localhost", port=5438, dbname="seat_inventory_service",
-                               user="ticketremaster", password="localpass")
+event_conn = psycopg2.connect(host="event-service-db", port=5432, dbname="event_service",
+                               user="ticketremaster", password="event_dev_pass")
+seat_conn  = psycopg2.connect(host="seat-service-db", port=5432, dbname="seat_service",
+                               user="ticketremaster", password="change_me")
+inv_conn   = psycopg2.connect(host="seat-inventory-service-db", port=5432, dbname="seat_inventory_service",
+                               user="ticketremaster", password="inventory_dev_pass")
 
 event_cur = event_conn.cursor()
 seat_cur  = seat_conn.cursor()
