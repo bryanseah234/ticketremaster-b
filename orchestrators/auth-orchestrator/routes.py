@@ -50,6 +50,7 @@ def register():
         "password": hashed,
         "salt": salt.decode(),
         "phoneNumber": data["phoneNumber"],
+        "venueId": data.get("venueId"),
     })
     if err == "EMAIL_ALREADY_EXISTS":
         return _error("EMAIL_ALREADY_EXISTS", "Email is already registered.", 409)
