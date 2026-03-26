@@ -46,7 +46,6 @@ def _log(ticket_id, staff_id, status):
         "status":   status,
     })
 
-
 # ── POST /verify/scan ─────────────────────────────────────────────────────────
 
 @bp.post("/verify/scan")
@@ -124,6 +123,84 @@ def scan():
         )
 
     # 8. All checks passed
+    call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={"status": "used"})
+    _log(ticket_id, staff_id, "checked_in")
+
+    return jsonify({"data": {
+        "result":    "SUCCESS",
+        "ticketId":  ticket_id,
+        "scannedAt": datetime.now(timezone.utc).isoformat(),
+        "event": {
+            "name": event["name"],
+            "date": event["date"],
+        },
+        "seat": {
+            "seatId": seat.get("seatId"),
+        },
+        "owner": {"userId": ticket["ownerId"]},
+    }}), 200
+
+# ── POST /verify/manual ───────────────────────────────────────────────────────
+
+@bp.post("/verify/manual")
+@require_staff
+def manual_verify():
+    body      = request.get_json(silent=True) or {}
+    ticket_id = body.get("ticketId")
+    if not ticket_id:
+        return _error("VALIDATION_ERROR", "ticketId is required.", 400)
+
+    staff_id       = request.user["userId"]
+    staff_venue_id = request.user.get("venueId")   # from JWT only
+
+    # 1. Look up ticket by ID
+    ticket, err = call_service("GET", f"{TICKET_SERVICE}/tickets/{ticket_id}")
+    if err:
+        return _error("TICKET_NOT_FOUND", "No ticket found with that ID.", 404)
+
+    # 2. Validate event
+    event, err = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
+    if err:
+        _log(ticket_id, staff_id, "invalid")
+        return _error("TICKET_NOT_FOUND", "Associated event not found.", 400)
+
+    # 3. Seat status = sold
+    inv_data, _ = call_service("GET", f"{SEAT_INV_SERVICE}/inventory/event/{ticket['eventId']}")
+    seat = next(
+        (s for s in (inv_data or {}).get("inventory", []) if s["inventoryId"] == ticket["inventoryId"]),
+        None,
+    )
+    if not seat or seat.get("status") != "sold":
+        _log(ticket_id, staff_id, "invalid")
+        return _error("TICKET_NOT_FOUND", "Seat is not marked as sold.", 400)
+
+    # 4. Ticket status = active
+    if ticket["status"] != "active":
+        _log(ticket_id, staff_id, "invalid")
+        return _error("QR_INVALID", f"Ticket status is '{ticket['status']}' — not valid for entry.", 400)
+
+    # 5. Duplicate scan check
+    logs_data, _ = call_service("GET", f"{TICKET_LOG_SERVICE}/ticket-logs/ticket/{ticket_id}")
+    already_in   = any(
+        log["status"] == "checked_in"
+        for log in (logs_data or {}).get("logs", [])
+    )
+    if already_in:
+        _log(ticket_id, staff_id, "duplicate")
+        return _error("ALREADY_CHECKED_IN", "This ticket has already been used.", 409)
+
+    # 6. Venue match (venueId from JWT, never from request body)
+    if staff_venue_id and ticket.get("venueId") != staff_venue_id:
+        correct_venue, _ = call_service("GET", f"{VENUE_SERVICE}/venues/{ticket['venueId']}")
+        _log(ticket_id, staff_id, "wrong_venue")
+        return _error(
+            "WRONG_HALL",
+            "This ticket is for a different venue.",
+            400,
+            correctVenue=correct_venue,
+        )
+
+    # 7. All checks passed
     call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={"status": "used"})
     _log(ticket_id, staff_id, "checked_in")
 
