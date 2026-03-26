@@ -31,7 +31,7 @@ EVENT_SERVICE      = os.environ.get("EVENT_SERVICE_URL",              "http://ev
 SEAT_INV_REST      = os.environ.get("SEAT_INVENTORY_SERVICE_URL",     "http://seat-inventory-service:5000")
 CREDIT_TXN_SERVICE = os.environ.get("CREDIT_TRANSACTION_SERVICE_URL", "http://credit-transaction-service:5000")
 
-HOLD_SECONDS = int(os.environ.get("SEAT_HOLD_DURATION_SECONDS", "600"))
+HOLD_SECONDS = int(os.environ.get("SEAT_HOLD_DURATION_SECONDS", "300"))
 
 
 def _error(code, message, status):
