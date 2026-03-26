@@ -44,6 +44,8 @@ services:
 
   user-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5433:5432"
     environment:
       POSTGRES_DB: ${USER_SERVICE_DB_NAME:-user_service}
       POSTGRES_USER: ${USER_SERVICE_DB_USER:-ticketremaster}
@@ -65,6 +67,8 @@ services:
 
   event-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5434:5432"
     environment:
       POSTGRES_DB: ${EVENT_SERVICE_DB_NAME}
       POSTGRES_USER: ${EVENT_SERVICE_DB_USER}
@@ -88,6 +92,8 @@ services:
 
   seat-inventory-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5435:5432"
     environment:
       POSTGRES_DB: ${SEAT_INVENTORY_SERVICE_DB_NAME}
       POSTGRES_USER: ${SEAT_INVENTORY_SERVICE_DB_USER}
@@ -109,6 +115,8 @@ services:
 
   ticket-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5436:5432"
     environment:
       POSTGRES_DB: ${TICKET_SERVICE_DB_NAME}
       POSTGRES_USER: ${TICKET_SERVICE_DB_USER}
@@ -130,6 +138,8 @@ services:
 
   ticket-log-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5437:5432"
     environment:
       POSTGRES_DB: ${TICKET_LOG_SERVICE_DB_NAME}
       POSTGRES_USER: ${TICKET_LOG_SERVICE_DB_USER}
@@ -151,6 +161,8 @@ services:
 
   marketplace-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5438:5432"
     environment:
       POSTGRES_DB: ${MARKETPLACE_SERVICE_DB_NAME}
       POSTGRES_USER: ${MARKETPLACE_SERVICE_DB_USER}
@@ -172,6 +184,8 @@ services:
 
   transfer-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5439:5432"
     environment:
       POSTGRES_DB: ${TRANSFER_SERVICE_DB_NAME}
       POSTGRES_USER: ${TRANSFER_SERVICE_DB_USER}
@@ -193,6 +207,8 @@ services:
 
   venue-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5440:5432"
     environment:
       POSTGRES_DB: ${VENUE_SERVICE_DB_NAME}
       POSTGRES_USER: ${VENUE_SERVICE_DB_USER}
@@ -214,6 +230,8 @@ services:
 
   seat-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5441:5432"
     environment:
       POSTGRES_DB: ${SEAT_SERVICE_DB_NAME}
       POSTGRES_USER: ${SEAT_SERVICE_DB_USER}
@@ -235,6 +253,8 @@ services:
 
   credit-transaction-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5442:5432"
     environment:
       POSTGRES_DB: ${CREDIT_TRANSACTION_SERVICE_DB_NAME}
       POSTGRES_USER: ${CREDIT_TRANSACTION_SERVICE_DB_USER}
@@ -464,7 +484,6 @@ services:
         condition: service_healthy
       seat-inventory-service:
         condition: service_healthy
-
 
   kong:
     image: kong:3.6

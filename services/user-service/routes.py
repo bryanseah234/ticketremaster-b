@@ -13,7 +13,7 @@ def health():
 
 
 REQUIRED_FIELDS = ('email', 'password', 'salt', 'phoneNumber')
-UPDATABLE_FIELDS = {'email', 'password', 'salt', 'phoneNumber', 'role', 'isFlagged'}
+UPDATABLE_FIELDS = {'email', 'password', 'salt', 'phoneNumber', 'role', 'isFlagged', 'venueId'}
 
 
 def error_response(status_code, code, message):

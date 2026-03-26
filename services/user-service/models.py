@@ -13,6 +13,7 @@ class User(db.Model):
     phoneNumber = db.Column(db.String(20), nullable=False)
     role = db.Column(db.String(20), nullable=False, default='user')
     isFlagged = db.Column(db.Boolean, nullable=False, default=False)
+    venueId = db.Column(db.String(36), nullable=True)
     createdAt = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self, include_sensitive=False):
@@ -22,6 +23,7 @@ class User(db.Model):
             'phoneNumber': self.phoneNumber,
             'role': self.role,
             'isFlagged': self.isFlagged,
+            'venueId': self.venueId,
             'createdAt': self.createdAt.isoformat(),
         }
         if include_sensitive:
