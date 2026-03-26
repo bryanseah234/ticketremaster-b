@@ -56,27 +56,6 @@ def send_otp():
     return jsonify({'sid': sid}), 200
 
 
-@bp.post('/notify/sms')
-def send_sms_notification():
-    data = request.get_json(silent=True)
-    if not data or 'phoneNumber' not in data or 'message' not in data:
-        return error_response(400, 'VALIDATION_ERROR', 'Missing required fields: phoneNumber, message')
-
-    try:
-        response = requests.post(
-            build_smu_url('/SendMessage'),
-            headers=smu_headers(),
-            json={'Mobile': data['phoneNumber'], 'Message': data['message']},
-            timeout=10,
-        )
-        response.raise_for_status()
-        return jsonify({'sent': True}), 200
-    except (requests.RequestException, ValueError) as exc:
-        # Non-critical — log and return success so transfer flow is not blocked
-        current_app.logger.warning('SMS notification failed: %s', exc)
-        return jsonify({'sent': False, 'reason': str(exc)}), 200
-
-
 
 @bp.post('/otp/verify')
 def verify_otp():
