@@ -105,6 +105,31 @@ def get_my_tickets():
 @bp.post("/purchase/hold/<inventory_id>")
 @require_auth
 def hold_seat(inventory_id):
+    """
+    Hold a seat for purchase — reserves for SEAT_HOLD_DURATION_SECONDS
+    ---
+    tags:
+      - Purchase
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+    responses:
+      200:
+        description: Seat held — returns holdToken and heldUntil timestamp
+      401:
+        description: Unauthorized
+      404:
+        description: Seat not found
+      409:
+        description: Seat already held or sold
+      503:
+        description: Seat inventory service unavailable
+    """
     user_id = request.user["userId"]
 
     try:
@@ -164,6 +189,46 @@ def release_hold(inventory_id):
 @bp.post("/purchase/confirm/<inventory_id>")
 @require_auth
 def confirm_purchase(inventory_id):
+    """
+    Confirm a seat purchase — deducts credits and creates ticket
+    ---
+    tags:
+      - Purchase
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [eventId, holdToken]
+          properties:
+            eventId:
+              type: string
+              example: evt_001
+            holdToken:
+              type: string
+              example: c378f45d-4236-4d49-8d93-d5e965964ada
+    responses:
+      201:
+        description: Ticket created successfully
+      400:
+        description: Missing eventId or validation error
+      402:
+        description: Insufficient credits
+      409:
+        description: Seat no longer available
+      410:
+        description: Seat hold has expired
+      500:
+        description: Ticket creation failed
+    """
     user_id = request.user["userId"]
     body    = request.get_json(silent=True) or {}
     hold_token = body.get("holdToken", "")
@@ -194,9 +259,6 @@ def confirm_purchase(inventory_id):
 
     # Fetch event (need venueId + price)
     inv_list, err = call_service("GET", f"{SEAT_INV_REST}/inventory/event/{seat_status.inventory_id if hasattr(seat_status, 'inventory_id') else inventory_id}")
-    # Fallback: find the inventory record by listing events — we need eventId
-    # The seat inventory REST list endpoint returns eventId per record
-    # Filter for our inventoryId
     inv_record = None
     if not err:
         inv_record = next(
@@ -204,9 +266,7 @@ def confirm_purchase(inventory_id):
             None,
         )
 
-    # If we can't find it that way, the confirm body may supply eventId
     event_id = body.get("eventId") or (inv_record["eventId"] if inv_record else None)
-    venue_id = body.get("venueId") or (None)  # resolved from event below
 
     if not event_id:
         return _error("VALIDATION_ERROR", "Could not resolve eventId for this seat.", 400)
@@ -215,7 +275,7 @@ def confirm_purchase(inventory_id):
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not fetch event details.", 503)
 
-    venue_id    = event_data.get("venueId")
+    venue_id     = event_data.get("venueId")
     ticket_price = float(event_data["price"])
 
     # 2. Check buyer credits (OutSystems)
@@ -223,7 +283,22 @@ def confirm_purchase(inventory_id):
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not verify credit balance.", 503)
 
-    if credit_data["creditBalance"] < ticket_price:
+    logger.info("Credit data response: %s", credit_data)
+
+    # Handle different possible field names from OutSystems
+    # and treat missing/zero balance as 0.0
+    raw_balance = (
+        credit_data.get("creditBalance")
+        if credit_data.get("creditBalance") is not None
+        else credit_data.get("CreditBalance")
+        if credit_data.get("CreditBalance") is not None
+        else credit_data.get("balance")
+        if credit_data.get("balance") is not None
+        else 0.0
+    )
+    balance = float(raw_balance)
+
+    if balance < ticket_price:
         return _error("INSUFFICIENT_CREDITS", "Insufficient credits for this purchase.", 402)
 
     # 3. Sell seat via gRPC
@@ -264,7 +339,7 @@ def confirm_purchase(inventory_id):
 
     # 5. Deduct credits (OutSystems)
     _, err = call_credit_service("PATCH", f"/credits/{user_id}", json={
-        "creditBalance": credit_data["creditBalance"] - ticket_price,
+        "creditBalance": balance - ticket_price,
     })
     if err:
         logger.error("Credit deduction failed for user %s — ticket %s created but credits not deducted", user_id, ticket_id)

@@ -1,4 +1,5 @@
 # TicketRemaster — Implementation Instructions
+
 ### Stack: Python · Flask · PostgreSQL · RabbitMQ · gRPC · OutSystems · Docker · Kubernetes
 
 This document explains the reasoning behind the implementation order in `tasks.md` and provides detailed guidance for each phase.
@@ -22,6 +23,7 @@ Never start an orchestrator until all the atomic services it calls are running a
 ## Phase 0 — Project Setup
 
 ### Folder structure
+
 Organise as a monorepo with one folder per service. Each service is fully self-contained with its own `requirements.txt`, `Dockerfile`, and database migrations.
 
 ```
@@ -55,6 +57,7 @@ ticketremaster/
 ```
 
 ### Standard service structure
+
 Every service and orchestrator follows the same internal layout:
 
 ```
@@ -69,6 +72,7 @@ user-service/
 ```
 
 ### Standard Dockerfile
+
 All services use the same base pattern:
 
 ```dockerfile
@@ -99,6 +103,7 @@ CMD ["python", "server.py"]
 ```
 
 ### Base requirements.txt
+
 Every service shares this base set:
 
 ```
@@ -113,6 +118,7 @@ gunicorn==22.0.0
 Additional per-service dependencies are noted in each phase below.
 
 ### Health check endpoint
+
 Every service must expose GET /health returning { "status": "ok" }. Add this to every
 service before anything else — it is required for Docker health checks and Kubernetes
 liveness probes.
@@ -124,6 +130,7 @@ def health():
 ```
 
 ### Flask app factory pattern
+
 Use the application factory pattern so the app can be instantiated with different configs
 for testing versus production:
 
@@ -160,38 +167,40 @@ app = create_app()
 ```
 
 ### docker-compose.yml pattern per service
+
 Each service gets its own isolated PostgreSQL container. Never share a database between
 two services — this defeats the purpose of the microservice architecture.
 
 ```yaml
 user-service:
-  build: ./services/user-service
-  ports:
-    - "3001:5000"
-  environment:
-    DATABASE_URL: postgresql://postgres:password@user-db:5432/users
-  depends_on:
-    user-db:
-      condition: service_healthy
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
+    build: ./services/user-service
+    ports:
+        - "3001:5000"
+    environment:
+        DATABASE_URL: postgresql://postgres:password@user-db:5432/users
+    depends_on:
+        user-db:
+            condition: service_healthy
+    healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
 
 user-db:
-  image: postgres:16-alpine
-  environment:
-    POSTGRES_DB: users
-    POSTGRES_PASSWORD: password
-  healthcheck:
-    test: ["CMD-SHELL", "pg_isready -U postgres"]
-    interval: 5s
-    timeout: 5s
-    retries: 5
+    image: postgres:16-alpine
+    environment:
+        POSTGRES_DB: users
+        POSTGRES_PASSWORD: password
+    healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 5s
+        timeout: 5s
+        retries: 5
 ```
 
 ### Standard error response shape
+
 All services and orchestrators must return errors in the same envelope:
 
 ```python
@@ -203,6 +212,7 @@ def success_response(data, status_code=200):
 ```
 
 ### Environment variables
+
 Define all keys in .env.example at the root from day one. Each service only references
 its own variables. Never share a single .env file across services.
 
@@ -214,6 +224,7 @@ These five services (User, Venue, Seat, Credit, Credit Transaction) have no outb
 calls to other services. They only talk to their own PostgreSQL database. Build them first.
 
 ### Build each service in this pattern:
+
 1. Scaffold the folder structure
 2. Write the SQLAlchemy model in models.py
 3. Run migrations: flask db init -> flask db migrate -m "initial" -> flask db upgrade
@@ -222,6 +233,7 @@ calls to other services. They only talk to their own PostgreSQL database. Build 
 6. Add to docker-compose.yml and verify it boots cleanly
 
 ### SQLAlchemy model pattern
+
 Use UUIDs as primary keys. Generate them in Python so tests never depend on the database
 for ID creation:
 
@@ -245,6 +257,7 @@ class User(db.Model):
 ```
 
 ### Route handler pattern
+
 Keep route handlers thin. Validate input, call a function, return a response. Never put
 business logic directly in a route handler:
 
@@ -305,7 +318,7 @@ key header is always injected consistently:
 ```python
 def call_credit_service(method, path, **kwargs):
     headers = kwargs.pop('headers', {})
-    headers['X-API-Key'] = os.environ['OUTSYSTEMS_API_KEY']
+    headers['X-API-KEY'] = os.environ['OUTSYSTEMS_API_KEY']
     return call_service(
         method,
         f"{os.environ['CREDIT_SERVICE_URL']}{path}",
@@ -351,11 +364,13 @@ with app.app_context():
 ## Phase 2 — Event & Seat Inventory Services
 
 ### Event Service
+
 The Event Service only creates the event record. It does not create seat inventory —
 that is triggered separately after the event is created. Keep the Event Service dumb.
 Seed at least 2 events pointing to your seeded venues.
 
 ### Seat Inventory Service — most critical service in the system
+
 This service is the most technically demanding because it uses both REST and gRPC and
 handles pessimistic locking under concurrent requests.
 
@@ -498,6 +513,7 @@ add transition validation logic to the Transfer Service.
 ## Phase 4 — External Wrappers
 
 ### Stripe Wrapper
+
 Additional requirements:
 
 ```
@@ -505,8 +521,9 @@ stripe==9.9.0
 ```
 
 **Development setup:**
+
 1. Create a free Stripe test account
-2. Copy your test secret key (sk_test_...) into .env
+2. Copy your test secret key (sk*test*...) into .env
 3. Run: stripe listen --forward-to localhost:PORT/stripe/webhook
 4. Add the webhook signing secret output by the CLI to .env as STRIPE_WEBHOOK_SECRET
 
@@ -548,6 +565,7 @@ def stripe_webhook():
 ```
 
 ### OTP Wrapper
+
 Keep this thin — two methods only: send (returns SID) and verify (returns True/False).
 This service stores nothing:
 
@@ -576,18 +594,18 @@ useful for debugging queues during development:
 
 ```yaml
 rabbitmq:
-  image: rabbitmq:3-management
-  ports:
-    - "5672:5672"
-    - "15672:15672"
-  environment:
-    RABBITMQ_DEFAULT_USER: guest
-    RABBITMQ_DEFAULT_PASS: guest
-  healthcheck:
-    test: ["CMD", "rabbitmq-diagnostics", "ping"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
+    image: rabbitmq:3-management
+    ports:
+        - "5672:5672"
+        - "15672:15672"
+    environment:
+        RABBITMQ_DEFAULT_USER: guest
+        RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+        test: ["CMD", "rabbitmq-diagnostics", "ping"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
 ```
 
 Additional requirements for any service using RabbitMQ:
@@ -671,6 +689,7 @@ bcrypt==4.1.3
 ```
 
 ### Internal service call helper
+
 Centralise outbound calls in a helper that handles timeouts and errors consistently:
 
 ```python
@@ -688,6 +707,7 @@ def call_service(method, url, **kwargs):
 ```
 
 ### JWT middleware
+
 Build once in the Auth Orchestrator and copy to every orchestrator that needs auth:
 
 ```python
@@ -726,6 +746,7 @@ def require_staff(f):
 ```
 
 ### 6.1 Auth Orchestrator — build this first
+
 Establishes the JWT pattern all other orchestrators reuse. Get this solid first.
 
 **Registration — compensate if credit init fails:**
@@ -773,10 +794,12 @@ def generate_token(user, venue_id=None):
 ```
 
 ### 6.2 Event Orchestrator — build this second
+
 The only fully public orchestrator — no JWT middleware. It is read-only and a good smoke
 test that internal HTTP calls between services are working correctly.
 
 ### 6.3 Credit Orchestrator
+
 The Stripe webhook endpoint must not use @require_auth — it is called by Stripe, not
 your frontend. Verify the Stripe signature instead (see Phase 4).
 
@@ -787,7 +810,7 @@ Use `call_credit_service()` for all Credit Service calls. This helper wraps the 
 ```python
 def call_credit_service(method, path, **kwargs):
     headers = kwargs.pop('headers', {})
-    headers['X-API-Key'] = os.environ['OUTSYSTEMS_API_KEY']
+    headers['X-API-KEY'] = os.environ['OUTSYSTEMS_API_KEY']
     return call_service(
         method,
         f"{os.environ['CREDIT_SERVICE_URL']}{path}",
@@ -827,6 +850,7 @@ Stripe may deliver the same webhook more than once. The idempotency check in ste
 above guards against this — always perform it before any balance update.
 
 ### 6.4 Ticket Purchase Orchestrator
+
 Set up the gRPC client using the generated stubs:
 
 ```python
@@ -891,8 +915,8 @@ SEAT_HOLD_DURATION_SECONDS=600   # production
 SEAT_HOLD_DURATION_SECONDS=10    # test
 ```
 
-
 ### 6.5 QR Orchestrator
+
 The QR_SECRET must be a long random string (32+ characters) stored as an environment
 variable — never hardcode it. Generate one with: python -c "import secrets; print(secrets.token_hex(32))"
 
@@ -910,6 +934,7 @@ The 60-second TTL is enforced at scan time by the Ticket Verification Orchestrat
 The QR Orchestrator only generates and stores the hash.
 
 ### 6.6 Marketplace Orchestrator
+
 Before creating a listing, check the ticket status is exactly 'active'. Reject anything
 in pending_transfer, listed, used, or expired state:
 
@@ -920,6 +945,7 @@ if ticket['status'] != 'active':
 ```
 
 ### 6.7 Transfer Orchestrator — most complex in the system
+
 Build this last among the orchestrators. It has the most steps and requires compensating
 logic if anything fails mid-transfer.
 
@@ -998,10 +1024,12 @@ if transfer['status'] != 'pending_seller_otp' or transfer['sellerOtpVerified']:
 ```
 
 ### 6.8 Ticket Verification Orchestrator
+
 The staff's venueId must come from the JWT — never from the request body. If the
 frontend could pass it, a malicious staff member could verify tickets at any venue.
 
 **Check order — perform in this exact sequence:**
+
 1. Look up ticket by QR hash
 2. Check QR TTL (60 seconds) — log 'expired' if stale
 3. Validate event is active
@@ -1051,7 +1079,9 @@ return DUPLICATE_SCAN).
 ## Phase 8 — Docker & Kubernetes
 
 ### Docker Compose checklist before Kompose
+
 Ensure your docker-compose.yml:
+
 - Has healthcheck defined for every service and database container
 - Uses named volumes for all PostgreSQL containers
 - Has all inter-service URLs using Docker service names, not localhost
@@ -1068,23 +1098,23 @@ Kubernetes Secret objects:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: app-secrets
+    name: app-secrets
 stringData:
-  JWT_SECRET: "your-secret-here"
-  STRIPE_SECRET_KEY: "sk_live_..."
-  QR_SECRET: "your-qr-secret-here"
-  STRIPE_WEBHOOK_SECRET: "whsec_..."
+    JWT_SECRET: "your-secret-here"
+    STRIPE_SECRET_KEY: "sk_live_..."
+    QR_SECRET: "your-qr-secret-here"
+    STRIPE_WEBHOOK_SECRET: "whsec_..."
 ```
 
 Reference in each Deployment:
 
 ```yaml
 env:
-  - name: JWT_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: app-secrets
-        key: JWT_SECRET
+    - name: JWT_SECRET
+      valueFrom:
+          secretKeyRef:
+              name: app-secrets
+              key: JWT_SECRET
 ```
 
 **2. Health check probes**
@@ -1092,17 +1122,17 @@ Add to every Deployment:
 
 ```yaml
 livenessProbe:
-  httpGet:
-    path: /health
-    port: 5000
-  initialDelaySeconds: 15
-  periodSeconds: 10
+    httpGet:
+        path: /health
+        port: 5000
+    initialDelaySeconds: 15
+    periodSeconds: 10
 readinessProbe:
-  httpGet:
-    path: /health
-    port: 5000
-  initialDelaySeconds: 5
-  periodSeconds: 5
+    httpGet:
+        path: /health
+        port: 5000
+    initialDelaySeconds: 5
+    periodSeconds: 5
 ```
 
 **3. Resource limits**
@@ -1110,12 +1140,12 @@ Add to every Deployment as a baseline — tune later based on observed usage:
 
 ```yaml
 resources:
-  requests:
-    memory: "128Mi"
-    cpu: "100m"
-  limits:
-    memory: "256Mi"
-    cpu: "500m"
+    requests:
+        memory: "128Mi"
+        cpu: "100m"
+    limits:
+        memory: "256Mi"
+        cpu: "500m"
 ```
 
 **4. HorizontalPodAutoscaler**
@@ -1125,21 +1155,21 @@ Add for seat-inventory-service and ticket-purchase-orchestrator:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: seat-inventory-hpa
+    name: seat-inventory-hpa
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: seat-inventory-service
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
+    scaleTargetRef:
+        apiVersion: apps/v1
+        kind: Deployment
+        name: seat-inventory-service
+    minReplicas: 2
+    maxReplicas: 10
+    metrics:
+        - type: Resource
+          resource:
+              name: cpu
+              target:
+                  type: Utilization
+                  averageUtilization: 70
 ```
 
 **5. Ingress**
@@ -1150,67 +1180,67 @@ through a single Ingress resource:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ticketremaster-ingress
+    name: ticketremaster-ingress
 spec:
-  rules:
-    - http:
-        paths:
-          - path: /auth
-            pathType: Prefix
-            backend:
-              service:
-                name: auth-orchestrator
-                port:
-                  number: 5000
-          - path: /events
-            pathType: Prefix
-            backend:
-              service:
-                name: event-orchestrator
-                port:
-                  number: 5000
-          - path: /purchase
-            pathType: Prefix
-            backend:
-              service:
-                name: ticket-purchase-orchestrator
-                port:
-                  number: 5000
-          - path: /credits
-            pathType: Prefix
-            backend:
-              service:
-                name: credit-orchestrator
-                port:
-                  number: 5000
-          - path: /marketplace
-            pathType: Prefix
-            backend:
-              service:
-                name: marketplace-orchestrator
-                port:
-                  number: 5000
-          - path: /transfer
-            pathType: Prefix
-            backend:
-              service:
-                name: transfer-orchestrator
-                port:
-                  number: 5000
-          - path: /tickets
-            pathType: Prefix
-            backend:
-              service:
-                name: qr-orchestrator
-                port:
-                  number: 5000
-          - path: /verify
-            pathType: Prefix
-            backend:
-              service:
-                name: ticket-verification-orchestrator
-                port:
-                  number: 5000
+    rules:
+        - http:
+              paths:
+                  - path: /auth
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: auth-orchestrator
+                            port:
+                                number: 5000
+                  - path: /events
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: event-orchestrator
+                            port:
+                                number: 5000
+                  - path: /purchase
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: ticket-purchase-orchestrator
+                            port:
+                                number: 5000
+                  - path: /credits
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: credit-orchestrator
+                            port:
+                                number: 5000
+                  - path: /marketplace
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: marketplace-orchestrator
+                            port:
+                                number: 5000
+                  - path: /transfer
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: transfer-orchestrator
+                            port:
+                                number: 5000
+                  - path: /tickets
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: qr-orchestrator
+                            port:
+                                number: 5000
+                  - path: /verify
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: ticket-verification-orchestrator
+                            port:
+                                number: 5000
 ```
 
 ### Testing on Minikube
@@ -1222,4 +1252,3 @@ docker compose build           # build all images into Minikube's daemon
 kubectl apply -f k8s/          # apply all manifests
 minikube tunnel                # expose Ingress at localhost
 ```
-

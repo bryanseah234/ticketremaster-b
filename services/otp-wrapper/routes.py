@@ -16,7 +16,7 @@ def build_smu_url(path):
 
 
 def smu_headers():
-    return {'X-API-Key': current_app.config['SMU_API_KEY']}
+    return {'X-API-KEY': current_app.config['SMU_API_KEY']}
 
 
 @bp.get('/health')

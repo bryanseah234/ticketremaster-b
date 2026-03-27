@@ -25,6 +25,21 @@ def _error(code, message, status):
 @bp.get("/credits/balance")
 @require_auth
 def get_balance():
+    """
+    Get the authenticated user's credit balance
+    ---
+    tags:
+      - Credits
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: Credit balance from OutSystems
+      401:
+        description: Unauthorized
+      503:
+        description: Credit service unavailable
+    """
     data, err = call_credit_service("GET", f"/credits/{request.user['userId']}")
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not retrieve balance.", 503)
@@ -36,6 +51,33 @@ def get_balance():
 @bp.post("/credits/topup/initiate")
 @require_auth
 def initiate_topup():
+    """
+    Initiate a Stripe credit top-up and get a clientSecret for payment
+    ---
+    tags:
+      - Credits
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [amount]
+          properties:
+            amount:
+              type: integer
+              example: 100
+              description: Amount in credits (1 credit = $1 SGD)
+    responses:
+      200:
+        description: Returns clientSecret and paymentIntentId for Stripe
+      400:
+        description: Invalid amount
+      401:
+        description: Unauthorized
+    """
     body = request.get_json(silent=True) or {}
     amount = body.get("amount")
 
@@ -107,9 +149,20 @@ def confirm_topup():
 @bp.post("/credits/topup/webhook")
 def stripe_webhook():
     """
-    Called by Stripe (not the frontend).
-    Stripe Wrapper verifies the signature and returns structured data.
-    We handle idempotency and credit logic here.
+    Stripe webhook — called by Stripe after payment succeeds
+    ---
+    tags:
+      - Credits
+    parameters:
+      - in: header
+        name: Stripe-Signature
+        required: true
+        type: string
+    responses:
+      200:
+        description: Webhook processed
+      400:
+        description: Invalid Stripe signature
     """
     payload   = request.get_data(cache=False, as_text=False)
     signature = request.headers.get("Stripe-Signature", "")
@@ -165,6 +218,28 @@ def stripe_webhook():
 @bp.get("/credits/transactions")
 @require_auth
 def get_transactions():
+    """
+    Get the authenticated user's credit transaction history
+    ---
+    tags:
+      - Credits
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        example: 1
+      - in: query
+        name: limit
+        type: integer
+        example: 20
+    responses:
+      200:
+        description: Paginated list of credit transactions
+      401:
+        description: Unauthorized
+    """
     params = {k: request.args[k] for k in ("page", "limit") if k in request.args}
     data, err = call_service("GET", f"{CREDIT_TXN_SERVICE}/credit-transactions/user/{request.user['userId']}", params=params)
     if err:

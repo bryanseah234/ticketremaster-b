@@ -24,6 +24,22 @@ def _error(code, message, status):
 
 @bp.get("/events")
 def list_events():
+    """
+    List all events enriched with venue and seat availability
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: query
+        name: type
+        type: string
+        description: Filter by event type (e.g. concert, orchestra, sports)
+    responses:
+      200:
+        description: List of events with venue and seatsAvailable
+      503:
+        description: Event service unavailable
+    """
     params = {k: v for k, v in request.args.items() if k in ("type", "page", "limit")}
     events_data, err = call_service("GET", f"{EVENT_SERVICE}/events", params=params)
     if err:
@@ -51,6 +67,23 @@ def list_events():
 
 @bp.get("/events/<event_id>")
 def get_event(event_id):
+    """
+    Get a single event with full venue details
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+        example: evt_001
+    responses:
+      200:
+        description: Event with venue details
+      404:
+        description: Event not found
+    """
     event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err == "EVENT_NOT_FOUND":
         return _error("EVENT_NOT_FOUND", "Event not found.", 404)
@@ -66,6 +99,23 @@ def get_event(event_id):
 
 @bp.get("/events/<event_id>/seats")
 def get_seat_map(event_id):
+    """
+    Get the seat map for an event
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+        example: evt_001
+    responses:
+      200:
+        description: Seat map with status for each seat (available, held, sold)
+      404:
+        description: Event not found
+    """
     event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err:
         return _error("EVENT_NOT_FOUND", "Event not found.", 404)
@@ -100,6 +150,28 @@ def get_seat_map(event_id):
 
 @bp.get("/events/<event_id>/seats/<inventory_id>")
 def get_seat_detail(event_id, inventory_id):
+    """
+    Get details for a single seat including event and venue info
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+        example: evt_001
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+    responses:
+      200:
+        description: Seat detail with event and venue
+      404:
+        description: Event or seat not found
+    """
     event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err:
         return _error("EVENT_NOT_FOUND", "Event not found.", 404)
