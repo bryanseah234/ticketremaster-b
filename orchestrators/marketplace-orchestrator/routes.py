@@ -27,6 +27,21 @@ def _error(code, message, status):
 
 @bp.get("/marketplace")
 def browse():
+    """
+    Browse all active marketplace listings
+    ---
+    tags:
+      - Marketplace
+    parameters:
+      - in: query
+        name: eventId
+        type: string
+        description: Filter listings by event
+        example: evt_001
+    responses:
+      200:
+        description: List of active listings enriched with event details
+    """
     params = {k: request.args[k] for k in ("eventId", "page", "limit") if k in request.args}
     listings_data, err = call_service("GET", f"{MARKETPLACE_SERVICE}/listings", params=params)
     if err:
@@ -65,6 +80,36 @@ def browse():
 @bp.post("/marketplace/list")
 @require_auth
 def list_ticket():
+    """
+    List a ticket for sale on the marketplace
+    ---
+    tags:
+      - Marketplace
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [ticketId]
+          properties:
+            ticketId:
+              type: string
+              example: tkt_001
+    responses:
+      201:
+        description: Listing created — ticket status set to listed
+      400:
+        description: Ticket not eligible for listing
+      401:
+        description: Unauthorized
+      403:
+        description: You do not own this ticket
+      404:
+        description: Ticket not found
+    """
     user_id = request.user["userId"]
     body    = request.get_json(silent=True) or {}
 
@@ -109,6 +154,31 @@ def list_ticket():
 @bp.delete("/marketplace/<listing_id>")
 @require_auth
 def delist(listing_id):
+    """
+    Cancel a marketplace listing and revert ticket to active
+    ---
+    tags:
+      - Marketplace
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: listing_id
+        required: true
+        type: string
+        example: lst_001
+    responses:
+      200:
+        description: Listing cancelled — ticket reverted to active
+      400:
+        description: Listing is not active
+      401:
+        description: Unauthorized
+      403:
+        description: You are not the seller
+      404:
+        description: Listing not found
+    """
     user_id = request.user["userId"]
 
     listing, err = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{listing_id}")

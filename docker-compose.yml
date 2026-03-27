@@ -360,7 +360,8 @@ services:
   ticket-purchase-orchestrator:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./orchestrators/ticket-purchase-orchestrator
+      context: .
+      dockerfile: ./orchestrators/ticket-purchase-orchestrator/Dockerfile
     ports:
       - "6003:5000"
     environment:
@@ -428,7 +429,8 @@ services:
   transfer-orchestrator:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./orchestrators/transfer-orchestrator
+      context: .
+      dockerfile: ./orchestrators/transfer-orchestrator/Dockerfile
     ports:
       - "6007:5000"
     environment:

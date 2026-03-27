@@ -51,6 +51,38 @@ def _log(ticket_id, staff_id, status):
 @bp.post("/verify/scan")
 @require_staff
 def scan():
+    """
+    Scan a QR code to verify and check in a ticket (staff only)
+    ---
+    tags:
+      - Verification
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [qrHash]
+          properties:
+            qrHash:
+              type: string
+              example: a3f9d2e1b8c74f6a91e2d3b4c5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4
+    responses:
+      200:
+        description: Ticket checked in successfully
+      400:
+        description: QR expired, seat not sold, ticket not active, or wrong venue
+      401:
+        description: Unauthorized
+      403:
+        description: Staff role required
+      404:
+        description: QR hash not found
+      409:
+        description: Ticket already checked in
+    """
     body    = request.get_json(silent=True) or {}
     qr_hash = body.get("qrHash")
     if not qr_hash:
@@ -145,6 +177,38 @@ def scan():
 @bp.post("/verify/manual")
 @require_staff
 def manual_verify():
+    """
+    Manually verify a ticket by ticket ID (staff only — no QR required)
+    ---
+    tags:
+      - Verification
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [ticketId]
+          properties:
+            ticketId:
+              type: string
+              example: tkt_001
+    responses:
+      200:
+        description: Ticket checked in successfully
+      400:
+        description: Ticket not active or wrong venue
+      401:
+        description: Unauthorized
+      403:
+        description: Staff role required
+      404:
+        description: Ticket not found
+      409:
+        description: Ticket already checked in
+    """
     body      = request.get_json(silent=True) or {}
     ticket_id = body.get("ticketId")
     if not ticket_id:

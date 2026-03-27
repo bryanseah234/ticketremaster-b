@@ -46,7 +46,7 @@ def test_send_otp_success(client, monkeypatch):
     assert response.status_code == 200
     assert response.get_json() == {'sid': 'sid_123'}
     assert captured['url'] == 'https://smu.example.com/Notification/SendOTP'
-    assert captured['headers'] == {'X-API-Key': 'fake-api-key'}
+    assert captured['headers'] == {'X-API-KEY': 'fake-api-key'}
     assert captured['json'] == {'Mobile': '+6591234567'}
     assert captured['timeout'] == 10
 
@@ -89,7 +89,7 @@ def test_verify_otp_success(client, monkeypatch):
     assert response.status_code == 200
     assert response.get_json() == {'verified': True}
     assert captured['url'] == 'https://smu.example.com/Notification/VerifyOTP'
-    assert captured['headers'] == {'X-API-Key': 'fake-api-key'}
+    assert captured['headers'] == {'X-API-KEY': 'fake-api-key'}
     assert captured['json'] == {'VerificationSid': 'sid_123', 'Code': '123456'}
     assert captured['timeout'] == 10
 

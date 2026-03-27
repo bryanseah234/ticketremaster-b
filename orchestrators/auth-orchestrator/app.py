@@ -1,6 +1,7 @@
 import os
 from flask import Flask, jsonify
 from dotenv import load_dotenv
+from flasgger import Swagger
 
 
 def create_app(test_config=None):
@@ -12,6 +13,22 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+
+    app.config["SWAGGER"] = {
+        "title": "Auth Orchestrator",
+        "uiversion": 3,
+        "version": "1.0.0",
+        "description": "Authentication — register, login, and JWT profile.",
+        "securityDefinitions": {
+            "BearerAuth": {
+                "type": "apiKey",
+                "name": "Authorization",
+                "in": "header",
+                "description": "Enter: Bearer <your_token>",
+            }
+        },
+    }
+    Swagger(app)    
 
     from routes import bp
     app.register_blueprint(bp)

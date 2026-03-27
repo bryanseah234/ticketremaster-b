@@ -36,6 +36,42 @@ def _generate_token(user):
 
 @bp.post("/auth/register")
 def register():
+    """
+    Register a new user account
+    ---
+    tags:
+      - Auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [email, password, phoneNumber]
+          properties:
+            email:
+              type: string
+              example: buyer@example.com
+            password:
+              type: string
+              example: Password123!
+            phoneNumber:
+              type: string
+              example: "+6591234567"
+            venueId:
+              type: string
+              example: ven_001
+              description: Optional. Only for staff accounts.
+    responses:
+      201:
+        description: User registered successfully
+      400:
+        description: Validation error or missing fields
+      409:
+        description: Email already registered
+      500:
+        description: Credit initialisation failed
+    """
     data = request.get_json(silent=True) or {}
     required = ("email", "password", "phoneNumber")
     missing = [f for f in required if not data.get(f)]
@@ -77,6 +113,35 @@ def register():
 
 @bp.post("/auth/login")
 def login():
+    """
+    Login and receive a JWT token
+    ---
+    tags:
+      - Auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [email, password]
+          properties:
+            email:
+              type: string
+              example: buyer@example.com
+            password:
+              type: string
+              example: Password123!
+    responses:
+      200:
+        description: Login successful — returns JWT token
+      400:
+        description: Missing fields
+      401:
+        description: Invalid credentials
+      403:
+        description: Account suspended
+    """
     data = request.get_json(silent=True) or {}
     if not data.get("email") or not data.get("password"):
         return _error("VALIDATION_ERROR", "email and password are required.", 400)
@@ -111,6 +176,21 @@ def login():
 @bp.get("/auth/me")
 @require_auth
 def me():
+    """
+    Get the current authenticated user's profile
+    ---
+    tags:
+      - Auth
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: User profile
+      401:
+        description: Missing or invalid token
+      404:
+        description: User not found
+    """
     user_data, err = call_service("GET", f"{USER_SERVICE}/users/{request.user['userId']}")
     if err:
         return _error("USER_NOT_FOUND", "User not found.", 404)

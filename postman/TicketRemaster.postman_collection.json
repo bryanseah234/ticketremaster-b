@@ -559,7 +559,7 @@
             "method": "POST",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-API-Key", "value": "{{outsystems_api_key}}" }
+              { "key": "X-API-KEY", "value": "{{outsystems_api_key}}" }
             ],
             "body": {
               "mode": "raw",
@@ -574,7 +574,7 @@
             "method": "GET",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-API-Key", "value": "{{outsystems_api_key}}" }
+              { "key": "X-API-KEY", "value": "{{outsystems_api_key}}" }
             ],
             "url": "{{credit_service_url}}/credits/{{outsystems_test_user_id}}"
           }
@@ -585,7 +585,7 @@
             "method": "PATCH",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-API-Key", "value": "{{outsystems_api_key}}" }
+              { "key": "X-API-KEY", "value": "{{outsystems_api_key}}" }
             ],
             "body": {
               "mode": "raw",
@@ -600,7 +600,7 @@
             "method": "GET",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-API-Key", "value": "invalid-key" }
+              { "key": "X-API-KEY", "value": "invalid-key" }
             ],
             "url": "{{credit_service_url}}/credits/{{outsystems_test_user_id}}"
           }
