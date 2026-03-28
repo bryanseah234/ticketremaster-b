@@ -77,6 +77,54 @@ def _publish_hold_ttl(inventory_id, user_id, hold_token):
 @bp.get("/tickets")
 @require_auth
 def get_my_tickets():
+    """
+    List all tickets owned by the authenticated user enriched with event details
+    ---
+    tags:
+      - Tickets
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of tickets with event details
+        schema:
+          type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  ticketId:
+                    type: string
+                    example: tkt_001
+                  status:
+                    type: string
+                    example: active
+                    enum: [active, listed, used, pending_transfer]
+                  price:
+                    type: number
+                    example: 80.0
+                  eventId:
+                    type: string
+                    example: evt_001
+                  venueId:
+                    type: string
+                    example: ven_001
+                  event:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        example: Taylor Swift | The Eras Tour
+                      event_date:
+                        type: string
+                        example: "2025-06-15T19:30:00"
+      401:
+        description: Unauthorized
+      503:
+        description: Ticket service unavailable
+    """
     user_id = request.user["userId"]
     data, err = call_service("GET", f"{TICKET_SERVICE}/tickets/owner/{user_id}")
     if err:
@@ -163,6 +211,52 @@ def hold_seat(inventory_id):
 @bp.delete("/purchase/hold/<inventory_id>")
 @require_auth
 def release_hold(inventory_id):
+    """
+    Manually release a seat hold before it expires
+    ---
+    tags:
+      - Purchase
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [holdToken]
+          properties:
+            holdToken:
+              type: string
+              example: c378f45d-4236-4d49-8d93-d5e965964ada
+              description: The holdToken returned from POST /purchase/hold/<inventory_id>
+    responses:
+      200:
+        description: Seat released — status back to available
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                inventoryId:
+                  type: string
+                  example: inv_001
+                status:
+                  type: string
+                  example: available
+      401:
+        description: Unauthorized
+      409:
+        description: Could not release — hold token mismatch or seat not held
+      503:
+        description: Seat inventory service unavailable
+    """
     user_id = request.user["userId"]
     body = request.get_json(silent=True) or {}
     hold_token = body.get("holdToken", "")

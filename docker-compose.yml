@@ -307,7 +307,7 @@ services:
     build:
       context: ./orchestrators/auth-orchestrator
     ports:
-      - "6000:5000"
+      - "8100:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       USER_SERVICE_URL: http://user-service:5000
@@ -322,7 +322,7 @@ services:
     build:
       context: ./orchestrators/event-orchestrator
     ports:
-      - "6001:5000"
+      - "8101:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       EVENT_SERVICE_URL: http://event-service:5000
@@ -344,7 +344,7 @@ services:
     build:
       context: ./orchestrators/credit-orchestrator
     ports:
-      - "6002:5000"
+      - "8102:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
@@ -363,7 +363,7 @@ services:
       context: .
       dockerfile: ./orchestrators/ticket-purchase-orchestrator/Dockerfile
     ports:
-      - "6003:5000"
+      - "8103:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       SEAT_INVENTORY_GRPC_HOST: seat-inventory-service
@@ -394,7 +394,7 @@ services:
     build:
       context: ./orchestrators/qr-orchestrator
     ports:
-      - "6004:5000"
+      - "8104:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       QR_SECRET: ${QR_SECRET}
@@ -412,7 +412,7 @@ services:
     build:
       context: ./orchestrators/marketplace-orchestrator
     ports:
-      - "6005:5000"
+      - "8105:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       TICKET_SERVICE_URL: http://ticket-service:5000
@@ -432,7 +432,7 @@ services:
       context: .
       dockerfile: ./orchestrators/transfer-orchestrator/Dockerfile
     ports:
-      - "6007:5000"
+      - "8107:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       MARKETPLACE_SERVICE_URL: http://marketplace-service:5000
@@ -466,7 +466,7 @@ services:
     build:
       context: ./orchestrators/ticket-verification-orchestrator
     ports:
-      - "6008:5000"
+      - "8108:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       QR_TTL_SECONDS: ${QR_TTL_SECONDS:-60}

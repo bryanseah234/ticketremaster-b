@@ -103,6 +103,60 @@ def initiate_topup():
 @bp.post("/credits/topup/confirm")
 @require_auth
 def confirm_topup():
+    """
+    Confirm a Stripe top-up and credit the user's balance
+    ---
+    tags:
+      - Credits
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [paymentIntentId]
+          properties:
+            paymentIntentId:
+              type: string
+              example: pi_3OqX2KSomeStripeId
+              description: The Stripe PaymentIntent ID returned from /credits/topup/initiate
+    responses:
+      200:
+        description: Top-up confirmed and credits added to balance
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: confirmed
+                new_balance:
+                  type: number
+                  example: 250.0
+      200:
+        description: Payment already processed (idempotency guard)
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: already_processed
+      400:
+        description: Missing paymentIntentId
+      403:
+        description: Payment does not belong to this user
+      401:
+        description: Unauthorized
+      503:
+        description: Stripe or credit service unavailable
+    """
     body = request.get_json(silent=True) or {}
     payment_intent_id = body.get("paymentIntentId")
     if not payment_intent_id:
