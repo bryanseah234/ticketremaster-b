@@ -488,7 +488,7 @@ services:
         condition: service_healthy
 
   kong:
-    image: kong:3.6
+    image: kong:3.9
     restart: unless-stopped
     networks:
       - ticketremaster
