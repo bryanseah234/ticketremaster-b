@@ -10,16 +10,10 @@ def iter_rows_a_to_z():
 
 
 VENUE_CAPACITIES = {
-    'ven_001': 1800,
-    'ven_002': 12000,
-    'ven_003': 5272,
-    'ven_004': 19500,
-    'ven_005': 2679,
-    'ven_006': 14471,
-    'ven_007': 20300,
-    'ven_008': 2361,
-    'ven_009': 8500,
-    'ven_010': 18000,
+    'ven_001': 40,
+    'ven_002': 50,
+    'ven_003': 60,
+    'ven_004': 70,
 }
 
 
@@ -74,3 +68,4 @@ with app.app_context():
         for venue_id, count in sorted(created_counts.items())
     )
     print(f'Seed complete. Created {total_created} seat(s). Per venue -> {per_venue_summary}')
+    # Expected: ven_001:40, ven_002:50, ven_003:60, ven_004:70 = 220 total
