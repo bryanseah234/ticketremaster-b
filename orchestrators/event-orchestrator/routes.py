@@ -20,6 +20,28 @@ def _error(code, message, status):
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+# ── GET /venues ────────────────────────────────────────────────────────────────
+
+@bp.get("/venues")
+def list_venues():
+    """
+    Get all active venues (read-only)
+    ---
+    tags:
+      - Venues
+    responses:
+      200:
+        description: List of active venues
+      503:
+        description: Venue service unavailable
+    """
+    venues_data, err = call_service("GET", f"{VENUE_SERVICE}/venues")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not fetch venues.", 503)
+    
+    return jsonify(venues_data), 200
+
+
 # ── GET /events ───────────────────────────────────────────────────────────────
 
 @bp.get("/events")
@@ -204,3 +226,112 @@ def get_seat_detail(event_id, inventory_id):
             "address": venue.get("address"),
         } if venue else None,
     }}), 200
+
+
+# ── POST /admin/events ────────────────────────────────────────────────────────
+
+@bp.post("/admin/events")
+def create_event_admin():
+    """
+    Admin endpoint: create event and auto-populate seat inventory
+    ---
+    tags:
+      - Admin
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - name
+              - type
+              - venueId
+              - event_date
+              - pricing_tiers
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              type:
+                type: string
+              venueId:
+                type: string
+              venue:
+                type: object
+              event_date:
+                type: string
+              end_date:
+                type: string
+              pricing_tiers:
+                type: object
+              total_seats:
+                type: integer
+    responses:
+      201:
+        description: Event created and seats provisioned
+      400:
+        description: Validation error
+      503:
+        description: Service unavailable
+    """
+    data = request.get_json(silent=True) or {}
+    venue_id = data.get("venueId") or data.get("venue_id")
+    event_date = data.get("event_date")
+    
+    if not all([data.get("name"), data.get("type"), venue_id, event_date]):
+        return _error("VALIDATION_ERROR", "Missing required fields: name, type, venueId, event_date", 400)
+    
+    # Get venue to verify it exists
+    venue, err = call_service("GET", f"{VENUE_SERVICE}/venues/{venue_id}")
+    if err or not venue:
+        return _error("VENUE_NOT_FOUND", f"Venue {venue_id} not found.", 404)
+    
+    # Create event
+    event_payload = {
+        "name": data["name"],
+        "type": data["type"],
+        "venueId": venue_id,
+        "date": event_date,
+        "price": list(data.get("pricing_tiers", {}).values())[0] if data.get("pricing_tiers") else 0,
+        "description": data.get("description", ""),
+        "image": data.get("image"),
+    }
+    
+    event, err = call_service("POST", f"{EVENT_SERVICE}/events", json=event_payload)
+    if err:
+        return _error("EVENT_SERVICE_ERROR", "Failed to create event.", 503)
+    
+    event_id = event.get("eventId")
+    
+    # Get all seats for this venue
+    seats, err = call_service("GET", f"{SEAT_SERVICE}/seats/venue/{venue_id}")
+    if err or not seats:
+        return _error("SEAT_SERVICE_ERROR", "Failed to fetch seat data.", 503)
+    
+    seat_list = seats.get("seats", [])
+    seats_created = len(seat_list)
+    
+    # Populate seat inventory for this event
+    inventory_payload = {
+        "eventId": event_id,
+        "seats": [
+            {
+                "seatId": seat["seatId"],
+                "status": "available",
+            }
+            for seat in seat_list
+        ],
+    }
+    
+    inv, err = call_service("POST", f"{SEAT_INVENTORY_SERVICE}/inventory/batch", json=inventory_payload)
+    if err:
+        return _error("INVENTORY_ERROR", "Failed to create seat inventory.", 503)
+    
+    return jsonify({
+        "data": {
+            "eventId": event_id,
+            "seatsCreated": seats_created,
+        }
+    }), 201

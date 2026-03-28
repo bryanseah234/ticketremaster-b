@@ -11,13 +11,14 @@ plugins:
   - name: cors
     config:
       origins:
-        - ~^https?://localhost(:[0-9]+)?$
-        - ~^https?://127\.0\.0\.1(:[0-9]+)?$
+        - http://localhost:5173
+        - http://localhost:3000
+        - http://localhost:8080
+        - http://127.0.0.1:5173
+        - http://127.0.0.1:3000
         - https://ticketremaster.hong-yi.me
         - https://ticketremasterapi.hong-yi.me
         - https://ticketremaster.vercel.app
-        - ~^https://.*\.vercel\.app$
-        - http://ticketremaster.hong-yi.me
       methods:
         - GET
         - POST
@@ -70,6 +71,14 @@ services:
       - name: event-route
         paths:
           - /events
+        strip_path: false
+      - name: admin-event-route
+        paths:
+          - /admin/events
+        strip_path: false
+      - name: venue-route
+        paths:
+          - /venues
         strip_path: false
 
   - name: marketplace-orchestrator
