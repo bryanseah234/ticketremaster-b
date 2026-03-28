@@ -78,6 +78,12 @@ def register():
     if missing:
         return _error("VALIDATION_ERROR", f"Missing required fields: {', '.join(missing)}", 400)
 
+    role = data.get("role", "user")
+    if role not in {"user", "staff", "admin"}:
+        return _error("VALIDATION_ERROR", "role must be one of: user, staff, admin.", 400)
+    if role == "staff" and not data.get("venueId"):
+        return _error("VALIDATION_ERROR", "venueId is required for staff accounts.", 400)
+
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(data["password"].encode(), salt).decode()
 
@@ -85,7 +91,7 @@ def register():
         "email": data["email"],
         "password": hashed,
         "salt": salt.decode(),
-        "role": data["role"],
+        "role": role,
         "phoneNumber": data["phoneNumber"],
         "venueId": data.get("venueId"),
     })

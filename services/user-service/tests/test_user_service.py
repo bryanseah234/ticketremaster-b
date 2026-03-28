@@ -1,3 +1,6 @@
+from app import create_app, db
+
+
 def create_user(client, email='jane@example.com'):
     return client.post(
         '/users',
@@ -90,3 +93,56 @@ def test_get_user_by_email_includes_sensitive_fields(client):
     payload = response.get_json()
     assert payload['password'] == 'hashed-password'
     assert payload['salt'] == 'salt-value'
+
+
+def test_unhandled_errors_hide_stack_trace_by_default():
+    app = create_app(
+        {
+            'TESTING': False,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+        }
+    )
+
+    @app.get('/boom')
+    def boom():
+        raise RuntimeError('sensitive details')
+
+    with app.app_context():
+        db.create_all()
+        client = app.test_client()
+        response = client.get('/boom')
+        db.session.remove()
+        db.drop_all()
+
+    assert response.status_code == 500
+    details = response.get_json()['error']['details']
+    assert 'exceptionMessage' not in details
+    assert 'stackTrace' not in details
+
+
+def test_unhandled_errors_can_opt_in_to_verbose_payloads():
+    app = create_app(
+        {
+            'TESTING': False,
+            'VERBOSE_ERRORS': True,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+        }
+    )
+
+    @app.get('/boom')
+    def boom():
+        raise RuntimeError('sensitive details')
+
+    with app.app_context():
+        db.create_all()
+        client = app.test_client()
+        response = client.get('/boom')
+        db.session.remove()
+        db.drop_all()
+
+    assert response.status_code == 500
+    details = response.get_json()['error']['details']
+    assert details['exceptionMessage'] == 'sensitive details'
+    assert details['stackTrace']

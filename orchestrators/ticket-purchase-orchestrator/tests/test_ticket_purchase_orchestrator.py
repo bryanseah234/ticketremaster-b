@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import jwt
-import pytest
 
 
 def _token(user_id="usr_001"):
@@ -30,7 +29,6 @@ def test_hold_no_auth(client):
 @patch("routes._publish_hold_ttl")
 @patch("routes._grpc_stub")
 def test_hold_success(mock_stub, mock_publish, client):
-    import seat_inventory_pb2
     stub = MagicMock()
     stub.HoldSeat.return_value = MagicMock(
         success=True, status="held",
@@ -74,7 +72,6 @@ def test_confirm_success(mock_stub, mock_credit, mock_svc, client):
         ({}, None),
     ]
     mock_svc.side_effect = [
-        ({"inventory": [{"inventoryId": "inv_001", "eventId": "evt_001", "seatId": "s1"}]}, None),
         ({"eventId": "evt_001", "venueId": "ven_001", "price": 80.0}, None),
         ({"ticketId": "tkt_001", "createdAt": "2025-01-01"}, None),
         (None, None),
@@ -85,6 +82,29 @@ def test_confirm_success(mock_stub, mock_credit, mock_svc, client):
                       headers=_auth())
     assert res.status_code == 201
     assert res.get_json()["data"]["ticketId"] == "tkt_001"
+
+
+@patch("routes.call_service")
+@patch("routes.call_credit_service")
+@patch("routes._grpc_stub")
+def test_confirm_requires_event_id(mock_stub, mock_credit, mock_svc, client):
+    stub = MagicMock()
+    stub.GetSeatStatus.return_value = MagicMock(
+        status="held",
+        held_until=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+    )
+    mock_stub.return_value = stub
+
+    res = client.post(
+        "/purchase/confirm/inv_001",
+        json={"holdToken": "tok_abc"},
+        headers=_auth(),
+    )
+
+    assert res.status_code == 400
+    assert res.get_json()["error"]["code"] == "VALIDATION_ERROR"
+    mock_credit.assert_not_called()
+    mock_svc.assert_not_called()
 
 
 @patch("routes._grpc_stub")
@@ -112,7 +132,6 @@ def test_confirm_insufficient_credits(mock_stub, mock_credit, mock_svc, client):
     mock_stub.return_value = stub
     mock_credit.return_value = ({"creditBalance": 5.0}, None)
     mock_svc.side_effect = [
-        ({"inventory": [{"inventoryId": "inv_001", "eventId": "evt_001", "seatId": "s1"}]}, None),
         ({"eventId": "evt_001", "venueId": "ven_001", "price": 80.0}, None),
     ]
     res = client.post("/purchase/confirm/inv_001", json={"eventId": "evt_001"}, headers=_auth())
@@ -134,7 +153,6 @@ def test_confirm_ticket_failure_releases_seat(mock_stub, mock_credit, mock_svc, 
     mock_stub.return_value = stub
     mock_credit.return_value = ({"creditBalance": 200.0}, None)
     mock_svc.side_effect = [
-        ({"inventory": [{"inventoryId": "inv_001", "eventId": "evt_001", "seatId": "s1"}]}, None),
         ({"eventId": "evt_001", "venueId": "ven_001", "price": 80.0}, None),
         (None, "INTERNAL_ERROR"),  # ticket creation fails
     ]

@@ -106,9 +106,11 @@ def test_get_venue_not_found(client):
     response = client.get('/venues/unknown')
 
     assert response.status_code == 404
-    assert response.get_json() == {
-        'error': {'code': 'VENUE_NOT_FOUND', 'message': 'Venue not found'}
-    }
+    payload = response.get_json()
+    assert payload['error']['code'] == 'VENUE_NOT_FOUND'
+    assert payload['error']['message'] == 'Venue not found'
+    assert payload['error']['status'] == 404
+    assert payload['error']['details']['path'] == '/venues/unknown'
 
 
 def test_list_venues_filters_inactive_records(client, app):

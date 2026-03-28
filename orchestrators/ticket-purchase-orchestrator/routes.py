@@ -324,8 +324,12 @@ def confirm_purchase(inventory_id):
         description: Ticket creation failed
     """
     user_id = request.user["userId"]
-    body    = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True) or {}
+    event_id = body.get("eventId")
     hold_token = body.get("holdToken", "")
+
+    if not event_id:
+        return _error("VALIDATION_ERROR", "eventId is required.", 400)
 
     # 1. Verify seat is still held (fast gRPC check)
     try:
@@ -350,20 +354,6 @@ def confirm_purchase(inventory_id):
                 return _error("PAYMENT_HOLD_EXPIRED", "Seat hold has expired. Please re-select.", 410)
         except ValueError:
             pass
-
-    # Fetch event (need venueId + price)
-    inv_list, err = call_service("GET", f"{SEAT_INV_REST}/inventory/event/{seat_status.inventory_id if hasattr(seat_status, 'inventory_id') else inventory_id}")
-    inv_record = None
-    if not err:
-        inv_record = next(
-            (s for s in inv_list.get("inventory", []) if s["inventoryId"] == inventory_id),
-            None,
-        )
-
-    event_id = body.get("eventId") or (inv_record["eventId"] if inv_record else None)
-
-    if not event_id:
-        return _error("VALIDATION_ERROR", "Could not resolve eventId for this seat.", 400)
 
     event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err:

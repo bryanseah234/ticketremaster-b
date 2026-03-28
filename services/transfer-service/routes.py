@@ -43,12 +43,21 @@ def create_transfer():
     if not data or any(field not in data for field in REQUIRED_FIELDS):
         return error_response(400, 'VALIDATION_ERROR', 'Missing required fields')
 
+    if data.get('sellerVerificationSid'):
+        initial_status = 'pending_seller_otp'
+    elif data.get('buyerVerificationSid'):
+        initial_status = 'pending_buyer_otp'
+    else:
+        initial_status = 'pending_seller_acceptance'
+
     transfer = Transfer(
         listingId=data['listingId'],
         buyerId=data['buyerId'],
         sellerId=data['sellerId'],
         creditAmount=data['creditAmount'],
+        status=initial_status,
         buyerVerificationSid=data.get('buyerVerificationSid'),
+        sellerVerificationSid=data.get('sellerVerificationSid'),
     )
 
     db.session.add(transfer)

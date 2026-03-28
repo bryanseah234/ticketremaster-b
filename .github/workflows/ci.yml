@@ -18,43 +18,23 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
-      - name: Install linting tools
-        run: pip install flake8 black isort
-
-      - name: Run flake8 (linting)
+      - name: Install repository dependencies
         run: |
-          flake8 . \
-            --max-line-length=120 \
-            --exclude=.git,__pycache__,venv,.venv,*_pb2.py,*_pb2_grpc.py \
-            --count --show-source --statistics
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          while IFS= read -r -d '' file; do
+            pip install -r "$file"
+          done < <(find services orchestrators shared -name requirements.txt -print0)
 
-      - name: Run black (formatting check)
-        run: |
-          black --check --diff \
-            --exclude="/(\.git|__pycache__|venv|\.venv|.*_pb2\.py|.*_pb2_grpc\.py)/" \
-            .
+      - name: Run repo lint script
+        run: python scripts/lint_repo.py
 
-      - name: Run isort (import sorting check)
-        run: |
-          isort --check --diff \
-            --skip-glob="*_pb2.py" --skip-glob="*_pb2_grpc.py" \
-            .
-
-  test:
-    name: Run Unit Tests
+  typecheck:
+    name: Typecheck Python Code
     runs-on: ubuntu-latest
     needs: lint
-
-    strategy:
-      matrix:
-        service:
-          - orchestrator-service
-          - inventory-service
-          - user-service
-          - order-service
-          - event-service
 
     steps:
       - name: Checkout code
@@ -63,29 +43,48 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install repository dependencies
         run: |
-          cd ${{ matrix.service }}
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
-          pip install pytest
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          while IFS= read -r -d '' file; do
+            pip install -r "$file"
+          done < <(find services orchestrators shared -name requirements.txt -print0)
 
-      - name: Run tests
+      - name: Run repo typecheck script
+        run: python scripts/typecheck_repo.py
+
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    needs: typecheck
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install repository dependencies
         run: |
-          cd ${{ matrix.service }}
-          if [ -d tests ]; then
-            python -m pytest tests/ -v --tb=short
-          else
-            echo "No tests directory found for ${{ matrix.service }} — skipping"
-          fi
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          while IFS= read -r -d '' file; do
+            pip install -r "$file"
+          done < <(find services orchestrators shared -name requirements.txt -print0)
+
+      - name: Run repo-root pytest
+        run: python -m pytest -q
 
   docker-build:
     name: Verify Docker Build
     runs-on: ubuntu-latest
-    needs: lint
+    needs: test
 
     steps:
       - name: Checkout code

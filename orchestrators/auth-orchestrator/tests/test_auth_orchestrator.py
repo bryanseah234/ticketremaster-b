@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import bcrypt
 import jwt
-import pytest
 
 
 def make_token(user_id="usr_001", role="user", venue_id=None):

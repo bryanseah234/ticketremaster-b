@@ -1,7 +1,3 @@
-import json
-from datetime import datetime
-
-
 def event_data(name="Test Event", venueId="ven_001", **kwargs):
     data = {
         "venueId": venueId,
@@ -82,7 +78,7 @@ def test_list_events_returns_created_events(client):
 
 def test_list_excludes_detail_fields(client):
     data = event_data(description="Detail", image="http://img.jpg")
-    created = client.post("/events", json=data).get_json()
+    client.post("/events", json=data).get_json()
 
     response = client.get("/events")
     payload = response.get_json()

@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import jwt
-import pytest
 
 
 def _token(user_id="usr_buyer", role="user"):
@@ -44,19 +43,19 @@ def test_health(client):
 
 # ── POST /transfer/initiate ───────────────────────────────────────────────────
 
+@patch("routes._publish_seller_notification")
 @patch("routes.call_service")
 @patch("routes.call_credit_service")
-def test_initiate_success(mock_credit, mock_svc, client):
+def test_initiate_success(mock_credit, mock_svc, mock_notify, client):
     mock_credit.return_value = ({"creditBalance": 200.0}, None)
     mock_svc.side_effect = [
         (MOCK_LISTING, None),
-        (MOCK_BUYER_USER, None),
-        ({"sid": "VE_buyer"}, None),
-        ({"transferId": "txr_001", "status": "pending_buyer_otp"}, None),
+        ({"transferId": "txr_001", "status": "pending_seller_acceptance"}, None),
     ]
     res = client.post("/transfer/initiate", json={"listingId": "lst_001"}, headers=_auth(BUYER))
     assert res.status_code == 201
-    assert res.get_json()["data"]["status"] == "pending_buyer_otp"
+    assert res.get_json()["data"]["status"] == "pending_seller_acceptance"
+    mock_notify.assert_called_once_with("txr_001", SELLER)
 
 
 @patch("routes.call_service")
@@ -95,19 +94,19 @@ def test_initiate_no_listing_id(client):
 
 # ── POST /transfer/<id>/buyer-verify ─────────────────────────────────────────
 
-@patch("routes._publish_seller_notification")
 @patch("routes.call_service")
-def test_buyer_verify_success(mock_svc, mock_notify, client):
+def test_buyer_verify_success(mock_svc, client):
     mock_svc.side_effect = [
         (MOCK_TRANSFER, None),
         ({"verified": True}, None),
+        (MOCK_SELLER_USER, None),
+        ({"sid": "VE_seller"}, None),
         (None, None),
     ]
     res = client.post("/transfer/txr_001/buyer-verify",
                       json={"otp": "123456"}, headers=_auth(BUYER))
     assert res.status_code == 200
-    assert res.get_json()["data"]["status"] == "pending_seller_acceptance"
-    mock_notify.assert_called_once_with("txr_001", SELLER)
+    assert res.get_json()["data"]["status"] == "pending_seller_otp"
 
 
 @patch("routes.call_service")
@@ -145,13 +144,13 @@ def test_seller_accept_success(mock_svc, client):
     transfer = {**MOCK_TRANSFER, "status": "pending_seller_acceptance", "buyerOtpVerified": True}
     mock_svc.side_effect = [
         (transfer, None),
-        (MOCK_SELLER_USER, None),
-        ({"sid": "VE_seller"}, None),
+        (MOCK_BUYER_USER, None),
+        ({"sid": "VE_buyer"}, None),
         (None, None),
     ]
     res = client.post("/transfer/txr_001/seller-accept", headers=_auth(SELLER))
     assert res.status_code == 200
-    assert res.get_json()["data"]["status"] == "pending_seller_otp"
+    assert res.get_json()["data"]["status"] == "pending_buyer_otp"
 
 
 @patch("routes.call_service")

@@ -1,19 +1,96 @@
-# ── Environment ──────────────────────────────────────────────────
+# ── Environment & Secrets ────────────────────────────────────────
 .env
+.env.local
+.env.*.local
+*.env
 
 # ── Python ───────────────────────────────────────────────────────
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyo
-*.egg-info/
-dist/
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
 *.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+.env/
+ENV/
+env/
 .venv/
 venv/
-env/
-instance/
-*.db
+venv.bak/
+venv~ 
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ruff
+.ruff_cache/
 
 # ── Node / Frontend ─────────────────────────────────────────────
 node_modules/
@@ -21,42 +98,64 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
-# ── IDE ──────────────────────────────────────────────────────────
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
+package-lock.json
 
 # ── Docker ───────────────────────────────────────────────────────
-# Ignore local data volumes (if mounted outside named volumes)
-# docker-data/
+# Local Docker data (if mounted outside named volumes)
+docker-data/
+docker-compose.override.yml
 
-# ── Testing ──────────────────────────────────────────────────────
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-**/migrations/__pycache__/
+# ── Database ─────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
 
+# ── Logs and temporary files ─────────────────────────────────────
+logs/
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
 
-# ── OS files ─────────────────────────────────────────────────────
+# ── OS generated files ───────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 desktop.ini
 
 # ── Stripe CLI ───────────────────────────────────────────────────
 .stripe/
 
-# ── Misc ─────────────────────────────────────────────────────────
-*.log
+# ── Certificates and keys (security sensitive) ───────────────────
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+*.jks
+
+# ── Backup and archive files ─────────────────────────────────────
 *.bak
-*.tmp
-.env
+*.backup
+*.zip
+*.tar.gz
+*.rar
 
-
-
-
+# ── Misc ─────────────────────────────────────────────────────────
+*.orig
+*.patch
+.hg/
+.hgignore
+.bzr/
+.bzrignore
+.fossil-ignore

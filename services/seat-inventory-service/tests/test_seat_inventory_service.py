@@ -19,6 +19,48 @@ def test_list_inventory_by_event(client, seeded_inventory):
     assert payload['inventory'][0]['seatId'] == 'A1'
 
 
+def test_create_inventory_batch(client):
+    response = client.post(
+        '/inventory/batch',
+        json={
+            'eventId': 'evt_002',
+            'seats': [
+                {'seatId': 'B1'},
+                {'seatId': 'B2', 'status': 'held'},
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.get_json()['data'] == {'eventId': 'evt_002', 'createdCount': 2}
+
+
+def test_create_inventory_batch_rejects_invalid_seat_payload(client):
+    response = client.post(
+        '/inventory/batch',
+        json={
+            'eventId': 'evt_002',
+            'seats': ['B1'],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()['error']['code'] == 'VALIDATION_ERROR'
+
+
+def test_create_inventory_batch_requires_seat_id(client):
+    response = client.post(
+        '/inventory/batch',
+        json={
+            'eventId': 'evt_002',
+            'seats': [{}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()['error']['code'] == 'VALIDATION_ERROR'
+
+
 def test_hold_seat_success(grpc_stub, seeded_inventory):
     inventory_id, _ = seeded_inventory
 

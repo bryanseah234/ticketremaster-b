@@ -1,10 +1,9 @@
 """Tests for marketplace-orchestrator."""
 import os
 from datetime import datetime, timedelta, timezone
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import jwt
-import pytest
 
 
 def _token(user_id="usr_001"):
@@ -37,6 +36,7 @@ MOCK_LISTING = {
     "createdAt": "2025-01-15T11:00:00",
 }
 MOCK_EVENT = {"eventId": "evt_001", "name": "Symphony Night", "date": "2025-03-20T19:30:00"}
+MOCK_SELLER = {"userId": "usr_001", "email": "usr_001@ticketremaster.local"}
 
 
 def test_health(client):
@@ -51,11 +51,13 @@ def test_browse_success(mock_svc, client):
         ({"listings": [MOCK_LISTING], "pagination": {}}, None),
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),
+        (MOCK_SELLER, None),
     ]
     res = client.get("/marketplace")
     assert res.status_code == 200
     assert len(res.get_json()["data"]["listings"]) == 1
     assert res.get_json()["data"]["listings"][0]["event"]["name"] == "Symphony Night"
+    assert res.get_json()["data"]["listings"][0]["sellerName"] == "usr_001"
 
 
 @patch("routes.call_service")

@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import jwt
-import pytest
 
 
 def _token(user_id="usr_001", role="user"):

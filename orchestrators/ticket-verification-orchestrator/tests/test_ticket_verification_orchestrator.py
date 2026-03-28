@@ -26,7 +26,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import jwt
-import pytest
 
 
 def _staff_token(user_id="staff_001", venue_id="ven_001"):

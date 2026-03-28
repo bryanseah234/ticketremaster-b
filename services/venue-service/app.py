@@ -105,7 +105,7 @@ def create_app(test_config=None):
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         JSON_SORT_KEYS=False,
         TESTING=False,
-        VERBOSE_ERRORS=True,
+        VERBOSE_ERRORS=os.getenv("VERBOSE_ERRORS", "").lower() == "true",
     )
 
     if test_config:
