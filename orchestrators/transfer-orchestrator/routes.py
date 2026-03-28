@@ -360,6 +360,46 @@ def seller_accept(transfer_id):
 @bp.post("/transfer/<transfer_id>/seller-reject")
 @require_auth
 def seller_reject(transfer_id):
+    """
+    Seller rejects the transfer request — listing and ticket reverted to active
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+        example: txr_001
+    responses:
+      200:
+        description: Transfer rejected — listing back to active
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transferId:
+                  type: string
+                  example: txr_001
+                status:
+                  type: string
+                  example: cancelled
+                message:
+                  type: string
+                  example: Transfer rejected.
+      400:
+        description: Transfer is not awaiting seller acceptance
+      401:
+        description: Unauthorized
+      403:
+        description: You are not the seller
+      404:
+        description: Transfer not found
+    """
     seller_id = request.user["userId"]
 
     transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
@@ -493,6 +533,47 @@ def seller_verify(transfer_id):
 @bp.get("/transfer/pending")
 @require_auth
 def get_pending_transfers():
+    """
+    Get all pending transfers awaiting the authenticated seller's acceptance
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of transfers with status pending_seller_acceptance
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transfers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      transferId:
+                        type: string
+                        example: txr_001
+                      buyerId:
+                        type: string
+                        example: usr_001
+                      sellerId:
+                        type: string
+                        example: usr_002
+                      creditAmount:
+                        type: number
+                        example: 80.0
+                      status:
+                        type: string
+                        example: pending_seller_acceptance
+      401:
+        description: Unauthorized
+      503:
+        description: Transfer service unavailable
+    """
     seller_id = request.user["userId"]
     result, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers",
                                params={"sellerId": seller_id, "status": "pending_seller_acceptance"})
@@ -542,6 +623,42 @@ def get_transfer(transfer_id):
 @bp.post("/transfer/<transfer_id>/resend-otp")
 @require_auth
 def resend_otp(transfer_id):
+    """
+    Resend OTP to the buyer or seller depending on current transfer status
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+        example: txr_001
+    responses:
+      200:
+        description: OTP resent successfully
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: OTP resent to your phone.
+      400:
+        description: OTP resend not available for current transfer status
+      401:
+        description: Unauthorized
+      403:
+        description: Access denied — not buyer or seller
+      404:
+        description: Transfer not found
+      503:
+        description: OTP service unavailable
+    """
     user_id = request.user["userId"]
 
     transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
