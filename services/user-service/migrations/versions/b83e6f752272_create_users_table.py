@@ -26,6 +26,7 @@ def upgrade():
         sa.Column('phoneNumber', sa.String(length=20), nullable=False),
         sa.Column('role', sa.String(length=20), nullable=False),
         sa.Column('isFlagged', sa.Boolean(), nullable=False),
+        sa.Column('venueId', sa.String(length=36), nullable=True),
         sa.Column('createdAt', sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint('userId'),
         sa.UniqueConstraint('email'),

@@ -12,6 +12,7 @@ bp = Blueprint("events", __name__)
 
 EVENT_SERVICE          = os.environ.get("EVENT_SERVICE_URL",           "http://event-service:5000")
 VENUE_SERVICE          = os.environ.get("VENUE_SERVICE_URL",           "http://venue-service:5000")
+SEAT_SERVICE           = os.environ.get("SEAT_SERVICE_URL",            "http://seat-service:5000")
 SEAT_INVENTORY_SERVICE = os.environ.get("SEAT_INVENTORY_SERVICE_URL",  "http://seat-inventory-service:5000")
 
 
@@ -23,6 +24,22 @@ def _error(code, message, status):
 
 @bp.get("/events")
 def list_events():
+    """
+    List all events enriched with venue and seat availability
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: query
+        name: type
+        type: string
+        description: Filter by event type (e.g. concert, orchestra, sports)
+    responses:
+      200:
+        description: List of events with venue and seatsAvailable
+      503:
+        description: Event service unavailable
+    """
     params = {k: v for k, v in request.args.items() if k in ("type", "page", "limit")}
     events_data, err = call_service("GET", f"{EVENT_SERVICE}/events", params=params)
     if err:
@@ -50,6 +67,23 @@ def list_events():
 
 @bp.get("/events/<event_id>")
 def get_event(event_id):
+    """
+    Get a single event with full venue details
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+        example: evt_001
+    responses:
+      200:
+        description: Event with venue details
+      404:
+        description: Event not found
+    """
     event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err == "EVENT_NOT_FOUND":
         return _error("EVENT_NOT_FOUND", "Event not found.", 404)
@@ -65,7 +99,24 @@ def get_event(event_id):
 
 @bp.get("/events/<event_id>/seats")
 def get_seat_map(event_id):
-    _, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
+    """
+    Get the seat map for an event
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+        example: evt_001
+    responses:
+      200:
+        description: Seat map with status for each seat (available, held, sold)
+      404:
+        description: Event not found
+    """
+    event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err:
         return _error("EVENT_NOT_FOUND", "Event not found.", 404)
 
@@ -73,15 +124,24 @@ def get_seat_map(event_id):
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not fetch seat map.", 503)
 
-    seats = [
-        {
+    # Fetch all seats for this venue once and build a lookup map
+    venue_id = event_data.get("venueId")
+    seat_list, _ = call_service("GET", f"{SEAT_SERVICE}/seats/venue/{venue_id}")
+    seat_map = {s["seatId"]: s for s in (seat_list or {}).get("seats", [])}
+
+    event_price = event_data.get("price", 0)
+    seats = []
+    for s in inv_data.get("inventory", []):
+        seat_info = seat_map.get(s.get("seatId"), {})
+        seats.append({
             "inventoryId": s["inventoryId"],
             "seatId": s.get("seatId"),
             "status": s["status"],
             "heldUntil": s.get("heldUntil"),
-        }
-        for s in inv_data.get("inventory", [])
-    ]
+            "rowNumber": seat_info.get("rowNumber"),
+            "seatNumber": seat_info.get("seatNumber"),
+            "price": event_price,
+        })
 
     return jsonify({"data": {"eventId": event_id, "seats": seats}}), 200
 
@@ -90,6 +150,28 @@ def get_seat_map(event_id):
 
 @bp.get("/events/<event_id>/seats/<inventory_id>")
 def get_seat_detail(event_id, inventory_id):
+    """
+    Get details for a single seat including event and venue info
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+        example: evt_001
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+    responses:
+      200:
+        description: Seat detail with event and venue
+      404:
+        description: Event or seat not found
+    """
     event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err:
         return _error("EVENT_NOT_FOUND", "Event not found.", 404)

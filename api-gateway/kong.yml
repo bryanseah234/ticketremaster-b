@@ -4,28 +4,15 @@ _transform: true
 
 # ── GLOBAL PLUGINS ──────────────────────────────
 plugins:
-  # Rate limiting per IP to protect the entire API
   - name: rate-limiting
     config:
       minute: 50
       policy: local
-  # Bot detection checks headers (User-Agent) against a database of known scraper bots
-  - name: bot-detection
-    config:
-      deny:
-        - python-requests
-        - curl
-        - wget
-  # CORS Configuration strictly tied to frontend origins
   - name: cors
     config:
       origins:
-        - http://localhost:3000
-        - http://127.0.0.1:3000
-        - http://localhost:5173
-        - http://localhost:5174
-        - http://127.0.0.1:5173
-        - http://127.0.0.1:5174
+        - ~^https?://localhost(:[0-9]+)?$
+        - ~^https?://127\.0\.0\.1(:[0-9]+)?$
         - https://ticketremaster.hong-yi.me
         - https://ticketremasterapi.hong-yi.me
         - https://ticketremaster.vercel.app
@@ -34,6 +21,7 @@ plugins:
       methods:
         - GET
         - POST
+        - PUT
         - PATCH
         - DELETE
         - OPTIONS
@@ -47,48 +35,51 @@ plugins:
 
 # ── SERVICES & ROUTES ───────────────────────
 services:
-  - name: user-service
-    url: http://user-service:5000
+  - name: auth-orchestrator
+    url: http://auth-orchestrator:5000
     routes:
       - name: auth-register-route
         paths:
-          - /api/auth/register
+          - /auth/register
         strip_path: false
         plugins:
           - name: rate-limiting
             config:
-              minute: 5 # Strict throttle: 5 registrations per IP per minute
+              minute: 5
               policy: local
       - name: auth-route
         paths:
-          - /api/auth
+          - /auth
+        strip_path: false
+
+  - name: user-service
+    url: http://user-service:5000
+    routes:
+      - name: user-route
+        paths:
+          - /users
         strip_path: false
       - name: stripe-webhook-route
         paths:
-          - /api/webhooks/stripe
+          - /webhooks/stripe
         strip_path: false
 
-  - name: event-service
-    url: http://event-service:5002
+  - name: event-orchestrator
+    url: http://event-orchestrator:5000
     routes:
       - name: event-route
         paths:
-          - /api/events
+          - /events
         strip_path: false
 
-  - name: orchestrator-service
-    url: http://orchestrator-service:5003
+  - name: marketplace-orchestrator
+    url: http://marketplace-orchestrator:5000
     routes:
-      - name: health-route
+      - name: marketplace-route
         paths:
-          - /health
-        strip_path: false
-      - name: catchall-api-route
-        paths:
-          - /api
+          - /marketplace
         strip_path: false
         plugins:
-          # API Key validation for protected ticket routes like /reserve
           - name: key-auth
             config:
               key_names:
@@ -96,7 +87,104 @@ services:
               hide_credentials: true
               run_on_preflight: false
 
-# ── CONSUMERS (API Key Setup) ───────────────────────
+  - name: transfer-orchestrator
+    url: http://transfer-orchestrator:5000
+    routes:
+      - name: transfer-route
+        paths:
+          - /transfer
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+
+  - name: credit-orchestrator
+    url: http://credit-orchestrator:5000
+    routes:
+      - name: credit-route
+        paths:
+          - /credits
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+
+  - name: ticket-purchase-orchestrator
+    url: http://ticket-purchase-orchestrator:5000
+    routes:
+      - name: tickets-route
+        paths:
+          - /tickets
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+      - name: checkout-route
+        paths:
+          - /checkout
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+      - name: purchase-route
+        paths:
+          - /purchase
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+
+  - name: qr-orchestrator
+    url: http://qr-orchestrator:5000
+    routes:
+      - name: qr-route
+        paths:
+          - /qr
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+
+  - name: ticket-verification-orchestrator
+    url: http://ticket-verification-orchestrator:5000
+    routes:
+      - name: scan-route
+        paths:
+          - /scan
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+
+# ── CONSUMERS ───────────────────────
 consumers:
   - username: frontend_app
     keyauth_credentials:

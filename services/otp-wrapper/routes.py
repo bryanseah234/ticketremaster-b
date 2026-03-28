@@ -16,7 +16,7 @@ def build_smu_url(path):
 
 
 def smu_headers():
-    return {'X-API-Key': current_app.config['SMU_API_KEY']}
+    return {'X-API-KEY': current_app.config['SMU_API_KEY']}
 
 
 @bp.get('/health')
@@ -54,6 +54,7 @@ def send_otp():
         return error_response(502, 'OTP_SEND_FAILED', 'SMU response missing verification SID')
 
     return jsonify({'sid': sid}), 200
+
 
 
 @bp.post('/otp/verify')

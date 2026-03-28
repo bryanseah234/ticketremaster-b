@@ -44,6 +44,8 @@ services:
 
   user-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5433:5432"
     environment:
       POSTGRES_DB: ${USER_SERVICE_DB_NAME:-user_service}
       POSTGRES_USER: ${USER_SERVICE_DB_USER:-ticketremaster}
@@ -65,6 +67,8 @@ services:
 
   event-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5434:5432"
     environment:
       POSTGRES_DB: ${EVENT_SERVICE_DB_NAME}
       POSTGRES_USER: ${EVENT_SERVICE_DB_USER}
@@ -88,6 +92,8 @@ services:
 
   seat-inventory-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5435:5432"
     environment:
       POSTGRES_DB: ${SEAT_INVENTORY_SERVICE_DB_NAME}
       POSTGRES_USER: ${SEAT_INVENTORY_SERVICE_DB_USER}
@@ -109,6 +115,8 @@ services:
 
   ticket-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5436:5432"
     environment:
       POSTGRES_DB: ${TICKET_SERVICE_DB_NAME}
       POSTGRES_USER: ${TICKET_SERVICE_DB_USER}
@@ -130,6 +138,8 @@ services:
 
   ticket-log-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5437:5432"
     environment:
       POSTGRES_DB: ${TICKET_LOG_SERVICE_DB_NAME}
       POSTGRES_USER: ${TICKET_LOG_SERVICE_DB_USER}
@@ -151,6 +161,8 @@ services:
 
   marketplace-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5438:5432"
     environment:
       POSTGRES_DB: ${MARKETPLACE_SERVICE_DB_NAME}
       POSTGRES_USER: ${MARKETPLACE_SERVICE_DB_USER}
@@ -172,6 +184,8 @@ services:
 
   transfer-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5439:5432"
     environment:
       POSTGRES_DB: ${TRANSFER_SERVICE_DB_NAME}
       POSTGRES_USER: ${TRANSFER_SERVICE_DB_USER}
@@ -193,6 +207,8 @@ services:
 
   venue-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5440:5432"
     environment:
       POSTGRES_DB: ${VENUE_SERVICE_DB_NAME}
       POSTGRES_USER: ${VENUE_SERVICE_DB_USER}
@@ -214,6 +230,8 @@ services:
 
   seat-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5441:5432"
     environment:
       POSTGRES_DB: ${SEAT_SERVICE_DB_NAME}
       POSTGRES_USER: ${SEAT_SERVICE_DB_USER}
@@ -235,6 +253,8 @@ services:
 
   credit-transaction-service-db:
     <<: *postgres-defaults
+    ports:
+      - "5442:5432"
     environment:
       POSTGRES_DB: ${CREDIT_TRANSACTION_SERVICE_DB_NAME}
       POSTGRES_USER: ${CREDIT_TRANSACTION_SERVICE_DB_USER}
@@ -287,7 +307,7 @@ services:
     build:
       context: ./orchestrators/auth-orchestrator
     ports:
-      - "6000:5000"
+      - "8100:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       USER_SERVICE_URL: http://user-service:5000
@@ -302,7 +322,7 @@ services:
     build:
       context: ./orchestrators/event-orchestrator
     ports:
-      - "6001:5000"
+      - "8101:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       EVENT_SERVICE_URL: http://event-service:5000
@@ -324,7 +344,7 @@ services:
     build:
       context: ./orchestrators/credit-orchestrator
     ports:
-      - "6002:5000"
+      - "8102:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       CREDIT_SERVICE_URL: ${CREDIT_SERVICE_URL}
@@ -340,9 +360,10 @@ services:
   ticket-purchase-orchestrator:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./orchestrators/ticket-purchase-orchestrator
+      context: .
+      dockerfile: ./orchestrators/ticket-purchase-orchestrator/Dockerfile
     ports:
-      - "6003:5000"
+      - "8103:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       SEAT_INVENTORY_GRPC_HOST: seat-inventory-service
@@ -373,7 +394,7 @@ services:
     build:
       context: ./orchestrators/qr-orchestrator
     ports:
-      - "6004:5000"
+      - "8104:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       QR_SECRET: ${QR_SECRET}
@@ -391,7 +412,7 @@ services:
     build:
       context: ./orchestrators/marketplace-orchestrator
     ports:
-      - "6005:5000"
+      - "8105:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       TICKET_SERVICE_URL: http://ticket-service:5000
@@ -408,9 +429,10 @@ services:
   transfer-orchestrator:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./orchestrators/transfer-orchestrator
+      context: .
+      dockerfile: ./orchestrators/transfer-orchestrator/Dockerfile
     ports:
-      - "6007:5000"
+      - "8107:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       MARKETPLACE_SERVICE_URL: http://marketplace-service:5000
@@ -444,7 +466,7 @@ services:
     build:
       context: ./orchestrators/ticket-verification-orchestrator
     ports:
-      - "6008:5000"
+      - "8108:5000"
     environment:
       JWT_SECRET: ${JWT_SECRET}
       QR_TTL_SECONDS: ${QR_TTL_SECONDS:-60}
@@ -465,6 +487,28 @@ services:
       seat-inventory-service:
         condition: service_healthy
 
+  kong:
+    image: kong:3.9
+    restart: unless-stopped
+    networks:
+      - ticketremaster
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_LOG_LEVEL: warn
+    volumes:
+      - ./api-gateway/kong.yml:/kong/declarative/kong.yml:ro
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 networks:
   ticketremaster:

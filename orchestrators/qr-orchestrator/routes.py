@@ -43,6 +43,19 @@ def _generate_qr(ticket_id, user_id, event_id, venue_id):
 @bp.get("/tickets")
 @require_auth
 def list_tickets():
+    """
+    List all tickets owned by the authenticated user
+    ---
+    tags:
+      - Tickets
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of tickets enriched with event and venue details
+      401:
+        description: Unauthorized
+    """
     user_id = request.user["userId"]
     data, err = call_service("GET", f"{TICKET_SERVICE}/tickets/owner/{user_id}")
     if err:
@@ -76,6 +89,31 @@ def list_tickets():
 @bp.get("/tickets/<ticket_id>/qr")
 @require_auth
 def get_qr(ticket_id):
+    """
+    Generate a fresh QR hash for a ticket (60-second TTL)
+    ---
+    tags:
+      - Tickets
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: ticket_id
+        required: true
+        type: string
+        example: tkt_001
+    responses:
+      200:
+        description: QR hash and expiry timestamp
+      400:
+        description: Ticket not active (listed or used)
+      401:
+        description: Unauthorized
+      403:
+        description: You do not own this ticket
+      404:
+        description: Ticket not found
+    """
     user_id = request.user["userId"]
 
     ticket, err = call_service("GET", f"{TICKET_SERVICE}/tickets/{ticket_id}")

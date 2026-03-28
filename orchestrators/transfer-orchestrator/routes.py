@@ -44,6 +44,20 @@ def _error(code, message, status):
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+def _get_credit_balance(credit_data):
+    """Safely extract credit balance from OutSystems response regardless of field name."""
+    raw = (
+        credit_data.get("creditBalance")
+        if credit_data.get("creditBalance") is not None
+        else credit_data.get("CreditBalance")
+        if credit_data.get("CreditBalance") is not None
+        else credit_data.get("balance")
+        if credit_data.get("balance") is not None
+        else 0.0
+    )
+    return float(raw)
+
+
 def _publish_seller_notification(transfer_id, seller_id):
     try:
         conn = pika.BlockingConnection(pika.ConnectionParameters(
@@ -121,6 +135,38 @@ def _execute_saga(transfer_id, buyer_id, seller_id, credit_amount, ticket_id, li
 @bp.post("/transfer/initiate")
 @require_auth
 def initiate():
+    """
+    Initiate a P2P ticket transfer as the buyer
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [listingId]
+          properties:
+            listingId:
+              type: string
+              example: lst_001
+    responses:
+      201:
+        description: Transfer created — status pending_seller_acceptance
+      400:
+        description: Listing not active
+      401:
+        description: Unauthorized
+      402:
+        description: Insufficient credits
+      403:
+        description: Cannot buy your own listing
+      404:
+        description: Listing not found
+    """
     buyer_id = request.user["userId"]
     body     = request.get_json(silent=True) or {}
 
@@ -146,33 +192,26 @@ def initiate():
     credit_data, err = call_credit_service("GET", f"/credits/{buyer_id}")
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not verify balance.", 503)
-    if credit_data["creditBalance"] < credit_amount:
-        return _error("INSUFFICIENT_CREDITS", "Insufficient credits.", 402)
 
-    # Get buyer phone for OTP
-    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{buyer_id}")
-    if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not retrieve user details.", 503)
-
-    otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
-                                   json={"phoneNumber": buyer["phoneNumber"]})
-    if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
+    buyer_balance = _get_credit_balance(credit_data)
+    if buyer_balance < credit_amount:
+        return _error("INSUFFICIENT_CREDITS", "Please top up your balance to buy this ticket.", 402)
 
     transfer, err = call_service("POST", f"{TRANSFER_SERVICE}/transfers", json={
-        "listingId":           body["listingId"],
-        "buyerId":             buyer_id,
-        "sellerId":            seller_id,
-        "creditAmount":        credit_amount,
-        "buyerVerificationSid": otp_result["sid"],
+        "listingId":    body["listingId"],
+        "buyerId":      buyer_id,
+        "sellerId":     seller_id,
+        "creditAmount": credit_amount,
     })
     if err:
         return _error("INTERNAL_ERROR", "Could not create transfer record.", 500)
 
+    _publish_seller_notification(transfer["transferId"], seller_id)
+
     return jsonify({"data": {
         "transferId": transfer["transferId"],
-        "status":     "pending_buyer_otp",
-        "message":    "OTP sent to your registered phone number.",
+        "status":     "pending_seller_acceptance",
+        "message":    "Request sent to seller. Pending acceptance.",
     }}), 201
 
 
@@ -181,6 +220,38 @@ def initiate():
 @bp.post("/transfer/<transfer_id>/buyer-verify")
 @require_auth
 def buyer_verify(transfer_id):
+    """
+    Buyer submits OTP to verify their identity
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [otp]
+          properties:
+            otp:
+              type: string
+              example: "123456"
+    responses:
+      200:
+        description: OTP verified — status moves to pending_seller_otp
+      400:
+        description: Invalid OTP or wrong transfer status
+      401:
+        description: Unauthorized
+      403:
+        description: Access denied
+    """
     buyer_id = request.user["userId"]
     body     = request.get_json(silent=True) or {}
 
@@ -202,17 +273,26 @@ def buyer_verify(transfer_id):
     if err or not verify.get("verified"):
         return _error("VALIDATION_ERROR", "OTP is incorrect or has expired.", 400)
 
-    call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
-        "buyerOtpVerified": True,
-        "status":           "pending_seller_acceptance",
-    })
+    # Send OTP to seller now
+    seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve seller details.", 503)
 
-    _publish_seller_notification(transfer_id, transfer["sellerId"])
+    seller_otp, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                   json={"phoneNumber": seller["phoneNumber"]})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not send OTP to seller.", 503)
+
+    call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
+        "buyerOtpVerified":      True,
+        "sellerVerificationSid": seller_otp["sid"],
+        "status":                "pending_seller_otp",
+    })
 
     return jsonify({"data": {
         "transferId": transfer_id,
-        "status":     "pending_seller_acceptance",
-        "message":    "Verification successful. Seller has been notified.",
+        "status":     "pending_seller_otp",
+        "message":    "Your OTP verified. OTP sent to seller.",
     }}), 200
 
 
@@ -221,6 +301,28 @@ def buyer_verify(transfer_id):
 @bp.post("/transfer/<transfer_id>/seller-accept")
 @require_auth
 def seller_accept(transfer_id):
+    """
+    Seller accepts the transfer request — OTP sent to buyer
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+    responses:
+      200:
+        description: Accepted — status moves to pending_buyer_otp
+      400:
+        description: Wrong transfer status
+      401:
+        description: Unauthorized
+      403:
+        description: You are not the seller
+    """
     seller_id = request.user["userId"]
 
     transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
@@ -231,25 +333,93 @@ def seller_accept(transfer_id):
     if transfer["status"] != "pending_seller_acceptance":
         return _error("VALIDATION_ERROR", "Transfer is not awaiting seller acceptance.", 400)
 
-    seller, err = call_service("GET", f"{USER_SERVICE}/users/{seller_id}")
+    # Send OTP to buyer first
+    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
     if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not retrieve user details.", 503)
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve buyer details.", 503)
 
     otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
-                                   json={"phoneNumber": seller["phoneNumber"]})
+                                   json={"phoneNumber": buyer["phoneNumber"]})
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
 
     call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
-        "sellerVerificationSid": otp_result["sid"],
-        "status":                "pending_seller_otp",
+        "buyerVerificationSid": otp_result["sid"],
+        "status":               "pending_buyer_otp",
     })
 
     return jsonify({"data": {
         "transferId": transfer_id,
-        "status":     "pending_seller_otp",
-        "message":    "OTP sent to your registered phone number.",
+        "status":     "pending_buyer_otp",
+        "message":    "Request accepted. OTP sent to buyer.",
     }}), 200
+
+
+# ── POST /transfer/<id>/seller-reject ────────────────────────────────────────
+
+@bp.post("/transfer/<transfer_id>/seller-reject")
+@require_auth
+def seller_reject(transfer_id):
+    """
+    Seller rejects the transfer request — listing and ticket reverted to active
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+        example: txr_001
+    responses:
+      200:
+        description: Transfer rejected — listing back to active
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transferId:
+                  type: string
+                  example: txr_001
+                status:
+                  type: string
+                  example: cancelled
+                message:
+                  type: string
+                  example: Transfer rejected.
+      400:
+        description: Transfer is not awaiting seller acceptance
+      401:
+        description: Unauthorized
+      403:
+        description: You are not the seller
+      404:
+        description: Transfer not found
+    """
+    seller_id = request.user["userId"]
+
+    transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
+    if err:
+        return _error("TRANSFER_NOT_FOUND", "Transfer not found.", 404)
+    if transfer["sellerId"] != seller_id:
+        return _error("AUTH_FORBIDDEN", "You are not the seller in this transfer.", 403)
+    if transfer["status"] != "pending_seller_acceptance":
+        return _error("VALIDATION_ERROR", "Transfer is not awaiting seller acceptance.", 400)
+
+    call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "cancelled"})
+    listing, _ = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}")
+    if listing:
+        call_service("PATCH", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}",
+                     json={"status": "active"})
+        call_service("PATCH", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}",
+                     json={"status": "listed"})
+
+    return jsonify({"data": {"transferId": transfer_id, "status": "cancelled",
+                             "message": "Transfer rejected."}}), 200
 
 
 # ── POST /transfer/<id>/seller-verify ────────────────────────────────────────
@@ -257,6 +427,40 @@ def seller_accept(transfer_id):
 @bp.post("/transfer/<transfer_id>/seller-verify")
 @require_auth
 def seller_verify(transfer_id):
+    """
+    Seller submits OTP — executes the full transfer saga
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [otp]
+          properties:
+            otp:
+              type: string
+              example: "654321"
+    responses:
+      200:
+        description: Transfer completed — ticket ownership transferred
+      400:
+        description: Invalid OTP or wrong transfer status
+      401:
+        description: Unauthorized
+      402:
+        description: Buyer no longer has sufficient credits
+      500:
+        description: Saga failed — no credits charged
+    """
     seller_id = request.user["userId"]
     body      = request.get_json(silent=True) or {}
 
@@ -294,12 +498,13 @@ def seller_verify(transfer_id):
         call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
         return _error("SERVICE_UNAVAILABLE", "Could not verify buyer balance.", 503)
 
-    if buyer_credit["creditBalance"] < credit_amount:
+    buyer_balance = _get_credit_balance(buyer_credit)
+    if buyer_balance < credit_amount:
         call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
         return _error("INSUFFICIENT_CREDITS", "Buyer no longer has sufficient credits.", 402)
 
-    seller_credit, _ = call_credit_service("GET", f"/credits/{seller_id}")
-    seller_balance   = seller_credit["creditBalance"] if seller_credit else 0.0
+    seller_credit, seller_err = call_credit_service("GET", f"/credits/{seller_id}")
+    seller_balance = _get_credit_balance(seller_credit) if not seller_err and seller_credit else 0.0
 
     try:
         _execute_saga(
@@ -309,7 +514,7 @@ def seller_verify(transfer_id):
             credit_amount=credit_amount,
             ticket_id=ticket_id,
             listing_id=transfer["listingId"],
-            buyer_balance=buyer_credit["creditBalance"],
+            buyer_balance=buyer_balance,
             seller_balance=seller_balance,
         )
     except Exception:
@@ -323,11 +528,87 @@ def seller_verify(transfer_id):
     }}), 200
 
 
+# ── GET /transfer/pending ─────────────────────────────────────────────────────
+
+@bp.get("/transfer/pending")
+@require_auth
+def get_pending_transfers():
+    """
+    Get all pending transfers awaiting the authenticated seller's acceptance
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of transfers with status pending_seller_acceptance
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transfers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      transferId:
+                        type: string
+                        example: txr_001
+                      buyerId:
+                        type: string
+                        example: usr_001
+                      sellerId:
+                        type: string
+                        example: usr_002
+                      creditAmount:
+                        type: number
+                        example: 80.0
+                      status:
+                        type: string
+                        example: pending_seller_acceptance
+      401:
+        description: Unauthorized
+      503:
+        description: Transfer service unavailable
+    """
+    seller_id = request.user["userId"]
+    result, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers",
+                               params={"sellerId": seller_id, "status": "pending_seller_acceptance"})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve transfers.", 503)
+    return jsonify({"data": {"transfers": result.get("transfers", [])}}), 200
+
+
 # ── GET /transfer/<id> ────────────────────────────────────────────────────────
 
 @bp.get("/transfer/<transfer_id>")
 @require_auth
 def get_transfer(transfer_id):
+    """
+    Get transfer status — accessible by buyer and seller only
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+    responses:
+      200:
+        description: Transfer record
+      401:
+        description: Unauthorized
+      403:
+        description: Access denied — not buyer or seller
+      404:
+        description: Transfer not found
+    """
     user_id  = request.user["userId"]
     transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
     if err:
@@ -337,11 +618,111 @@ def get_transfer(transfer_id):
     return jsonify({"data": transfer}), 200
 
 
+# ── POST /transfer/<id>/resend-otp ───────────────────────────────────────────
+
+@bp.post("/transfer/<transfer_id>/resend-otp")
+@require_auth
+def resend_otp(transfer_id):
+    """
+    Resend OTP to the buyer or seller depending on current transfer status
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+        example: txr_001
+    responses:
+      200:
+        description: OTP resent successfully
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: OTP resent to your phone.
+      400:
+        description: OTP resend not available for current transfer status
+      401:
+        description: Unauthorized
+      403:
+        description: Access denied — not buyer or seller
+      404:
+        description: Transfer not found
+      503:
+        description: OTP service unavailable
+    """
+    user_id = request.user["userId"]
+
+    transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
+    if err:
+        return _error("TRANSFER_NOT_FOUND", "Transfer not found.", 404)
+    if user_id not in (transfer["buyerId"], transfer["sellerId"]):
+        return _error("AUTH_FORBIDDEN", "Access denied.", 403)
+
+    status = transfer.get("status")
+
+    if status == "pending_buyer_otp" and transfer["buyerId"] == user_id:
+        buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not retrieve user details.", 503)
+        otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                       json={"phoneNumber": buyer["phoneNumber"]})
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
+                     json={"buyerVerificationSid": otp_result["sid"]})
+        return jsonify({"data": {"message": "OTP resent to your phone."}}), 200
+
+    elif status == "pending_seller_otp" and transfer["sellerId"] == user_id:
+        seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not retrieve user details.", 503)
+        otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                       json={"phoneNumber": seller["phoneNumber"]})
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
+                     json={"sellerVerificationSid": otp_result["sid"]})
+        return jsonify({"data": {"message": "OTP resent to your phone."}}), 200
+
+    return _error("VALIDATION_ERROR", "OTP resend is not available for the current transfer state.", 400)
+
+
 # ── POST /transfer/<id>/cancel ────────────────────────────────────────────────
 
 @bp.post("/transfer/<transfer_id>/cancel")
 @require_auth
 def cancel_transfer(transfer_id):
+    """
+    Cancel an in-progress transfer — reverts listing and ticket to active
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: transfer_id
+        required: true
+        type: string
+    responses:
+      200:
+        description: Transfer cancelled
+      400:
+        description: Transfer already completed or ended
+      401:
+        description: Unauthorized
+      403:
+        description: Access denied
+    """
     user_id  = request.user["userId"]
     transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
     if err:

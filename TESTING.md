@@ -1,11 +1,13 @@
 # TicketRemaster Testing Guide (Postman + External Integrations)
 
 This guide explains how to import and run the shared Postman tests, plus how to validate external integrations and API keys for:
+
 - **1.4 OutSystems Credit Service**
 - **4.1 Stripe Wrapper (with Stripe CLI)**
 - **4.2 OTP Wrapper (SMU Notification API)**
 
 Related references:
+
 - Root docs index: [README.md](README.md)
 - Postman asset notes: [postman/README.md](postman/README.md)
 - Stripe wrapper service guide: [services/stripe-wrapper/README.md](services/stripe-wrapper/README.md)
@@ -19,6 +21,7 @@ Related references:
 - A local `.env` file at repo root (copy from `.env.example` and fill real secrets)
 
 Required `.env` keys for external checks:
+
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `SMU_API_URL`
@@ -35,12 +38,13 @@ docker compose up -d --build
 ```
 
 Quick smoke check:
+
 - Open Postman and run folder **00 Health**
 - Correct result: each request returns **200** with body like:
 
 ```json
 {
-  "status": "ok"
+    "status": "ok"
 }
 ```
 
@@ -48,18 +52,19 @@ Quick smoke check:
 
 1. In Postman, click **Import**.
 2. Import:
-   - `postman/TicketRemaster.postman_collection.json`
-   - `postman/TicketRemaster.local.postman_environment.json`
+    - `postman/TicketRemaster.postman_collection.json`
+    - `postman/TicketRemaster.local.postman_environment.json`
 3. Set active environment to **TicketRemaster Local**.
 4. In environment variables, confirm base URLs match local ports:
-   - `user_service_url=http://localhost:5000`
-   - `stripe_wrapper_url=http://localhost:5011`
-   - `otp_wrapper_url=http://localhost:5012`
-   - others as needed from the environment file.
+    - `user_service_url=http://localhost:5000`
+    - `stripe_wrapper_url=http://localhost:5011`
+    - `otp_wrapper_url=http://localhost:5012`
+    - others as needed from the environment file.
 
 ## 3.1) Seed-data baseline used by Postman
 
 The shared local environment assumes seeded baseline data:
+
 - `user_email=admin1@ticketremaster.local`
 - `venue_id=ven_001`
 - `event_id=evt_001`
@@ -87,6 +92,7 @@ The collection auto-captures `user_id`, `venue_id`, `event_id`, and `inventory_i
 Run folders top-to-bottom so IDs are captured into environment variables.
 
 Recommended order:
+
 1. `00 Health`
 2. `01 User Service` (sets `user_id`)
 3. `02 Venue Service`
@@ -104,6 +110,7 @@ Recommended order:
 15. `14 OutSystems Credit Service (Phase 1.4 External)`
 
 What “correct” looks like:
+
 - Most create/update calls return **200/201** and a JSON object containing a generated ID (`userId`, `eventId`, `ticketId`, `listingId`, `transferId`, etc.).
 - GET-by-ID calls return **200** and the same ID you just created.
 - Request chaining works when environment values are populated after prior requests.
@@ -127,38 +134,43 @@ postman collection run .\postman\TicketRemaster.postman_collection.json -e .\pos
 ## 5.1 Phase 4.1 Stripe Wrapper (including Stripe CLI)
 
 ### A) Verify Stripe API key works (Payment Intent creation)
+
 Run request: **11 Stripe Wrapper → Create Payment Intent**
 
 Expected success:
+
 - HTTP **200**
 - JSON includes:
 
 ```json
 {
-  "clientSecret": "cs_...",
-  "paymentIntentId": "pi_...",
-  "amount": 50
+    "clientSecret": "cs_...",
+    "paymentIntentId": "pi_...",
+    "amount": 50
 }
 ```
 
 If key/config is wrong, this request fails (typically 4xx/5xx from Stripe wrapper).
 
 ### B) Verify signature rejection path
+
 Run request: **11 Stripe Wrapper → Webhook Invalid Signature Check**
 
 Expected:
+
 - HTTP **400**
 - JSON contains:
 
 ```json
 {
-  "error": {
-    "code": "INVALID_SIGNATURE"
-  }
+    "error": {
+        "code": "INVALID_SIGNATURE"
+    }
 }
 ```
 
 ### C) Verify valid webhook signature path using Stripe CLI
+
 1. In terminal, login and listen:
 
 ```powershell
@@ -180,6 +192,7 @@ stripe trigger payment_intent.succeeded
 ```
 
 Expected:
+
 - Stripe CLI shows event delivered to `localhost:5011/stripe/webhook` with **200**.
 - This confirms webhook signature verification path is working with your configured secret.
 
@@ -188,36 +201,40 @@ Expected:
 SMU Notification endpoints are POST-only. Opening endpoint URLs directly in a browser sends GET and returns:
 
 ```json
-{"Message":"The requested resource does not support http method 'GET'."}
+{ "Message": "The requested resource does not support http method 'GET'." }
 ```
 
 That response is expected for browser checks and does not indicate wrapper failure.
 
 ### A) Send OTP
+
 Run request: **12 OTP Wrapper → Send OTP**
 
 Expected success:
+
 - HTTP **200**
 - JSON:
 
 ```json
 {
-  "sid": "..."
+    "sid": "..."
 }
 ```
 
 Copy returned `sid` into environment variable `otp_sid` (unless already set manually by your team workflow).
 
 ### B) Verify OTP
+
 Run request: **12 OTP Wrapper → Verify OTP**
 
 Expected success format:
+
 - HTTP **200**
 - JSON:
 
 ```json
 {
-  "verified": true
+    "verified": true
 }
 ```
 
@@ -225,20 +242,23 @@ or:
 
 ```json
 {
-  "verified": false
+    "verified": false
 }
 ```
 
 Both are valid API responses; `true/false` depends on the OTP entered.
 
 ### C) Detect bad API key / upstream issues
+
 If `SMU_API_KEY` or `SMU_API_URL` is wrong, expected wrapper behavior:
+
 - HTTP **502**
 - Error code:
-  - `OTP_SEND_FAILED` for `/otp/send`
-  - `OTP_VERIFY_FAILED` for `/otp/verify`
+    - `OTP_SEND_FAILED` for `/otp/send`
+    - `OTP_VERIFY_FAILED` for `/otp/verify`
 
 OTP wrapper → SMU mapping used by this repo:
+
 - `/otp/send` calls `POST <SMU_API_URL>/SendOTP` with body `{ "Mobile": "<phoneNumber>" }`
 - `/otp/verify` calls `POST <SMU_API_URL>/VerifyOTP` with body `{ "VerificationSid": "<sid>", "Code": "<otp>" }`
 
@@ -247,58 +267,69 @@ OTP wrapper → SMU mapping used by this repo:
 The shared collection already includes folder **14 OutSystems Credit Service (Phase 1.4 External)**.
 
 Before testing, add environment variables:
+
 - `credit_service_url` = your OutSystems base URL (same value as `.env` `CREDIT_SERVICE_URL`)
 - `outsystems_api_key` = your OutSystems key (same value as `.env` `OUTSYSTEMS_API_KEY`)
 
 Headers already configured in collection:
-- `X-API-Key: {{outsystems_api_key}}`
+
+- `X-API-KEY: {{outsystems_api_key}}`
 - `Content-Type: application/json`
 
 ### A) Create credit record
+
 - Method/URL: `POST {{credit_service_url}}/credits`
 - Body:
 
 ```json
 {
-  "userId": "outsys_test_user_001"
+    "userId": "outsys_test_user_001"
 }
 ```
 
 Expected:
+
 - HTTP **200/201**
 - Response includes `userId` and `creditBalance` initialized to `0` (or `0.0`).
 
 ### B) Fetch credit balance
+
 - Method/URL: `GET {{credit_service_url}}/credits/outsys_test_user_001`
 
 Expected:
+
 - HTTP **200**
 - Response includes `userId` and numeric `creditBalance`.
 
 ### C) Update credit balance (absolute value)
+
 - Method/URL: `PATCH {{credit_service_url}}/credits/outsys_test_user_001`
 - Body:
 
 ```json
 {
-  "creditBalance": 120
+    "creditBalance": 120
 }
 ```
 
 Expected:
+
 - HTTP **200**
 - Response includes updated `creditBalance` in body (this is required for orchestrator compatibility).
 
 ### D) API key negative test
-Repeat one request with an invalid `X-API-Key`.
+
+Repeat one request with an invalid `X-API-KEY`.
 
 Expected:
+
 - HTTP **401/403** (provider-specific)
 - Request must be rejected.
 
 ## 6) Team validation checklist
 
 Use this pass/fail checklist during walkthrough:
+
 - [ ] All services in **00 Health** return 200 + `{ "status": "ok" }`
 - [ ] Core collection runs in order without missing environment IDs
 - [ ] Stripe create-payment-intent returns `clientSecret` + `paymentIntentId`
@@ -334,25 +365,26 @@ Expected error format from TicketRemaster services:
 
 ```json
 {
-  "error": {
-    "code": "INTERNAL_ERROR",
-    "message": "Unhandled internal server error.",
-    "status": 500,
-    "traceId": "f3a6f8ea-....",
-    "details": {
-      "method": "POST",
-      "path": "/stripe/webhook",
-      "timestamp": "2026-03-21T...",
-      "resolution": "Check error.code, request payload, and service logs using traceId.",
-      "exceptionType": "ValueError",
-      "exceptionMessage": "...",
-      "stackTrace": ["Traceback ..."]
+    "error": {
+        "code": "INTERNAL_ERROR",
+        "message": "Unhandled internal server error.",
+        "status": 500,
+        "traceId": "f3a6f8ea-....",
+        "details": {
+            "method": "POST",
+            "path": "/stripe/webhook",
+            "timestamp": "2026-03-21T...",
+            "resolution": "Check error.code, request payload, and service logs using traceId.",
+            "exceptionType": "ValueError",
+            "exceptionMessage": "...",
+            "stackTrace": ["Traceback ..."]
+        }
     }
-  }
 }
 ```
 
 When a request fails:
+
 - Copy `error.traceId`.
 - Check service logs:
 

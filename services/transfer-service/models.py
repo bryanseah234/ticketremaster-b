@@ -11,7 +11,7 @@ class Transfer(db.Model):
     listingId = db.Column(db.String(36), nullable=False, index=True)
     buyerId = db.Column(db.String(36), nullable=False)
     sellerId = db.Column(db.String(36), nullable=False)
-    status = db.Column(db.String(30), nullable=False, default='pending_buyer_otp')
+    status = db.Column(db.String(30), nullable=False, default='pending_seller_acceptance')
     creditAmount = db.Column(db.Float, nullable=False)
     buyerOtpVerified = db.Column(db.Boolean, nullable=False, default=False)
     sellerOtpVerified = db.Column(db.Boolean, nullable=False, default=False)

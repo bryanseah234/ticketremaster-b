@@ -13,7 +13,7 @@ def health():
 
 
 REQUIRED_FIELDS = ('email', 'password', 'salt', 'phoneNumber')
-UPDATABLE_FIELDS = {'email', 'password', 'salt', 'phoneNumber', 'role', 'isFlagged'}
+UPDATABLE_FIELDS = {'email', 'password', 'salt', 'phoneNumber', 'role', 'isFlagged', 'venueId'}
 
 
 def error_response(status_code, code, message):
@@ -44,6 +44,7 @@ def create_user():
         phoneNumber=data['phoneNumber'],
         role=data.get('role', 'user'),
         isFlagged=data.get('isFlagged', False),
+        venueId=data.get('venueId')
     )
     db.session.add(user)
     db.session.commit()

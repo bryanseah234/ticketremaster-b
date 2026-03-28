@@ -19,7 +19,7 @@ class SeatInventoryGrpcService(SeatInventoryServiceServicer):
     def HoldSeat(self, request, context):
         with self.app.app_context():
             now = datetime.now(UTC)
-            hold_seconds = request.hold_duration_seconds if request.hold_duration_seconds > 0 else 600
+            hold_seconds = request.hold_duration_seconds if request.hold_duration_seconds > 0 else 300
             held_until = now + timedelta(seconds=hold_seconds)
             hold_token = str(uuid.uuid4())
 

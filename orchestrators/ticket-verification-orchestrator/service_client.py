@@ -37,6 +37,6 @@ def call_credit_service(method, path, **kwargs):
     Automatically injects the OUTSYSTEMS_API_KEY header.
     """
     headers = kwargs.pop("headers", {})
-    headers["X-API-Key"] = os.environ["OUTSYSTEMS_API_KEY"]
+    headers["X-API-KEY"] = os.environ["OUTSYSTEMS_API_KEY"]
     base = os.environ["CREDIT_SERVICE_URL"].rstrip("/")
     return call_service(method, f"{base}{path}", headers=headers, **kwargs)

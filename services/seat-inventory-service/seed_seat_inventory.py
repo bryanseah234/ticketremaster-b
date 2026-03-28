@@ -57,3 +57,4 @@ with app.app_context():
 
     db.session.commit()
     print(f'Seed complete. Created {created} inventory record(s).')
+    # Expected: 3 events x 40 seats + 3 events x 50 seats + 2 events x 60 seats + 2 events x 70 seats = 530 total

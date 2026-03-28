@@ -31,7 +31,7 @@ EVENT_SERVICE      = os.environ.get("EVENT_SERVICE_URL",              "http://ev
 SEAT_INV_REST      = os.environ.get("SEAT_INVENTORY_SERVICE_URL",     "http://seat-inventory-service:5000")
 CREDIT_TXN_SERVICE = os.environ.get("CREDIT_TRANSACTION_SERVICE_URL", "http://credit-transaction-service:5000")
 
-HOLD_SECONDS = int(os.environ.get("SEAT_HOLD_DURATION_SECONDS", "600"))
+HOLD_SECONDS = int(os.environ.get("SEAT_HOLD_DURATION_SECONDS", "300"))
 
 
 def _error(code, message, status):
@@ -72,11 +72,112 @@ def _publish_hold_ttl(inventory_id, user_id, hold_token):
         logger.warning("Failed to publish hold TTL message: %s", exc)
 
 
+# ── GET /tickets ─────────────────────────────────────────────────────────────
+
+@bp.get("/tickets")
+@require_auth
+def get_my_tickets():
+    """
+    List all tickets owned by the authenticated user enriched with event details
+    ---
+    tags:
+      - Tickets
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of tickets with event details
+        schema:
+          type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  ticketId:
+                    type: string
+                    example: tkt_001
+                  status:
+                    type: string
+                    example: active
+                    enum: [active, listed, used, pending_transfer]
+                  price:
+                    type: number
+                    example: 80.0
+                  eventId:
+                    type: string
+                    example: evt_001
+                  venueId:
+                    type: string
+                    example: ven_001
+                  event:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        example: Taylor Swift | The Eras Tour
+                      event_date:
+                        type: string
+                        example: "2025-06-15T19:30:00"
+      401:
+        description: Unauthorized
+      503:
+        description: Ticket service unavailable
+    """
+    user_id = request.user["userId"]
+    data, err = call_service("GET", f"{TICKET_SERVICE}/tickets/owner/{user_id}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not fetch tickets.", 503)
+    tickets = data.get("tickets", [])
+
+    # Enrich each ticket with event details
+    event_cache = {}
+    for ticket in tickets:
+        event_id = ticket.get("eventId")
+        if event_id and event_id not in event_cache:
+            event_data, e_err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
+            event_cache[event_id] = event_data if not e_err else {}
+        if event_id:
+            ev = event_cache.get(event_id, {})
+            ticket["event"] = {
+                "name": ev.get("name"),
+                "event_date": ev.get("date") or ev.get("eventDate"),
+            }
+
+    return jsonify({"data": tickets}), 200
+
+
 # ── POST /purchase/hold/<inventory_id> ───────────────────────────────────────
 
 @bp.post("/purchase/hold/<inventory_id>")
 @require_auth
 def hold_seat(inventory_id):
+    """
+    Hold a seat for purchase — reserves for SEAT_HOLD_DURATION_SECONDS
+    ---
+    tags:
+      - Purchase
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+    responses:
+      200:
+        description: Seat held — returns holdToken and heldUntil timestamp
+      401:
+        description: Unauthorized
+      404:
+        description: Seat not found
+      409:
+        description: Seat already held or sold
+      503:
+        description: Seat inventory service unavailable
+    """
     user_id = request.user["userId"]
 
     try:
@@ -105,11 +206,123 @@ def hold_seat(inventory_id):
     }}), 200
 
 
+# ── DELETE /purchase/hold/<inventory_id> ─────────────────────────────────────
+
+@bp.delete("/purchase/hold/<inventory_id>")
+@require_auth
+def release_hold(inventory_id):
+    """
+    Manually release a seat hold before it expires
+    ---
+    tags:
+      - Purchase
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [holdToken]
+          properties:
+            holdToken:
+              type: string
+              example: c378f45d-4236-4d49-8d93-d5e965964ada
+              description: The holdToken returned from POST /purchase/hold/<inventory_id>
+    responses:
+      200:
+        description: Seat released — status back to available
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                inventoryId:
+                  type: string
+                  example: inv_001
+                status:
+                  type: string
+                  example: available
+      401:
+        description: Unauthorized
+      409:
+        description: Could not release — hold token mismatch or seat not held
+      503:
+        description: Seat inventory service unavailable
+    """
+    user_id = request.user["userId"]
+    body = request.get_json(silent=True) or {}
+    hold_token = body.get("holdToken", "")
+
+    try:
+        stub = _grpc_stub()
+        resp = stub.ReleaseSeat(seat_inventory_pb2.ReleaseSeatRequest(
+            inventory_id=inventory_id,
+            user_id=user_id,
+            hold_token=hold_token,
+        ))
+    except grpc.RpcError as exc:
+        logger.error("gRPC ReleaseSeat error: %s", exc)
+        return _error("SERVICE_UNAVAILABLE", "Seat inventory service unavailable.", 503)
+
+    if not resp.success:
+        return _error(resp.error_code or "RELEASE_FAILED", "Could not release seat hold.", 409)
+
+    return jsonify({"data": {"inventoryId": inventory_id, "status": "available"}}), 200
+
+
 # ── POST /purchase/confirm/<inventory_id> ────────────────────────────────────
 
 @bp.post("/purchase/confirm/<inventory_id>")
 @require_auth
 def confirm_purchase(inventory_id):
+    """
+    Confirm a seat purchase — deducts credits and creates ticket
+    ---
+    tags:
+      - Purchase
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: inventory_id
+        required: true
+        type: string
+        example: inv_001
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [eventId, holdToken]
+          properties:
+            eventId:
+              type: string
+              example: evt_001
+            holdToken:
+              type: string
+              example: c378f45d-4236-4d49-8d93-d5e965964ada
+    responses:
+      201:
+        description: Ticket created successfully
+      400:
+        description: Missing eventId or validation error
+      402:
+        description: Insufficient credits
+      409:
+        description: Seat no longer available
+      410:
+        description: Seat hold has expired
+      500:
+        description: Ticket creation failed
+    """
     user_id = request.user["userId"]
     body    = request.get_json(silent=True) or {}
     hold_token = body.get("holdToken", "")
@@ -140,9 +353,6 @@ def confirm_purchase(inventory_id):
 
     # Fetch event (need venueId + price)
     inv_list, err = call_service("GET", f"{SEAT_INV_REST}/inventory/event/{seat_status.inventory_id if hasattr(seat_status, 'inventory_id') else inventory_id}")
-    # Fallback: find the inventory record by listing events — we need eventId
-    # The seat inventory REST list endpoint returns eventId per record
-    # Filter for our inventoryId
     inv_record = None
     if not err:
         inv_record = next(
@@ -150,9 +360,7 @@ def confirm_purchase(inventory_id):
             None,
         )
 
-    # If we can't find it that way, the confirm body may supply eventId
     event_id = body.get("eventId") or (inv_record["eventId"] if inv_record else None)
-    venue_id = body.get("venueId") or (None)  # resolved from event below
 
     if not event_id:
         return _error("VALIDATION_ERROR", "Could not resolve eventId for this seat.", 400)
@@ -161,7 +369,7 @@ def confirm_purchase(inventory_id):
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not fetch event details.", 503)
 
-    venue_id    = event_data.get("venueId")
+    venue_id     = event_data.get("venueId")
     ticket_price = float(event_data["price"])
 
     # 2. Check buyer credits (OutSystems)
@@ -169,7 +377,22 @@ def confirm_purchase(inventory_id):
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not verify credit balance.", 503)
 
-    if credit_data["creditBalance"] < ticket_price:
+    logger.info("Credit data response: %s", credit_data)
+
+    # Handle different possible field names from OutSystems
+    # and treat missing/zero balance as 0.0
+    raw_balance = (
+        credit_data.get("creditBalance")
+        if credit_data.get("creditBalance") is not None
+        else credit_data.get("CreditBalance")
+        if credit_data.get("CreditBalance") is not None
+        else credit_data.get("balance")
+        if credit_data.get("balance") is not None
+        else 0.0
+    )
+    balance = float(raw_balance)
+
+    if balance < ticket_price:
         return _error("INSUFFICIENT_CREDITS", "Insufficient credits for this purchase.", 402)
 
     # 3. Sell seat via gRPC
@@ -210,7 +433,7 @@ def confirm_purchase(inventory_id):
 
     # 5. Deduct credits (OutSystems)
     _, err = call_credit_service("PATCH", f"/credits/{user_id}", json={
-        "creditBalance": credit_data["creditBalance"] - ticket_price,
+        "creditBalance": balance - ticket_price,
     })
     if err:
         logger.error("Credit deduction failed for user %s — ticket %s created but credits not deducted", user_id, ticket_id)
