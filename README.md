@@ -279,16 +279,20 @@ For a fuller validation and troubleshooting flow, use [TESTING.md](TESTING.md).
 
 ## Documentation hub
 
-### Project-level docs
+### Core documentation
 
+- [README.md](README.md) — this file, system overview and quickstart
+- [COMPLETE_SYSTEM_DOCUMENTATION.md](COMPLETE_SYSTEM_DOCUMENTATION.md) — **complete architecture reference with full system diagrams**
 - [API.md](API.md) — unified API reference, auth model, examples, and OpenAPI links
-- [FRONTEND.md](FRONTEND.md) — exact frontend integration contract and gateway route guidance
-- [PRD.md](PRD.md) — product and architecture summary aligned to the current implementation
+- [FRONTEND.md](FRONTEND.md) — exact frontend integration contract, reliability features, and gateway route guidance
 - [TESTING.md](TESTING.md) — Docker, Postman, OutSystems, and Kubernetes testing guide
-- [OUTSYSTEMS.md](OUTSYSTEMS.md) — OutSystems-specific implementation notes
-- [INSTRUCTION.md](INSTRUCTION.md) — implementation notes and deployment guidance
-- [CHANGES.md](CHANGES.md) — current infrastructure hardening backlog
-- [TASK.md](TASK.md) — implementation checklist and history
+- [PRD.md](PRD.md) — product and architecture summary aligned to the current implementation
+
+### Integration guides
+
+- [OUTSYSTEMS.md](OUTSYSTEMS.md) — OutSystems Credit Service integration contract and setup
+- [INSTRUCTION.md](INSTRUCTION.md) — implementation notes, build order reasoning, and deployment guidance
+- [ticketremaster-k8s-architecture.md](ticketremaster-k8s-architecture.md) — Kubernetes architecture specification
 
 ### Collections and environments
 
