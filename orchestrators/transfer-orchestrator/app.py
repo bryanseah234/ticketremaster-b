@@ -5,6 +5,11 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify
 from flasgger import Swagger
 
+import sys
+import signal
+from shared.graceful_shutdown import setup_graceful_shutdown, create_cleanup_function
+
+
 def create_app(test_config=None):
     load_dotenv()
     app = Flask(__name__)
@@ -42,6 +47,10 @@ def create_app(test_config=None):
         from seller_consumer import start_seller_consumer
         t = threading.Thread(target=start_seller_consumer, daemon=True, name="seller-consumer")
         t.start()
+        
+        from timeout_consumer import start_transfer_timeout_consumer
+        t2 = threading.Thread(target=start_transfer_timeout_consumer, daemon=True, name="timeout-consumer")
+        t2.start()
 
     from routes import bp
     app.register_blueprint(bp)
@@ -50,7 +59,42 @@ def create_app(test_config=None):
     def health():
         return jsonify({"status": "ok", "service": "transfer-orchestrator"}), 200
 
+    @app.get("/ready")
+    def readiness():
+        """Readiness probe endpoint - returns 503 during shutdown."""
+        from shared.graceful_shutdown import is_shutting_down
+        if is_shutting_down():
+            return jsonify({"status": "shutting_down"}), 503
+        return jsonify({"status": "ready"}), 200
+
+    # Setup graceful shutdown
+    cleanup = create_cleanup_function()
+    setup_graceful_shutdown(app, cleanup_func=cleanup)
+
     return app
+
+
+def main():
+    """Main entry point with graceful shutdown support."""
+    app = create_app()
+    
+    # Register signal handlers
+    def shutdown_handler(signum, frame):
+        import sys
+        from shared.graceful_shutdown import graceful_shutdown
+        graceful_shutdown(signum, frame, cleanup)
+    
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
+    
+    # Run the app
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port)
+
+
+if __name__ == "__main__":
+    import os
+    main()
 
 
 app = create_app()

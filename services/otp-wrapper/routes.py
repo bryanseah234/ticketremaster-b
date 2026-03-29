@@ -1,9 +1,14 @@
 from urllib.parse import urljoin
+import logging
+import os
+import time
 
+import redis
 import requests
 from flask import Blueprint, current_app, jsonify, request
 
 bp = Blueprint('otp_wrapper', __name__)
+logger = logging.getLogger(__name__)
 
 
 def error_response(status_code, code, message):
@@ -17,6 +22,88 @@ def build_smu_url(path):
 
 def smu_headers():
     return {'X-API-KEY': current_app.config['SMU_API_KEY']}
+
+
+# Rate limiting configuration
+RATE_LIMIT_ATTEMPTS = int(os.environ.get('OTP_RATE_LIMIT_ATTEMPTS', '5'))
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get('OTP_RATE_LIMIT_WINDOW_SECONDS', '900'))  # 15 minutes
+RATE_LIMIT_LOCKOUT_SECONDS = int(os.environ.get('OTP_RATE_LIMIT_LOCKOUT_SECONDS', '900'))  # 15 minutes
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+
+
+def _get_redis_client():
+    """Get Redis client for rate limiting."""
+    try:
+        client = redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        client.ping()
+        return client
+    except Exception as exc:
+        logger.warning("Redis unavailable for rate limiting: %s", exc)
+        return None
+
+
+def _check_rate_limit(phone_number, ip_address=None):
+    """
+    Check if OTP verification attempts are within rate limits.
+    Returns (allowed, attempts, lock_remaining) tuple.
+    """
+    client = _get_redis_client()
+    if client is None:
+        # Redis unavailable, allow but log
+        return True, 0, 0
+    
+    # Check phone number rate limit
+    phone_key = f"otp:rate:{phone_number}"
+    lock_key = f"otp:lock:{phone_number}"
+    
+    # Check if account is locked
+    is_locked = client.get(lock_key)
+    if is_locked:
+        ttl = client.ttl(lock_key)
+        return False, RATE_LIMIT_ATTEMPTS, ttl
+    
+    # Get current attempt count
+    attempts = client.get(phone_key)
+    attempts = int(attempts) if attempts else 0
+    
+    if attempts >= RATE_LIMIT_ATTEMPTS:
+        # Lock the account
+        client.setex(lock_key, RATE_LIMIT_LOCKOUT_SECONDS, "1")
+        return False, attempts, RATE_LIMIT_LOCKOUT_SECONDS
+    
+    return True, attempts, 0
+
+
+def _increment_attempt(phone_number):
+    """Increment OTP attempt counter."""
+    client = _get_redis_client()
+    if client is None:
+        return 0
+    
+    phone_key = f"otp:rate:{phone_number}"
+    # Increment and set expiry if new key
+    pipe = client.pipeline()
+    pipe.incr(phone_key)
+    pipe.expire(phone_key, RATE_LIMIT_WINDOW_SECONDS)
+    pipe.execute()
+    
+    return int(client.get(phone_key) or 0)
+
+
+def _reset_attempts(phone_number):
+    """Reset OTP attempt counter on successful verification."""
+    client = _get_redis_client()
+    if client is None:
+        return
+    
+    phone_key = f"otp:rate:{phone_number}"
+    lock_key = f"otp:lock:{phone_number}"
+    client.delete(phone_key, lock_key)
 
 
 @bp.get('/health')
@@ -62,6 +149,20 @@ def verify_otp():
     data = request.get_json(silent=True)
     if not data or 'sid' not in data or 'otp' not in data:
         return error_response(400, 'VALIDATION_ERROR', 'Missing required fields: sid, otp')
+    
+    # Extract phone number for rate limiting (from request headers or data)
+    phone_number = data.get('phoneNumber', request.headers.get('X-Phone-Number', 'unknown'))
+    ip_address = request.remote_addr
+    
+    # Check rate limit
+    allowed, attempts, lock_remaining = _check_rate_limit(phone_number, ip_address)
+    if not allowed:
+        if lock_remaining > 0:
+            return error_response(429, 'OTP_RATE_LIMIT_EXCEEDED', 
+                                f'Account locked. Try again in {lock_remaining} seconds.')
+        else:
+            return error_response(429, 'OTP_RATE_LIMIT_EXCEEDED',
+                                f'Rate limit exceeded. {RATE_LIMIT_ATTEMPTS - attempts} attempts remaining.')
 
     try:
         response = requests.post(
@@ -71,6 +172,13 @@ def verify_otp():
             timeout=10,
         )
         if response.status_code == 400:
+            # Invalid OTP - increment attempt counter
+            new_attempts = _increment_attempt(phone_number)
+            
+            if new_attempts >= RATE_LIMIT_ATTEMPTS:
+                return error_response(429, 'OTP_RATE_LIMIT_EXCEEDED',
+                                    f'Maximum attempts reached. Account locked for {RATE_LIMIT_LOCKOUT_SECONDS} seconds.')
+            
             return jsonify({'verified': False}), 200
         response.raise_for_status()
         payload = response.json()
@@ -86,5 +194,9 @@ def verify_otp():
         verified = payload.get('success')
     if verified is None:
         verified = payload.get('Success')
+
+    if verified:
+        # Success - reset attempt counter
+        _reset_attempts(phone_number)
 
     return jsonify({'verified': bool(verified)}), 200

@@ -14,8 +14,11 @@ Check order (must not be changed):
 """
 import logging
 import os
+import random
+import time
 from datetime import datetime, timedelta, timezone
 
+import redis
 from flask import Blueprint, jsonify, request
 
 from middleware import require_staff
@@ -31,6 +34,90 @@ VENUE_SERVICE          = os.environ.get("VENUE_SERVICE_URL",           "http://v
 SEAT_INV_SERVICE       = os.environ.get("SEAT_INVENTORY_SERVICE_URL",  "http://seat-inventory-service:5000")
 
 QR_TTL_SECONDS = int(os.environ.get("QR_TTL_SECONDS", "60"))
+
+# Redis configuration for distributed locks
+REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+LOCK_TTL_SECONDS = int(os.environ.get("SCAN_LOCK_TTL_SECONDS", "5"))
+LOCK_RETRY_DELAY_MS = int(os.environ.get("SCAN_LOCK_RETRY_DELAY_MS", "100"))
+MAX_LOCK_RETRIES = int(os.environ.get("SCAN_LOCK_MAX_RETRIES", "3"))
+
+
+def _get_redis_client():
+    """Get Redis client for distributed locks."""
+    try:
+        client = redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        client.ping()
+        return client
+    except Exception as exc:
+        logger.warning("Redis unavailable for distributed locks: %s", exc)
+        return None
+
+
+def _acquire_scan_lock(ticket_id):
+    """
+    Acquire distributed lock for ticket scan to prevent concurrent scans.
+    Returns lock token if acquired, None otherwise.
+    """
+    client = _get_redis_client()
+    if client is None:
+        # Redis unavailable, allow operation but log warning
+        logger.warning("Redis unavailable, proceeding without distributed lock for ticket %s", ticket_id)
+        return "no-lock"
+    
+    lock_key = f"scan_lock:{ticket_id}"
+    lock_token = f"{ticket_id}:{time.time()}"
+    
+    for attempt in range(MAX_LOCK_RETRIES):
+        try:
+            # SETNX with TTL for atomic lock acquisition
+            acquired = client.set(lock_key, lock_token, nx=True, ex=LOCK_TTL_SECONDS)
+            if acquired:
+                logger.info("Acquired scan lock for ticket %s (attempt %d)", ticket_id, attempt + 1)
+                return lock_token
+            
+            if attempt < MAX_LOCK_RETRIES - 1:
+                # Exponential backoff with jitter
+                delay = (LOCK_RETRY_DELAY_MS / 1000) * (2 ** attempt) + random.uniform(0, 0.1)
+                logger.debug("Scan lock busy for ticket %s, retrying in %.2fs (attempt %d)", ticket_id, delay, attempt + 1)
+                time.sleep(delay)
+        except Exception as exc:
+            logger.warning("Error acquiring scan lock for ticket %s (attempt %d): %s", ticket_id, attempt + 1, exc)
+            if attempt < MAX_LOCK_RETRIES - 1:
+                time.sleep(LOCK_RETRY_DELAY_MS / 1000 * (2 ** attempt))
+    
+    logger.warning("Failed to acquire scan lock for ticket %s after %d attempts", ticket_id, MAX_LOCK_RETRIES)
+    return None
+
+
+def _release_scan_lock(ticket_id, lock_token):
+    """Release distributed lock for ticket scan."""
+    if lock_token == "no-lock":
+        return
+    
+    client = _get_redis_client()
+    if client is None:
+        logger.warning("Redis unavailable, cannot release scan lock for ticket %s", ticket_id)
+        return
+    
+    lock_key = f"scan_lock:{ticket_id}"
+    try:
+        # Only delete if we own the lock (Lua script for atomicity)
+        lua_script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+        client.eval(lua_script, 1, lock_key, lock_token)
+        logger.info("Released scan lock for ticket %s", ticket_id)
+    except Exception as exc:
+        logger.warning("Error releasing scan lock for ticket %s: %s", ticket_id, exc)
 
 
 def _error(code, message, status, **extra):
@@ -97,80 +184,93 @@ def scan():
         return _error("TICKET_NOT_FOUND", "No ticket matches this QR code.", 404)
 
     ticket_id = ticket["ticketId"]
-
-    # 2. QR TTL check
+    
+    # 1.5 Acquire distributed lock to prevent concurrent scans
+    lock_token = _acquire_scan_lock(ticket_id)
+    if lock_token is None:
+        return _error("CONCURRENT_SCAN", "Another scan is in progress. Please try again.", 409)
+    
     try:
-        ts = ticket.get("qrTimestamp", "")
-        if ts:
-            ts_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            if ts_dt.tzinfo is None:
-                ts_dt = ts_dt.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) - ts_dt > timedelta(seconds=QR_TTL_SECONDS):
-                _log(ticket_id, staff_id, "expired")
-                return _error("QR_EXPIRED", "QR code has expired — ask the attendee to refresh.", 400)
-    except (ValueError, TypeError):
-        _log(ticket_id, staff_id, "expired")
-        return _error("QR_EXPIRED", "Could not parse QR timestamp.", 400)
+        # 2. QR TTL check
+        try:
+            ts = ticket.get("qrTimestamp", "")
+            if ts:
+                ts_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+                # Also check if timestamp is in the future (clock skew attack)
+                if ts_dt > datetime.now(timezone.utc) + timedelta(seconds=300):
+                    _log(ticket_id, staff_id, "invalid")
+                    return _error("QR_INVALID", "QR timestamp is in the future.", 400)
+                if datetime.now(timezone.utc) - ts_dt > timedelta(seconds=QR_TTL_SECONDS):
+                    _log(ticket_id, staff_id, "expired")
+                    return _error("QR_EXPIRED", "QR code has expired — ask the attendee to refresh.", 400)
+        except (ValueError, TypeError):
+            _log(ticket_id, staff_id, "expired")
+            return _error("QR_EXPIRED", "Could not parse QR timestamp.", 400)
 
-    # 3. Validate event
-    event, err = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
-    if err:
-        _log(ticket_id, staff_id, "invalid")
-        return _error("TICKET_NOT_FOUND", "Associated event not found.", 400)
+        # 3. Validate event
+        event, err = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
+        if err:
+            _log(ticket_id, staff_id, "invalid")
+            return _error("TICKET_NOT_FOUND", "Associated event not found.", 400)
 
-    # 4. Seat status = sold
-    inv_data, _ = call_service("GET", f"{SEAT_INV_SERVICE}/inventory/event/{ticket['eventId']}")
-    seat = next(
-        (s for s in (inv_data or {}).get("inventory", []) if s["inventoryId"] == ticket["inventoryId"]),
-        None,
-    )
-    if not seat or seat.get("status") != "sold":
-        _log(ticket_id, staff_id, "invalid")
-        return _error("TICKET_NOT_FOUND", "Seat is not marked as sold.", 400)
-
-    # 5. Ticket status = active
-    if ticket["status"] != "active":
-        _log(ticket_id, staff_id, "invalid")
-        return _error("QR_INVALID", f"Ticket status is '{ticket['status']}' — not valid for entry.", 400)
-
-    # 6. Duplicate scan check
-    logs_data, _ = call_service("GET", f"{TICKET_LOG_SERVICE}/ticket-logs/ticket/{ticket_id}")
-    already_in   = any(
-        log["status"] == "checked_in"
-        for log in (logs_data or {}).get("logs", [])
-    )
-    if already_in:
-        _log(ticket_id, staff_id, "duplicate")
-        return _error("ALREADY_CHECKED_IN", "This ticket has already been used.", 409)
-
-    # 7. Venue match (venueId from JWT, never from request body)
-    if staff_venue_id and ticket.get("venueId") != staff_venue_id:
-        correct_venue, _ = call_service("GET", f"{VENUE_SERVICE}/venues/{ticket['venueId']}")
-        _log(ticket_id, staff_id, "wrong_venue")
-        return _error(
-            "WRONG_HALL",
-            "This ticket is for a different venue.",
-            400,
-            correctVenue=correct_venue,
+        # 4. Seat status = sold
+        inv_data, _ = call_service("GET", f"{SEAT_INV_SERVICE}/inventory/event/{ticket['eventId']}")
+        seat = next(
+            (s for s in (inv_data or {}).get("inventory", []) if s["inventoryId"] == ticket["inventoryId"]),
+            None,
         )
+        if not seat or seat.get("status") != "sold":
+            _log(ticket_id, staff_id, "invalid")
+            return _error("TICKET_NOT_FOUND", "Seat is not marked as sold.", 400)
 
-    # 8. All checks passed
-    call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={"status": "used"})
-    _log(ticket_id, staff_id, "checked_in")
+        # 5. Ticket status = active
+        if ticket["status"] != "active":
+            _log(ticket_id, staff_id, "invalid")
+            return _error("QR_INVALID", f"Ticket status is '{ticket['status']}' — not valid for entry.", 400)
 
-    return jsonify({"data": {
-        "result":    "SUCCESS",
-        "ticketId":  ticket_id,
-        "scannedAt": datetime.now(timezone.utc).isoformat(),
-        "event": {
-            "name": event["name"],
-            "date": event["date"],
-        },
-        "seat": {
-            "seatId": seat.get("seatId"),
-        },
-        "owner": {"userId": ticket["ownerId"]},
-    }}), 200
+        # 6. Duplicate scan check
+        logs_data, _ = call_service("GET", f"{TICKET_LOG_SERVICE}/ticket-logs/ticket/{ticket_id}")
+        already_in   = any(
+            log["status"] == "checked_in"
+            for log in (logs_data or {}).get("logs", [])
+        )
+        if already_in:
+            _log(ticket_id, staff_id, "duplicate")
+            return _error("ALREADY_CHECKED_IN", "This ticket has already been used.", 409)
+
+        # 7. Venue match (venueId from JWT, never from request body)
+        if staff_venue_id and ticket.get("venueId") != staff_venue_id:
+            correct_venue, _ = call_service("GET", f"{VENUE_SERVICE}/venues/{ticket['venueId']}")
+            _log(ticket_id, staff_id, "wrong_venue")
+            return _error(
+                "WRONG_HALL",
+                "This ticket is for a different venue.",
+                400,
+                correctVenue=correct_venue,
+            )
+
+        # 8. All checks passed
+        call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={"status": "used"})
+        _log(ticket_id, staff_id, "checked_in")
+
+        return jsonify({"data": {
+            "result":    "SUCCESS",
+            "ticketId":  ticket_id,
+            "scannedAt": datetime.now(timezone.utc).isoformat(),
+            "event": {
+                "name": event["name"],
+                "date": event["date"],
+            },
+            "seat": {
+                "seatId": seat.get("seatId"),
+            },
+            "owner": {"userId": ticket["ownerId"]},
+        }}), 200
+    finally:
+        # Always release the lock
+        _release_scan_lock(ticket_id, lock_token)
 
 # ── POST /verify/manual ───────────────────────────────────────────────────────
 

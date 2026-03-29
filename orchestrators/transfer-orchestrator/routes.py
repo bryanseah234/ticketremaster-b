@@ -99,6 +99,65 @@ def _publish_seller_notification(transfer_id, seller_id):
                 logger.error("RabbitMQ publish failed after %d attempts: %s", MAX_RETRIES, exc)
 
 
+def _publish_transfer_timeout(transfer_id, listing_id, buyer_id, seller_id):
+    """Publish transfer timeout message to RabbitMQ with 24-hour TTL."""
+    MAX_RETRIES = 3
+    BACKOFF_DELAYS = [1, 2, 4]  # seconds
+    
+    timeout_ms = int(os.environ.get("TRANSFER_TIMEOUT_HOURS", "24")) * 3600 * 1000
+    
+    message = json.dumps({
+        "transferId": transfer_id,
+        "listingId": listing_id,
+        "buyerId": buyer_id,
+        "sellerId": seller_id,
+    })
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            conn = pika.BlockingConnection(pika.ConnectionParameters(
+                host=os.environ.get("RABBITMQ_HOST", "rabbitmq"),
+                port=int(os.environ.get("RABBITMQ_PORT", "5672")),
+                credentials=pika.PlainCredentials(
+                    os.environ.get("RABBITMQ_USER", "guest"),
+                    os.environ.get("RABBITMQ_PASS", "guest"),
+                ),
+                connection_attempts=2,
+                retry_delay=1,
+            ))
+            ch = conn.channel()
+            
+            # Declare queue with TTL support
+            ch.queue_declare(
+                queue="transfer_timeout_queue",
+                durable=True,
+                arguments={"x-message-ttl": timeout_ms},
+            )
+            
+            ch.basic_publish(
+                exchange="",
+                routing_key="transfer_timeout_queue",
+                body=message,
+                properties=pika.BasicProperties(
+                    delivery_mode=2,
+                    expiration=str(timeout_ms),
+                ),
+            )
+            conn.close()
+            logger.info("Published transfer timeout message for %s", transfer_id)
+            if attempt > 0:
+                logger.info("RabbitMQ timeout publish succeeded on attempt %d", attempt + 1)
+            return
+        except Exception as exc:
+            if attempt < MAX_RETRIES - 1:
+                delay = BACKOFF_DELAYS[attempt]
+                logger.warning("RabbitMQ timeout publish failed (attempt %d/%d): %s. Retrying in %ds...", 
+                             attempt + 1, MAX_RETRIES, exc, delay)
+                time.sleep(delay)
+            else:
+                logger.error("RabbitMQ timeout publish failed after %d attempts: %s", MAX_RETRIES, exc)
+
+
 def _execute_saga(transfer_id, buyer_id, seller_id, credit_amount, ticket_id, listing_id,
                   buyer_balance, seller_balance):
     completed = []
@@ -226,6 +285,14 @@ def initiate():
         return _error("INTERNAL_ERROR", "Could not create transfer record.", 500)
 
     _publish_seller_notification(transfer["transferId"], seller_id)
+    
+    # Schedule timeout for auto-cancellation
+    _publish_transfer_timeout(
+        transfer["transferId"],
+        body["listingId"],
+        buyer_id,
+        seller_id,
+    )
 
     return jsonify({"data": {
         "transferId": transfer["transferId"],
