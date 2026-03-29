@@ -48,29 +48,32 @@ Treat this as a local or controlled-environment gateway detail. Do not hardcode 
 - call Kong only
 - send `Authorization: Bearer <jwt>` on JWT-protected routes
 - send `apikey: <value>` on every route group that Kong key-auth protects
+- send `Idempotency-Key: <uuid>` on state-changing operations (top-up, purchase, transfer) to prevent duplicates
 - do not call internal services, Docker hostnames, or Kubernetes service DNS names from the browser
+- implement exponential backoff for retries on `429`, `503`, `408`, `504` responses
 
 ## Authentication matrix
 
-| Route or route group | JWT required | Kong `apikey` required | Notes |
-| --- | --- | --- | --- |
-| `POST /auth/register` | no | no | public |
-| `POST /auth/login` | no | no | public |
-| `GET /auth/me` | yes | no | authenticated profile |
-| `GET /venues` | no | no | public |
-| `GET /events` | no | no | public |
-| `GET /events/{eventId}` | no | no | public |
-| `GET /events/{eventId}/seats` | no | no | public |
-| `GET /events/{eventId}/seats/{inventoryId}` | no | no | public |
-| `POST /admin/events` | admin JWT | no | event creation now requires an admin token in the orchestrator |
-| `/credits/*` | yes except webhook | yes | webhook is backend-to-backend only |
-| `/purchase/*` | yes | yes | purchase operations |
-| `/tickets/*` | yes | yes | these routes are served by `qr-orchestrator` at the gateway |
-| `GET /marketplace` | no | no | public browse route |
-| `POST /marketplace/list` | yes | yes | listing creation |
-| `DELETE /marketplace/{listingId}` | yes | yes | delist |
-| `/transfer/*` | yes | yes | buyer and seller transfer flows |
-| `/verify/*` | staff JWT | yes | JWT must contain `role=staff`; `venueId` is also used if present |
+|| Route or route group | JWT required | Kong `apikey` required | Idempotency Key | Notes |
+|| --- | --- | --- | --- | --- |
+|| `POST /auth/register` | no | no | no | public |
+|| `POST /auth/login` | no | no | no | public |
+|| `GET /auth/me` | yes | no | no | authenticated profile |
+|| `GET /venues` | no | no | no | public |
+|| `GET /events` | no | no | no | public |
+|| `GET /events/{eventId}` | no | no | no | public |
+|| `GET /events/{eventId}/seats` | no | no | no | public |
+|| `GET /events/{eventId}/seats/{inventoryId}` | no | no | no | public |
+|| `POST /admin/events` | admin JWT | no | no | event creation now requires an admin token in the orchestrator |
+|| `/credits/topup/*` | yes | yes | **yes** | webhook is backend-to-backend only; use idempotency keys |
+|| `/purchase/*` | yes | yes | **yes** | purchase operations; distributed locks on holds |
+|| `/tickets/*` | yes | yes | no | these routes are served by `qr-orchestrator` at the gateway |
+|| `GET /marketplace` | no | no | no | public browse route |
+|| `POST /marketplace/list` | yes | yes | no | listing creation |
+|| `DELETE /marketplace/{listingId}` | yes | yes | no | delist |
+|| `/transfer/*/verify` | yes | yes | no | **rate limited**: max 3 OTP attempts per 15 min |
+|| `/transfer/*` (other) | yes | yes | no | buyer and seller transfer flows; auto-cancel after 24h |
+|| `/verify/*` | staff JWT | yes | no | JWT must contain `role=staff`; `venueId` is also used if present |
 
 ## Route map used by the frontend
 
@@ -182,6 +185,13 @@ Frontend base path:
 | `POST` | `/credits/topup/initiate` | JWT + `apikey` | `amount` | `{ "data": { "clientSecret", "paymentIntentId", "amount" } }` |
 | `POST` | `/credits/topup/confirm` | JWT + `apikey` | `paymentIntentId` | `{ "data": { "status", "new_balance" } }` or `{ "data": { "status": "already_processed" } }` |
 | `GET` | `/credits/transactions` | JWT + `apikey` | optional `page`, `limit` query | `{ "data": { "transactions": [...], "pagination": {...} } }` |
+
+**Important notes on top-up operations:**
+
+- Use **idempotency keys** on both `initiate` and `confirm` to prevent duplicate charges
+- If the same `Idempotency-Key` is sent within 24 hours, returns the original response
+- Handle `429` rate limiting with exponential backoff
+- The `already_processed` status indicates an idempotent retry succeeded
 
 Top-up initiate example:
 
