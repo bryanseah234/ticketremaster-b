@@ -15,6 +15,7 @@ class Event(db.Model):
     type = db.Column(db.String(50), nullable=False)
     image = db.Column(db.String(500), nullable=True)
     price = db.Column(db.Float, nullable=False)
+    cancelledAt = db.Column(db.DateTime, nullable=True)
     createdAt = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self, summary=False):
@@ -26,6 +27,7 @@ class Event(db.Model):
             'date': self.date.isoformat(),
             'type': self.type,
             'price': self.price,
+            'cancelledAt': self.cancelledAt.isoformat() if self.cancelledAt else None,
         }
         if not summary:
             payload['description'] = self.description

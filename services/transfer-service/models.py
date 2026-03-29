@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app import db
 
@@ -18,6 +18,7 @@ class Transfer(db.Model):
     buyerVerificationSid = db.Column(db.String(64), nullable=True)
     sellerVerificationSid = db.Column(db.String(64), nullable=True)
     completedAt = db.Column(db.DateTime, nullable=True)
+    expiresAt = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(UTC) + timedelta(hours=24))
     createdAt = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self):
@@ -33,5 +34,6 @@ class Transfer(db.Model):
             'buyerVerificationSid': self.buyerVerificationSid,
             'sellerVerificationSid': self.sellerVerificationSid,
             'completedAt': self.completedAt.isoformat() if self.completedAt else None,
+            'expiresAt': self.expiresAt.isoformat() if self.expiresAt else None,
             'createdAt': self.createdAt.isoformat() if self.createdAt else None,
         }

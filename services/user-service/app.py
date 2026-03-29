@@ -124,7 +124,7 @@ def create_app(test_config=None):
     db.init_app(app)
     migrate.init_app(app, db)
 
-    from models import User  # noqa: F401
+    from models import User, PasswordResetToken  # noqa: F401
     from routes import bp as users_bp
 
     app.register_blueprint(users_bp)

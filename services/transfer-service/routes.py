@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
@@ -17,6 +17,24 @@ UPDATABLE_FIELDS = {
     'completedAt',
 }
 
+# State machine definition: valid transitions for each status
+VALID_STATE_TRANSITIONS = {
+    'pending_seller_acceptance': ['seller_accepted', 'cancelled', 'expired'],
+    'seller_accepted': ['pending_buyer_otp', 'cancelled', 'expired'],
+    'pending_buyer_otp': ['buyer_otp_verified', 'cancelled', 'expired'],
+    'buyer_otp_verified': ['pending_seller_otp', 'cancelled', 'expired'],
+    'pending_seller_otp': ['completed', 'cancelled', 'expired'],
+    'completed': [],  # terminal state
+    'cancelled': [],  # terminal state
+    'expired': [],    # terminal state
+}
+
+# Statuses that require buyer OTP verification before proceeding
+BUYER_OTP_REQUIRED_STATUSES = {'pending_buyer_otp'}
+
+# Statuses that require seller OTP verification before proceeding
+SELLER_OTP_REQUIRED_STATUSES = {'pending_seller_otp'}
+
 
 def error_response(status_code, code, message):
     return jsonify({'error': {'code': code, 'message': message}}), status_code
@@ -32,6 +50,13 @@ def parse_datetime(value):
     raise ValueError('Invalid datetime format')
 
 
+def is_transfer_expired(transfer):
+    """Check if a transfer has expired."""
+    if transfer.expiresAt is None:
+        return False
+    return datetime.now(timezone.utc) > transfer.expiresAt
+
+
 @bp.get('/health')
 def health():
     return jsonify({'status': 'ok'}), 200
@@ -43,19 +68,14 @@ def create_transfer():
     if not data or any(field not in data for field in REQUIRED_FIELDS):
         return error_response(400, 'VALIDATION_ERROR', 'Missing required fields')
 
-    if data.get('sellerVerificationSid'):
-        initial_status = 'pending_seller_otp'
-    elif data.get('buyerVerificationSid'):
-        initial_status = 'pending_buyer_otp'
-    else:
-        initial_status = 'pending_seller_acceptance'
-
+    # Always start with pending_seller_acceptance - enforce strict state ordering
+    # Buyer OTP must come first (steps 5-8), then seller notification (steps 9-13)
     transfer = Transfer(
         listingId=data['listingId'],
         buyerId=data['buyerId'],
         sellerId=data['sellerId'],
         creditAmount=data['creditAmount'],
-        status=initial_status,
+        status='pending_seller_acceptance',
         buyerVerificationSid=data.get('buyerVerificationSid'),
         sellerVerificationSid=data.get('sellerVerificationSid'),
     )
@@ -67,6 +87,7 @@ def create_transfer():
         {
             'transferId': transfer.transferId,
             'status': transfer.status,
+            'expiresAt': transfer.expiresAt.isoformat() if transfer.expiresAt else None,
             'createdAt': transfer.createdAt.isoformat() if transfer.createdAt else None,
         }
     ), 201
@@ -90,6 +111,13 @@ def get_transfer(transfer_id):
     transfer = db.session.get(Transfer, transfer_id)
     if not transfer:
         return error_response(404, 'TRANSFER_NOT_FOUND', 'Transfer not found')
+
+    # Check if transfer has expired and auto-cancel if so
+    if is_transfer_expired(transfer) and transfer.status not in ('completed', 'cancelled', 'expired'):
+        transfer.status = 'expired'
+        db.session.commit()
+        return jsonify(transfer.to_dict()), 200
+
     return jsonify(transfer.to_dict()), 200
 
 
@@ -107,6 +135,45 @@ def patch_transfer(transfer_id):
     if not transfer:
         return error_response(404, 'TRANSFER_NOT_FOUND', 'Transfer not found')
 
+    # Check if transfer has expired
+    if is_transfer_expired(transfer) and transfer.status not in ('completed', 'cancelled', 'expired'):
+        transfer.status = 'expired'
+        db.session.commit()
+        return error_response(400, 'TRANSFER_EXPIRED', 'Transfer has expired')
+
+    # Validate state transitions if status is being updated
+    if 'status' in data:
+        new_status = data['status']
+        current_status = transfer.status
+
+        # Check if the transition is valid
+        if current_status not in VALID_STATE_TRANSITIONS:
+            return error_response(400, 'INVALID_STATE', f'Unknown current status: {current_status}')
+
+        allowed_transitions = VALID_STATE_TRANSITIONS.get(current_status, [])
+        if new_status not in allowed_transitions:
+            return error_response(
+                400,
+                'INVALID_STATE_TRANSITION',
+                f'Cannot transition from {current_status} to {new_status}. Allowed transitions: {allowed_transitions}'
+            )
+
+        # Enforce buyer OTP verification before seller OTP phase
+        if new_status == 'pending_seller_otp' and not transfer.buyerOtpVerified:
+            return error_response(
+                400,
+                'BUYER_OTP_REQUIRED',
+                'Buyer must verify OTP before proceeding to seller OTP verification'
+            )
+
+        # Enforce seller OTP verification before completion
+        if new_status == 'completed' and not transfer.sellerOtpVerified:
+            return error_response(
+                400,
+                'SELLER_OTP_REQUIRED',
+                'Seller must verify OTP before completing the transfer'
+            )
+
     if 'completedAt' in data:
         try:
             data['completedAt'] = parse_datetime(data['completedAt'])
@@ -118,3 +185,41 @@ def patch_transfer(transfer_id):
 
     db.session.commit()
     return jsonify(transfer.to_dict()), 200
+
+
+@bp.post('/transfers/<transfer_id>/cancel')
+def cancel_transfer(transfer_id):
+    """Explicitly cancel a transfer."""
+    transfer = db.session.get(Transfer, transfer_id)
+    if not transfer:
+        return error_response(404, 'TRANSFER_NOT_FOUND', 'Transfer not found')
+
+    if transfer.status in ('completed', 'cancelled', 'expired'):
+        return error_response(400, 'INVALID_STATE', f'Cannot cancel transfer in {transfer.status} status')
+
+    transfer.status = 'cancelled'
+    db.session.commit()
+    return jsonify(transfer.to_dict()), 200
+
+
+@bp.get('/transfers/pending')
+def list_pending_transfers():
+    """Get all pending transfers for a user (buyer or seller)."""
+    user_id = request.args.get('userId')
+    if not user_id:
+        return error_response(400, 'VALIDATION_ERROR', 'userId query param required')
+
+    pending_statuses = [
+        'pending_seller_acceptance',
+        'seller_accepted',
+        'pending_buyer_otp',
+        'buyer_otp_verified',
+        'pending_seller_otp',
+    ]
+
+    transfers = Transfer.query.filter(
+        ((Transfer.buyerId == user_id) | (Transfer.sellerId == user_id)) &
+        Transfer.status.in_(pending_statuses)
+    ).order_by(Transfer.createdAt.desc()).all()
+
+    return jsonify({'transfers': [t.to_dict() for t in transfers]}), 200

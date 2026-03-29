@@ -122,6 +122,34 @@ The data layer exists to keep stateful components private and separate from the 
 - RabbitMQ carries delayed hold-expiry and seller-notification messages
 - stateful components currently run as single replicas in the committed manifests, so the plane is deployable but not yet highly available
 
+### Async Messaging (RabbitMQ)
+
+RabbitMQ decouples time-based and notification-based work from synchronous request latency. Three queues power the async workflows:
+
+**Seat Hold TTL Queue** (`seat_hold_ttl_queue`)
+- Messages have a 5-minute TTL; when a purchase starts, a hold message is published
+- If the purchase completes, the message is acknowledged and removed
+- If the TTL expires, the message routes to the dead-letter exchange → `seat_hold_expired_queue` for cleanup
+- Frontend impact: users have 5 minutes to complete payment after a hold is placed
+
+**Seller Notification Queue** (`seller_notification_queue`)
+- When a buyer initiates a P2P transfer, a notification is published asynchronously
+- The seller receives a push/email/SMS notification decoupled from the buyer's request
+- Frontend impact: after initiating a transfer, the buyer sees "waiting for seller" and should poll for status changes
+
+**Idempotency**: All message consumers must handle duplicate deliveries. Each message includes a `referenceId` for deduplication.
+
+**Configuration**:
+| Variable | Description | Default |
+|---|---|---|
+| `RABBITMQ_URL` | RabbitMQ connection URL | `amqp://rabbitmq:5672/` |
+| `SEAT_HOLD_TTL_SECONDS` | Seat hold TTL in seconds | `300` |
+| `NOTIFICATION_RETRY_ATTEMPTS` | Max notification retries | `3` |
+
+**Monitoring**: Watch queue depth, consumer lag, and dead-letter queue activity via RabbitMQ management UI at `http://localhost:15672`.
+
+See [TESTING.md](TESTING.md) for RabbitMQ verification steps.
+
 ```mermaid
 flowchart TB
     subgraph Edge[ticketremaster-edge]

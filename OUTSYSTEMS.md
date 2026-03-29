@@ -1,5 +1,42 @@
 # OutSystems Integration Guide (Credit Service)
 
+## Architecture Overview
+
+The Credit Service uses **OutSystems** as the external system of record for user credit balances. This is a **standard microservice with OutSystems backend** architecture:
+
+- **Backend (this repo):** Provides REST API wrapper endpoints that proxy to OutSystems
+- **OutSystems:** External system that owns the authoritative credit balance data
+- **Communication:** Backend calls OutSystems via REST with API key authentication
+
+### Integration Pattern
+
+```
+Frontend → API Gateway → Credit Orchestrator → credit-transaction-service → OutSystems Credit API
+```
+
+The `credit-transaction-service` in this repository acts as a **REST wrapper** around the OutSystems Credit API. It provides:
+
+1. **Transaction logging** (PostgreSQL) - Local record of all credit changes
+2. **API abstraction** - Consistent interface regardless of OutSystems implementation
+3. **Error handling** - Normalized error responses for frontend consumption
+
+### Data Flow
+
+1. **Credit Balance Read:** `credit-transaction-service` → OutSystems `GET /credits/<user_id>`
+2. **Credit Balance Update:** `credit-transaction-service` → OutSystems `PATCH /credits/<user_id>`
+3. **Transaction Recording:** Local PostgreSQL (for audit trail)
+
+### PostgreSQL Persistence
+
+The `credit-transaction-service` maintains a local `credit_transactions` table for:
+- Audit trail of all credit movements
+- Idempotency checking via `referenceId`
+- Historical transaction queries
+
+**Note:** The authoritative credit *balance* lives in OutSystems. The local table only stores *transactions*.
+
+---
+
 ## Scope
 
 This guide covers how to connect the TicketRemaster backend to the external OutSystems Credit Service for Phase 1.4 and future orchestrators.
