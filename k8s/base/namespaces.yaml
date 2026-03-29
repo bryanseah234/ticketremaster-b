@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticketremaster-core
+  labels:
+    app.kubernetes.io/part-of: ticketremaster
+    ticketremaster.io/plane: core
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticketremaster-edge
+  labels:
+    app.kubernetes.io/part-of: ticketremaster
+    ticketremaster.io/plane: edge
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticketremaster-data
+  labels:
+    app.kubernetes.io/part-of: ticketremaster
+    ticketremaster.io/plane: data
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ticketremaster-critical
+value: 100000
+globalDefault: false
+description: Critical edge and purchase-path workloads for local Kubernetes validation.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ticketremaster-standard
+value: 1000
+globalDefault: false
+description: Default workload priority for standard TicketRemaster services.

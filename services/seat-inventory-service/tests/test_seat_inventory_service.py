@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 from seat_inventory_pb2 import GetSeatStatusRequest, HoldSeatRequest, ReleaseSeatRequest, SellSeatRequest
 
@@ -61,7 +62,8 @@ def test_create_inventory_batch_requires_seat_id(client):
     assert response.get_json()['error']['code'] == 'VALIDATION_ERROR'
 
 
-def test_hold_seat_success(grpc_stub, seeded_inventory):
+@patch('grpc_server._write_hold_cache')
+def test_hold_seat_success(mock_write_hold_cache, grpc_stub, seeded_inventory):
     inventory_id, _ = seeded_inventory
 
     response = grpc_stub.HoldSeat(
@@ -73,9 +75,11 @@ def test_hold_seat_success(grpc_stub, seeded_inventory):
     assert response.error_code == ''
     assert response.held_until
     assert response.hold_token
+    mock_write_hold_cache.assert_called_once()
 
 
-def test_release_seat_success(grpc_stub, seeded_inventory):
+@patch('grpc_server._delete_hold_cache')
+def test_release_seat_success(mock_delete_hold_cache, grpc_stub, seeded_inventory):
     inventory_id, _ = seeded_inventory
 
     hold = grpc_stub.HoldSeat(
@@ -91,9 +95,11 @@ def test_release_seat_success(grpc_stub, seeded_inventory):
     status = grpc_stub.GetSeatStatus(GetSeatStatusRequest(inventory_id=inventory_id))
     assert status.status == 'available'
     assert status.held_until == ''
+    mock_delete_hold_cache.assert_called_once_with(inventory_id)
 
 
-def test_sell_seat_success(grpc_stub, seeded_inventory):
+@patch('grpc_server._delete_hold_cache')
+def test_sell_seat_success(mock_delete_hold_cache, grpc_stub, seeded_inventory):
     inventory_id, _ = seeded_inventory
 
     hold = grpc_stub.HoldSeat(
@@ -106,6 +112,7 @@ def test_sell_seat_success(grpc_stub, seeded_inventory):
 
     status = grpc_stub.GetSeatStatus(GetSeatStatusRequest(inventory_id=inventory_id))
     assert status.status == 'sold'
+    mock_delete_hold_cache.assert_called_once_with(inventory_id)
 
 
 def test_get_seat_status_not_found(grpc_stub):

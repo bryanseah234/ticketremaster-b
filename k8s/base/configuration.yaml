@@ -1,0 +1,264 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: core-runtime
+  namespace: ticketremaster-core
+data:
+  APP_ENV: local-k8s
+  LOG_LEVEL: INFO
+  PYTHONUNBUFFERED: "1"
+  QR_TTL_SECONDS: "60"
+  SEAT_HOLD_DURATION_SECONDS: "300"
+  CREDIT_SERVICE_URL: https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI
+  SMU_API_URL: https://smuedu-dev.outsystemsenterprise.com/SMULab_Notification/rest/Notification
+  USER_SERVICE_URL: http://user-service.ticketremaster-core.svc.cluster.local:5000
+  VENUE_SERVICE_URL: http://venue-service.ticketremaster-core.svc.cluster.local:5000
+  SEAT_SERVICE_URL: http://seat-service.ticketremaster-core.svc.cluster.local:5000
+  EVENT_SERVICE_URL: http://event-service.ticketremaster-core.svc.cluster.local:5000
+  SEAT_INVENTORY_SERVICE_URL: http://seat-inventory-service.ticketremaster-core.svc.cluster.local:5000
+  SEAT_INVENTORY_GRPC_HOST: seat-inventory-service.ticketremaster-core.svc.cluster.local
+  SEAT_INVENTORY_GRPC_PORT: "50051"
+  CREDIT_TRANSACTION_SERVICE_URL: http://credit-transaction-service.ticketremaster-core.svc.cluster.local:5000
+  TICKET_SERVICE_URL: http://ticket-service.ticketremaster-core.svc.cluster.local:5000
+  TICKET_LOG_SERVICE_URL: http://ticket-log-service.ticketremaster-core.svc.cluster.local:5000
+  MARKETPLACE_SERVICE_URL: http://marketplace-service.ticketremaster-core.svc.cluster.local:5000
+  TRANSFER_SERVICE_URL: http://transfer-service.ticketremaster-core.svc.cluster.local:5000
+  STRIPE_WRAPPER_URL: http://stripe-wrapper.ticketremaster-core.svc.cluster.local:5000
+  OTP_WRAPPER_URL: http://otp-wrapper.ticketremaster-core.svc.cluster.local:5000
+  RABBITMQ_HOST: rabbitmq.ticketremaster-data.svc.cluster.local
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_MANAGEMENT_PORT: "15672"
+  REDIS_URL: redis://redis.ticketremaster-data.svc.cluster.local:6379/0
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: core-secrets
+  namespace: ticketremaster-core
+type: Opaque
+stringData:
+  JWT_SECRET: change_me
+  QR_SECRET: change_me
+  OUTSYSTEMS_API_KEY: change_me
+  STRIPE_SECRET_KEY: sk_test_change_me
+  STRIPE_WEBHOOK_SECRET: whsec_change_me
+  SMU_API_KEY: change_me
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: core-data-secrets
+  namespace: ticketremaster-core
+type: Opaque
+stringData:
+  RABBITMQ_USER: guest
+  RABBITMQ_PASS: guest
+  USER_SERVICE_DB_PASSWORD: change_me
+  VENUE_SERVICE_DB_PASSWORD: change_me
+  SEAT_SERVICE_DB_PASSWORD: change_me
+  EVENT_SERVICE_DB_PASSWORD: change_me
+  SEAT_INVENTORY_SERVICE_DB_PASSWORD: change_me
+  CREDIT_TRANSACTION_SERVICE_DB_PASSWORD: change_me
+  TICKET_SERVICE_DB_PASSWORD: change_me
+  TICKET_LOG_SERVICE_DB_PASSWORD: change_me
+  MARKETPLACE_SERVICE_DB_PASSWORD: change_me
+  TRANSFER_SERVICE_DB_PASSWORD: change_me
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: data-secrets
+  namespace: ticketremaster-data
+type: Opaque
+stringData:
+  RABBITMQ_USER: guest
+  RABBITMQ_PASS: guest
+  USER_SERVICE_DB_PASSWORD: change_me
+  VENUE_SERVICE_DB_PASSWORD: change_me
+  SEAT_SERVICE_DB_PASSWORD: change_me
+  EVENT_SERVICE_DB_PASSWORD: change_me
+  SEAT_INVENTORY_SERVICE_DB_PASSWORD: change_me
+  CREDIT_TRANSACTION_SERVICE_DB_PASSWORD: change_me
+  TICKET_SERVICE_DB_PASSWORD: change_me
+  TICKET_LOG_SERVICE_DB_PASSWORD: change_me
+  MARKETPLACE_SERVICE_DB_PASSWORD: change_me
+  TRANSFER_SERVICE_DB_PASSWORD: change_me
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: edge-secrets
+  namespace: ticketremaster-edge
+type: Opaque
+stringData:
+  CLOUDFLARE_TUNNEL_TOKEN: change_me
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-declarative-config
+  namespace: ticketremaster-edge
+data:
+  kong.yml: |
+    _format_version: "3.0"
+    _transform: true
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 50
+          policy: local
+      - name: cors
+        config:
+          origins:
+            - http://localhost:5173
+            - http://localhost:3000
+            - http://localhost:8080
+            - http://127.0.0.1:5173
+            - http://127.0.0.1:3000
+            - https://ticketremaster.hong-yi.me
+            - https://ticketremaster.vercel.app
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - X-Correlation-ID
+            - X-Request-ID
+            - apikey
+          credentials: true
+          max_age: 3600
+    services:
+      - name: auth-orchestrator
+        url: http://auth-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: auth-register-route
+            paths:
+              - /auth/register
+            strip_path: false
+            plugins:
+              - name: rate-limiting
+                config:
+                  minute: 5
+                  policy: local
+          - name: auth-route
+            paths:
+              - /auth
+            strip_path: false
+      - name: user-service
+        url: http://user-service.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: stripe-webhook-route
+            paths:
+              - /webhooks/stripe
+            strip_path: false
+      - name: event-orchestrator
+        url: http://event-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: event-route
+            paths:
+              - /events
+            strip_path: false
+          - name: admin-event-route
+            paths:
+              - /admin/events
+            strip_path: false
+          - name: venue-route
+            paths:
+              - /venues
+            strip_path: false
+      - name: marketplace-orchestrator
+        url: http://marketplace-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: marketplace-route
+            paths:
+              - /marketplace
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+      - name: transfer-orchestrator
+        url: http://transfer-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: transfer-route
+            paths:
+              - /transfer
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+      - name: credit-orchestrator
+        url: http://credit-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: credit-route
+            paths:
+              - /credits
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+      - name: ticket-purchase-orchestrator
+        url: http://ticket-purchase-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: purchase-route
+            paths:
+              - /purchase
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+      - name: qr-orchestrator
+        url: http://qr-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: tickets-route
+            paths:
+              - /tickets
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+      - name: ticket-verification-orchestrator
+        url: http://ticket-verification-orchestrator.ticketremaster-core.svc.cluster.local:5000
+        routes:
+          - name: verify-route
+            paths:
+              - /verify
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+    consumers:
+      - username: frontend_app
+        keyauth_credentials:
+          - key: tk_front_123456789
+      - username: partner_app
+        keyauth_credentials:
+          - key: tk_partner_abcdefg

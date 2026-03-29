@@ -1,0 +1,779 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: ticketremaster-data
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        app.kubernetes.io/part-of: ticketremaster
+    spec:
+      priorityClassName: ticketremaster-critical
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+          args:
+            - redis-server
+            - --appendonly
+            - "yes"
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: 5672
+    - name: management
+      port: 15672
+      targetPort: 15672
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: ticketremaster-data
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+        app.kubernetes.io/part-of: ticketremaster
+    spec:
+      priorityClassName: ticketremaster-critical
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3-management
+          ports:
+            - containerPort: 5672
+              name: amqp
+            - containerPort: 15672
+              name: management
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: RABBITMQ_PASS
+          readinessProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - -q
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - -q
+                - ping
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: rabbitmq-data
+              mountPath: /var/lib/rabbitmq
+  volumeClaimTemplates:
+    - metadata:
+        name: rabbitmq-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: user-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: user-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: user-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service-db
+  template:
+    metadata:
+      labels:
+        app: user-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: user_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: USER_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "user_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: venue-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: venue-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: venue-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: venue-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: venue-service-db
+  template:
+    metadata:
+      labels:
+        app: venue-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: venue_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: VENUE_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "venue_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seat-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: seat-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: seat-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: seat-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seat-service-db
+  template:
+    metadata:
+      labels:
+        app: seat-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: seat_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: SEAT_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "seat_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: event-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: event-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: event-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-service-db
+  template:
+    metadata:
+      labels:
+        app: event-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: event_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: EVENT_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "event_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seat-inventory-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: seat-inventory-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: seat-inventory-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: seat-inventory-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seat-inventory-service-db
+  template:
+    metadata:
+      labels:
+        app: seat-inventory-service-db
+    spec:
+      priorityClassName: ticketremaster-critical
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: seat_inventory_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: SEAT_INVENTORY_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "seat_inventory_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: credit-transaction-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: credit-transaction-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: credit-transaction-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: credit-transaction-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: credit-transaction-service-db
+  template:
+    metadata:
+      labels:
+        app: credit-transaction-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: credit_transaction_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: CREDIT_TRANSACTION_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "credit_transaction_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticket-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: ticket-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ticket-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: ticket-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ticket-service-db
+  template:
+    metadata:
+      labels:
+        app: ticket-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: ticket_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: TICKET_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "ticket_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticket-log-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: ticket-log-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ticket-log-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: ticket-log-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ticket-log-service-db
+  template:
+    metadata:
+      labels:
+        app: ticket-log-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: ticket_log_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: TICKET_LOG_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "ticket_log_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: marketplace-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: marketplace-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: marketplace-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: marketplace-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: marketplace-service-db
+  template:
+    metadata:
+      labels:
+        app: marketplace-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: marketplace_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: MARKETPLACE_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "marketplace_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transfer-service-db
+  namespace: ticketremaster-data
+spec:
+  selector:
+    app: transfer-service-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: transfer-service-db
+  namespace: ticketremaster-data
+spec:
+  serviceName: transfer-service-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transfer-service-db
+  template:
+    metadata:
+      labels:
+        app: transfer-service-db
+    spec:
+      priorityClassName: ticketremaster-standard
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: transfer_service
+            - name: POSTGRES_USER
+              value: ticketremaster
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-secrets
+                  key: TRANSFER_SERVICE_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ticketremaster", "-d", "transfer_service"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

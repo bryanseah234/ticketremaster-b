@@ -1,7 +1,7 @@
 # TicketRemaster Backend
 
 ## Project Overview
-TicketRemaster is an advanced, microservices-oriented backend platform providing end-to-end ticketing operations. It facilitates event management, real-time seat inventory holding (via gRPC and pessimistic locking), dynamic QR-code verification, a secure peer-to-peer marketplace, and a credit-based payment ecosystem. The architecture is composed of domain-specific atomic Flask services orchestrated by dedicated edge APIs, utilizing RabbitMQ for asynchronous event processing and PostgreSQL for isolated data persistence.
+TicketRemaster is an advanced, microservices-oriented backend platform providing end-to-end ticketing operations. It facilitates event management, real-time seat inventory holding via gRPC and pessimistic locking, Redis-backed hold confirmation checks, dynamic QR-code verification, a secure peer-to-peer marketplace, and a credit-based payment ecosystem. The architecture is composed of domain-specific atomic Flask services orchestrated by dedicated edge APIs, utilizing RabbitMQ for asynchronous event processing, Redis for short-lived hold caching, and PostgreSQL for isolated data persistence.
 
 ## Prerequisites
 To run and develop TicketRemaster locally, ensure the following are installed:
@@ -9,6 +9,7 @@ To run and develop TicketRemaster locally, ensure the following are installed:
 - **Python 3.12+:** For running local scripts or virtual environments.
 - **Stripe CLI:** Required for forwarding webhooks during local payment testing.
 - **Postman:** For executing the provided E2E API test collections.
+- **kubectl:** Recommended for rendering or applying the committed Kubernetes manifests under `k8s/base`.
 
 ## Environment Configuration
 The system relies on an extensive set of environment variables. Create a `.env` file in the repository root (use `.env.example` as a template). Key variables include:
@@ -23,11 +24,13 @@ The system relies on an extensive set of environment variables. Create a `.env` 
 ### System & Infrastructure
 - `SEAT_HOLD_DURATION_SECONDS`: Integer defining seat hold TTL (e.g., `600` for production, `10` for testing).
 - `RABBITMQ_HOST`, `RABBITMQ_USER`, `RABBITMQ_PASS`: Credentials for the message broker.
+- `REDIS_URL`: Redis connection string used for short-lived seat-hold caching during purchase confirmation.
 - `*_SERVICE_DATABASE_URL`: PostgreSQL connection strings for each atomic service (e.g., `postgresql://ticketremaster:change_me@user-service-db:5432/user_service`).
 - `*_URL`: Internal routing URLs for service-to-service and orchestrator communication.
+- `CLOUDFLARE_TUNNEL_TOKEN`: Token used by the Kubernetes edge deployment for `cloudflared`.
 
 ## Installation & Setup
-The repository includes an automated script to build the containers, execute SQLAlchemy migrations, and seed baseline data.
+The repository provides Docker Compose for local development and a committed Kubernetes base for cluster deployment. For local setup, use the explicit migration and seed commands below so the baseline matches the current per-service seed entrypoints.
 
 1. **Clone the repository:**
    ```bash
@@ -41,17 +44,50 @@ The repository includes an automated script to build the containers, execute SQL
    # Update .env with any necessary local overrides and keys
    ```
 
-3. **Build, Migrate, and Seed:**
-   Execute the provided setup script. Use the `--fresh` flag to wipe existing Docker volumes and start clean.
+3. **Build and start the stack:**
    ```bash
-   bash scripts/start_and_seed.sh --fresh
+   docker compose up -d --build
    ```
-   *Note: This script orchestrates `docker compose up --build`, runs `flask db upgrade` across all 10 databases, and executes the necessary Python seed scripts to populate venues, seats, events, and inventory.*
+
+4. **Run migrations for the services that own data:**
+   ```bash
+   docker compose run --rm user-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm venue-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm seat-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm event-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm seat-inventory-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm ticket-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm ticket-log-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm marketplace-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm transfer-service python -m flask --app app.py db upgrade -d migrations
+   docker compose run --rm credit-transaction-service python -m flask --app app.py db upgrade -d migrations
+   ```
+
+5. **Seed the shared baseline used by the local collection and service docs:**
+   ```bash
+   docker compose run --rm user-service python user_seed.py
+   docker compose run --rm venue-service python seed_venues.py
+   docker compose run --rm seat-service python seed_seats.py
+   docker compose run --rm event-service python seed_events.py
+   docker compose run --rm seat-inventory-service python seed_seat_inventory.py
+   ```
 
 ## Usage & Workflows
 Once the stack is successfully deployed, the following core interfaces are exposed:
 - **Kong API Gateway:** `http://localhost:8000` — All frontend HTTP requests should be routed here.
 - **RabbitMQ Management UI:** `http://localhost:15672` (Credentials: `guest` / `guest`) — Useful for monitoring the `seat-hold-dlx` and `seller_notification_queue`.
+- **Redis:** `redis://localhost:6379/0` — Used for short-lived seat-hold cache entries on the purchase path.
+
+### Gateway routes
+- `/auth` and `/auth/register` → `auth-orchestrator`
+- `/events`, `/admin/events`, and `/venues` → `event-orchestrator`
+- `/credits` → `credit-orchestrator`
+- `/purchase` → `ticket-purchase-orchestrator`
+- `/tickets` → `qr-orchestrator`
+- `/verify` → `ticket-verification-orchestrator`
+- `/marketplace` → `marketplace-orchestrator`
+- `/transfer` → `transfer-orchestrator`
+- `/webhooks/stripe` → `user-service`
 
 ### Common Workflows
 - **Stripe Webhook Testing:**
@@ -76,11 +112,22 @@ Once the stack is successfully deployed, the following core interfaces are expos
 - **E2E Integration:** Import `postman/TicketRemaster.postman_collection.json` and `postman/TicketRemaster.local.postman_environment.json` into Postman to execute comprehensive business journey scenarios.
 
 ### Deployment (Kubernetes)
-The platform is designed for a Kubernetes deployment (Phase 8). Base manifests can be generated via Kompose:
+The repository now includes hand-maintained Kubernetes manifests under `k8s/base` instead of relying on generated Kompose output. The base deployment is split into:
+- `ticketremaster-edge` for Kong and Cloudflare Tunnel
+- `ticketremaster-core` for Flask services and orchestrators
+- `ticketremaster-data` for PostgreSQL, RabbitMQ, and Redis
+
+Render the full manifest set locally:
 ```bash
-kompose convert -f docker-compose.yml -o k8s/
+kubectl kustomize k8s/base
 ```
-Production deployments require configuring `HorizontalPodAutoscaler` for high-throughput services (e.g., `seat-inventory-service`), migrating `.env` values to Kubernetes Secrets, and adjusting service definitions from `NodePort` to `ClusterIP` behind an Ingress controller.
+
+Apply it to a configured cluster:
+```bash
+kubectl apply -k k8s/base
+```
+
+The committed base includes namespaces, priority classes, shared config and secrets, stateful data-plane resources, core Deployments and Services, seed Jobs, and initial NetworkPolicies. Horizontal Pod Autoscalers and production-grade secret management remain follow-on work.
 
 ---
 

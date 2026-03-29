@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 import grpc
 import pika
+import redis
 import seat_inventory_pb2
 import seat_inventory_pb2_grpc
 from flask import Blueprint, jsonify, request
@@ -44,6 +45,69 @@ def _grpc_stub():
     return seat_inventory_pb2_grpc.SeatInventoryServiceStub(
         grpc.insecure_channel(f"{host}:{port}")
     )
+
+
+def _get_redis_client():
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        return None
+    try:
+        client = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+        client.ping()
+        return client
+    except Exception as exc:
+        logger.warning("Redis unavailable during purchase confirmation: %s", exc)
+        return None
+
+
+def _get_cached_hold(inventory_id):
+    client = _get_redis_client()
+    if client is None:
+        return None
+    try:
+        cached_hold = client.get(f"hold:{inventory_id}")
+    except Exception as exc:
+        logger.warning("Redis hold cache read failed for %s: %s", inventory_id, exc)
+        return None
+    if not cached_hold:
+        logger.info("Purchase confirm cache miss for %s", inventory_id)
+        return None
+    try:
+        payload = json.loads(cached_hold)
+    except json.JSONDecodeError:
+        logger.warning("Redis hold cache payload invalid for %s", inventory_id)
+        return None
+    logger.info("Purchase confirm cache hit for %s", inventory_id)
+    return payload
+
+
+def _parse_timestamp(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _validate_hold_state(status, held_until):
+    if status != "held":
+        code = "PAYMENT_HOLD_EXPIRED" if status == "available" else "SEAT_UNAVAILABLE"
+        return _error(code, "Seat is no longer held. Please re-select.", 410 if code == "PAYMENT_HOLD_EXPIRED" else 409)
+    held_until_at = _parse_timestamp(held_until)
+    if held_until and held_until_at is None:
+        return None
+    if held_until_at and datetime.now(timezone.utc) > held_until_at:
+        return _error("PAYMENT_HOLD_EXPIRED", "Seat hold has expired. Please re-select.", 410)
+    return None
 
 
 def _publish_hold_ttl(inventory_id, user_id, hold_token):
@@ -331,29 +395,37 @@ def confirm_purchase(inventory_id):
     if not event_id:
         return _error("VALIDATION_ERROR", "eventId is required.", 400)
 
-    # 1. Verify seat is still held (fast gRPC check)
-    try:
-        stub        = _grpc_stub()
-        seat_status = stub.GetSeatStatus(
-            seat_inventory_pb2.GetSeatStatusRequest(inventory_id=inventory_id)
+    stub = _grpc_stub()
+    cached_hold = _get_cached_hold(inventory_id)
+    if isinstance(cached_hold, dict):
+        cached_user_id = cached_hold.get("heldByUserId")
+        cached_hold_token = cached_hold.get("holdToken")
+        if cached_user_id and cached_user_id != user_id:
+            return _error("SEAT_UNAVAILABLE", "Seat is no longer held. Please re-select.", 409)
+        if hold_token and cached_hold_token and cached_hold_token != hold_token:
+            return _error("SEAT_UNAVAILABLE", "Seat is no longer held. Please re-select.", 409)
+        validation_error = _validate_hold_state(
+            status=str(cached_hold.get("status", "")),
+            held_until=str(cached_hold.get("heldUntil", "")),
         )
-    except grpc.RpcError as exc:
-        logger.error("gRPC GetSeatStatus error: %s", exc)
-        return _error("SERVICE_UNAVAILABLE", "Seat inventory service unavailable.", 503)
-
-    if seat_status.status != "held":
-        code = "PAYMENT_HOLD_EXPIRED" if seat_status.status == "available" else "SEAT_UNAVAILABLE"
-        return _error(code, "Seat is no longer held. Please re-select.", 410 if code == "PAYMENT_HOLD_EXPIRED" else 409)
-
-    if seat_status.held_until:
+        if validation_error:
+            return validation_error
+        logger.info("Purchase confirm using Redis hold cache for %s", inventory_id)
+    else:
         try:
-            held_until = datetime.fromisoformat(seat_status.held_until.replace("Z", "+00:00"))
-            if held_until.tzinfo is None:
-                held_until = held_until.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) > held_until:
-                return _error("PAYMENT_HOLD_EXPIRED", "Seat hold has expired. Please re-select.", 410)
-        except ValueError:
-            pass
+            seat_status = stub.GetSeatStatus(
+                seat_inventory_pb2.GetSeatStatusRequest(inventory_id=inventory_id)
+            )
+        except grpc.RpcError as exc:
+            logger.error("gRPC GetSeatStatus error: %s", exc)
+            return _error("SERVICE_UNAVAILABLE", "Seat inventory service unavailable.", 503)
+        validation_error = _validate_hold_state(
+            status=seat_status.status,
+            held_until=seat_status.held_until,
+        )
+        if validation_error:
+            return validation_error
+        logger.info("Purchase confirm falling back to gRPC status for %s", inventory_id)
 
     event_data, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
     if err:

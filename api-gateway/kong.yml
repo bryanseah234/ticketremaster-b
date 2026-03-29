@@ -17,7 +17,6 @@ plugins:
         - http://127.0.0.1:5173
         - http://127.0.0.1:3000
         - https://ticketremaster.hong-yi.me
-        - https://ticketremasterapi.hong-yi.me
         - https://ticketremaster.vercel.app
       methods:
         - GET
@@ -30,6 +29,7 @@ plugins:
         - Authorization
         - Content-Type
         - X-Correlation-ID
+        - X-Request-ID
         - apikey
       credentials: true
       max_age: 3600
@@ -56,10 +56,6 @@ services:
   - name: user-service
     url: http://user-service:5000
     routes:
-      - name: user-route
-        paths:
-          - /users
-        strip_path: false
       - name: stripe-webhook-route
         paths:
           - /webhooks/stripe
@@ -129,28 +125,6 @@ services:
   - name: ticket-purchase-orchestrator
     url: http://ticket-purchase-orchestrator:5000
     routes:
-      - name: tickets-route
-        paths:
-          - /tickets
-        strip_path: false
-        plugins:
-          - name: key-auth
-            config:
-              key_names:
-                - apikey
-              hide_credentials: true
-              run_on_preflight: false
-      - name: checkout-route
-        paths:
-          - /checkout
-        strip_path: false
-        plugins:
-          - name: key-auth
-            config:
-              key_names:
-                - apikey
-              hide_credentials: true
-              run_on_preflight: false
       - name: purchase-route
         paths:
           - /purchase
@@ -166,10 +140,10 @@ services:
   - name: qr-orchestrator
     url: http://qr-orchestrator:5000
     routes:
-      - name: qr-route
+      - name: tickets-route
         paths:
-          - /qr
-        strip_path: true
+          - /tickets
+        strip_path: false
         plugins:
           - name: key-auth
             config:
@@ -181,10 +155,10 @@ services:
   - name: ticket-verification-orchestrator
     url: http://ticket-verification-orchestrator:5000
     routes:
-      - name: scan-route
+      - name: verify-route
         paths:
-          - /scan
-        strip_path: true
+          - /verify
+        strip_path: false
         plugins:
           - name: key-auth
             config:

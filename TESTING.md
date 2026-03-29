@@ -48,6 +48,12 @@ Quick smoke check:
 }
 ```
 
+The local stack now includes:
+
+- Kong on `http://localhost:8000`
+- RabbitMQ management on `http://localhost:15672`
+- Redis on `redis://localhost:6379/0`
+
 ## 3) Import Postman assets correctly
 
 1. In Postman, click **Import**.
@@ -69,7 +75,7 @@ The shared local environment assumes seeded baseline data:
 - `venue_id=ven_001`
 - `event_id=evt_001`
 
-Before running the full collection, run migrations and seeds so these references exist:
+Before running the full collection, run migrations and seeds so these references exist. Use the explicit seed scripts below because the baseline data is now split across service-specific entrypoints:
 
 ```powershell
 docker compose run --rm user-service python -m flask --app app.py db upgrade -d migrations
@@ -78,14 +84,16 @@ docker compose run --rm seat-service python -m flask --app app.py db upgrade -d 
 docker compose run --rm event-service python -m flask --app app.py db upgrade -d migrations
 docker compose run --rm seat-inventory-service python -m flask --app app.py db upgrade -d migrations
 
-docker compose run --rm user-service python seed.py
-docker compose run --rm venue-service python seed.py
-docker compose run --rm seat-service python seed.py
-docker compose run --rm event-service python seed.py
-docker compose run --rm seat-inventory-service python seed.py
+docker compose run --rm user-service python user_seed.py
+docker compose run --rm venue-service python seed_venues.py
+docker compose run --rm seat-service python seed_seats.py
+docker compose run --rm event-service python seed_events.py
+docker compose run --rm seat-inventory-service python seed_seat_inventory.py
 ```
 
 The collection auto-captures `user_id`, `venue_id`, `event_id`, and `inventory_id` from responses at runtime.
+
+The purchase flow also relies on Redis-backed seat-hold cache entries created by `seat-inventory-service` and checked by `ticket-purchase-orchestrator`, so keep Redis running when validating checkout and confirm flows.
 
 ## 4) Run the core collection in dependency order
 
@@ -350,7 +358,23 @@ docker compose up -d --build
 
 Use reset only when you intentionally want a fresh database state.
 
-## 8) Troubleshooting JSONError / HTML 500 responses
+After a volume reset, rerun the migration and seed commands from **3.1** so the shared Postman identifiers exist again.
+
+## 8) Kubernetes manifest sanity check
+
+If you want to verify the committed Kubernetes base manifests before deploying:
+
+```powershell
+kubectl kustomize .\k8s\base | Out-Null
+```
+
+If you have a reachable cluster configured, you can also apply the base directly:
+
+```powershell
+kubectl apply -k .\k8s\base
+```
+
+## 9) Troubleshooting JSONError / HTML 500 responses
 
 Symptom seen in Postman or Postman CLI:
 

@@ -1,0 +1,53 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - configuration.yaml
+  - data-plane.yaml
+  - core-workloads.yaml
+  - edge-workloads.yaml
+  - seed-jobs.yaml
+  - network-policies.yaml
+images:
+  - name: ticketremaster/user-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/venue-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/seat-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/event-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/seat-inventory-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/ticket-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/ticket-log-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/marketplace-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/transfer-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/credit-transaction-service
+    newTag: local-k8s-20260329
+  - name: ticketremaster/stripe-wrapper
+    newTag: local-k8s-20260329
+  - name: ticketremaster/otp-wrapper
+    newTag: local-k8s-20260329
+  - name: ticketremaster/auth-orchestrator
+    newTag: local-k8s-20260329
+  - name: ticketremaster/event-orchestrator
+    newTag: local-k8s-20260329
+  - name: ticketremaster/credit-orchestrator
+    newTag: local-k8s-20260329
+  - name: ticketremaster/ticket-purchase-orchestrator
+    newTag: local-k8s-20260329
+  - name: ticketremaster/qr-orchestrator
+    newTag: local-k8s-20260329
+  - name: ticketremaster/marketplace-orchestrator
+    newTag: local-k8s-20260329
+  - name: ticketremaster/transfer-orchestrator
+    newTag: local-k8s-20260329
+  - name: ticketremaster/ticket-verification-orchestrator
+    newTag: local-k8s-20260329
+  - name: cloudflare/cloudflared
+    digest: sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0

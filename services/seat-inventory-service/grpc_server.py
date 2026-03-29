@@ -1,5 +1,11 @@
+import json
+import logging
+import os
 from datetime import UTC, datetime, timedelta
+from typing import Any
 import uuid
+
+import redis
 
 from app import create_app, db
 from models import SeatInventory
@@ -10,6 +16,58 @@ from seat_inventory_pb2 import (
     SellSeatResponse,
 )
 from seat_inventory_pb2_grpc import SeatInventoryServiceServicer
+
+logger = logging.getLogger(__name__)
+
+
+def _get_redis_client():
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        return None
+    try:
+        client = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+        client.ping()
+        return client
+    except Exception as exc:
+        logger.warning("Redis unavailable for seat hold caching: %s", exc)
+        return None
+
+
+def _write_hold_cache(
+    inventory_id: str,
+    user_id: str,
+    hold_token: str,
+    held_until_iso: str,
+    ttl_seconds: int,
+) -> None:
+    client = _get_redis_client()
+    if client is None:
+        return
+    payload: dict[str, Any] = {
+        "status": "held",
+        "heldByUserId": user_id,
+        "holdToken": hold_token,
+        "heldUntil": held_until_iso,
+    }
+    try:
+        client.setex(f"hold:{inventory_id}", ttl_seconds, json.dumps(payload))
+    except Exception as exc:
+        logger.warning("Redis hold cache write failed for %s: %s", inventory_id, exc)
+
+
+def _delete_hold_cache(inventory_id: str) -> None:
+    client = _get_redis_client()
+    if client is None:
+        return
+    try:
+        client.delete(f"hold:{inventory_id}")
+    except Exception as exc:
+        logger.warning("Redis hold cache delete failed for %s: %s", inventory_id, exc)
 
 
 class SeatInventoryGrpcService(SeatInventoryServiceServicer):
@@ -79,6 +137,13 @@ class SeatInventoryGrpcService(SeatInventoryServiceServicer):
                 )
 
             db.session.commit()
+            _write_hold_cache(
+                inventory_id=request.inventory_id,
+                user_id=request.user_id,
+                hold_token=hold_token,
+                held_until_iso=held_until.isoformat(),
+                ttl_seconds=hold_seconds,
+            )
             return HoldSeatResponse(
                 success=True,
                 status='held',
@@ -110,6 +175,7 @@ class SeatInventoryGrpcService(SeatInventoryServiceServicer):
             inventory.holdToken = None
             inventory.heldUntil = None
             db.session.commit()
+            _delete_hold_cache(request.inventory_id)
             return ReleaseSeatResponse(success=True)
 
     def SellSeat(self, request, context):
@@ -138,6 +204,7 @@ class SeatInventoryGrpcService(SeatInventoryServiceServicer):
             inventory.holdToken = None
             inventory.heldUntil = None
             db.session.commit()
+            _delete_hold_cache(request.inventory_id)
             return SellSeatResponse(success=True)
 
     def GetSeatStatus(self, request, context):

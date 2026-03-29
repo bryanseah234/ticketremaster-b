@@ -86,8 +86,11 @@ services:
     environment:
       SEAT_INVENTORY_SERVICE_DATABASE_URL: ${SEAT_INVENTORY_SERVICE_DATABASE_URL}
       SEAT_INVENTORY_GRPC_PORT: ${SEAT_INVENTORY_GRPC_PORT:-50051}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       seat-inventory-service-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   seat-inventory-service-db:
@@ -302,6 +305,22 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - ticketremaster
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - redis-data:/data
+
   auth-orchestrator:
     <<: [*service-defaults, *flask-healthcheck]
     build:
@@ -379,6 +398,7 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
       SEAT_HOLD_DURATION_SECONDS: ${SEAT_HOLD_DURATION_SECONDS:-600}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       ticket-service:
         condition: service_healthy
@@ -387,6 +407,8 @@ services:
       credit-transaction-service:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   qr-orchestrator:
@@ -526,3 +548,4 @@ volumes:
   seat-service-db-data:
   credit-transaction-service-db-data:
   rabbitmq-data:
+  redis-data:
