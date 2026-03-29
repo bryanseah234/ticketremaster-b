@@ -21,6 +21,7 @@ Saga on seller-verify:
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import pika
@@ -59,25 +60,43 @@ def _get_credit_balance(credit_data):
 
 
 def _publish_seller_notification(transfer_id, seller_id):
-    try:
-        conn = pika.BlockingConnection(pika.ConnectionParameters(
-            host=os.environ.get("RABBITMQ_HOST", "rabbitmq"),
-            port=int(os.environ.get("RABBITMQ_PORT", "5672")),
-            credentials=pika.PlainCredentials(
-                os.environ.get("RABBITMQ_USER", "guest"),
-                os.environ.get("RABBITMQ_PASS", "guest"),
-            ),
-        ))
-        ch = conn.channel()
-        ch.basic_publish(
-            exchange="",
-            routing_key="seller_notification_queue",
-            body=json.dumps({"transferId": transfer_id, "sellerId": seller_id}),
-            properties=pika.BasicProperties(delivery_mode=2),
-        )
-        conn.close()
-    except Exception as exc:
-        logger.warning("Could not publish seller notification: %s", exc)
+    """Publish seller notification to RabbitMQ with retry and exponential backoff."""
+    MAX_RETRIES = 3
+    BACKOFF_DELAYS = [1, 2, 4]  # seconds
+    
+    message = json.dumps({"transferId": transfer_id, "sellerId": seller_id})
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            conn = pika.BlockingConnection(pika.ConnectionParameters(
+                host=os.environ.get("RABBITMQ_HOST", "rabbitmq"),
+                port=int(os.environ.get("RABBITMQ_PORT", "5672")),
+                credentials=pika.PlainCredentials(
+                    os.environ.get("RABBITMQ_USER", "guest"),
+                    os.environ.get("RABBITMQ_PASS", "guest"),
+                ),
+                connection_attempts=2,
+                retry_delay=1,
+            ))
+            ch = conn.channel()
+            ch.basic_publish(
+                exchange="",
+                routing_key="seller_notification_queue",
+                body=message,
+                properties=pika.BasicProperties(delivery_mode=2),
+            )
+            conn.close()
+            if attempt > 0:
+                logger.info("RabbitMQ publish succeeded on attempt %d", attempt + 1)
+            return
+        except Exception as exc:
+            if attempt < MAX_RETRIES - 1:
+                delay = BACKOFF_DELAYS[attempt]
+                logger.warning("RabbitMQ publish failed (attempt %d/%d): %s. Retrying in %ds...", 
+                             attempt + 1, MAX_RETRIES, exc, delay)
+                time.sleep(delay)
+            else:
+                logger.error("RabbitMQ publish failed after %d attempts: %s", MAX_RETRIES, exc)
 
 
 def _execute_saga(transfer_id, buyer_id, seller_id, credit_amount, ticket_id, listing_id,

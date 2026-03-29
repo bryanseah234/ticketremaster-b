@@ -57,13 +57,35 @@ def list_events():
         name: type
         type: string
         description: Filter by event type (e.g. concert, orchestra, sports)
+      - in: query
+        name: page
+        type: integer
+        description: Page number (default: 1)
+      - in: query
+        name: limit
+        type: integer
+        description: Items per page (default: 20, max: 100)
     responses:
       200:
         description: List of events with venue and seatsAvailable
       503:
         description: Event service unavailable
     """
-    params = {k: v for k, v in request.args.items() if k in ("type", "page", "limit")}
+    # Parse and validate pagination parameters
+    page = request.args.get("page", default=1, type=int)
+    limit = request.args.get("limit", default=20, type=int)
+    
+    if page < 1:
+        return _error("VALIDATION_ERROR", "page must be an integer greater than or equal to 1.", 400)
+    if limit < 1:
+        return _error("VALIDATION_ERROR", "limit must be an integer greater than or equal to 1.", 400)
+    if limit > 100:
+        limit = 100
+    
+    params = {k: v for k, v in request.args.items() if k in ("type",)}
+    params["page"] = page
+    params["limit"] = limit
+    
     events_data, err = call_service("GET", f"{EVENT_SERVICE}/events", params=params)
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not fetch events.", 503)
@@ -85,7 +107,11 @@ def list_events():
 
     return jsonify({"data": {
         "events": enriched,
-        "pagination": events_data.get("pagination", {}),
+        "pagination": events_data.get("pagination", {
+            "page": page,
+            "limit": limit,
+            "total": len(enriched),
+        }),
     }}), 200
 
 

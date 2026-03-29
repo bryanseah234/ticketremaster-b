@@ -6,6 +6,10 @@ import os
 import requests
 
 
+# Configurable timeout for OutSystems calls (default 5 seconds)
+OUTSYSTEMS_TIMEOUT = int(os.environ.get("OUTSYSTEMS_TIMEOUT_SECONDS", "5"))
+
+
 def call_service(method, url, **kwargs):
     """
     Call an internal service.
@@ -35,8 +39,11 @@ def call_credit_service(method, path, **kwargs):
     """
     Call the OutSystems Credit Service.
     Automatically injects the OUTSYSTEMS_API_KEY header.
+    Uses configurable timeout from OUTSYSTEMS_TIMEOUT_SECONDS env var.
     """
     headers = kwargs.pop("headers", {})
     headers["X-API-KEY"] = os.environ["OUTSYSTEMS_API_KEY"]
     base = os.environ["CREDIT_SERVICE_URL"].rstrip("/")
+    # Apply OutSystems-specific timeout if not already set
+    kwargs.setdefault("timeout", OUTSYSTEMS_TIMEOUT)
     return call_service(method, f"{base}{path}", headers=headers, **kwargs)
