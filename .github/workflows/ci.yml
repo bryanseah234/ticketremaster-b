@@ -95,5 +95,5 @@ jobs:
 
       - name: Build all Docker images
         run: |
-          docker compose build --no-cache 2>&1 || true
+          docker compose build --no-cache 2>&1
           echo "Docker build check complete"
