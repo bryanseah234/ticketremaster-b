@@ -43,13 +43,32 @@ def create_listing():
 
 @bp.get('/listings')
 def list_active_listings():
+    page = request.args.get('page', default=1, type=int)
+    limit = request.args.get('limit', default=20, type=int)
+
+    if page is None or page < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'page must be an integer greater than or equal to 1')
+    if limit is None or limit < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'limit must be an integer greater than or equal to 1')
+
+    limit = min(limit, 100)
+
+    query = Listing.query.filter_by(status='active')
+    total = query.count()
     listings = (
-        Listing.query
-        .filter_by(status='active')
-        .order_by(Listing.createdAt.desc())
+        query.order_by(Listing.createdAt.desc(), Listing.listingId.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
-    return jsonify({'listings': [listing.to_dict() for listing in listings]}), 200
+    return jsonify({
+        'listings': [listing.to_dict() for listing in listings],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+        },
+    }), 200
 
 
 @bp.get('/listings/<listing_id>')

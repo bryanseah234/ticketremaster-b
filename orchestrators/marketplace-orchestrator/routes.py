@@ -23,6 +23,16 @@ def _error(code, message, status):
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+def _parse_pagination_args():
+    page = request.args.get("page", default=1, type=int)
+    limit = request.args.get("limit", default=20, type=int)
+    if page is None or page < 1:
+        return None, None, _error("VALIDATION_ERROR", "page must be an integer greater than or equal to 1.", 400)
+    if limit is None or limit < 1:
+        return None, None, _error("VALIDATION_ERROR", "limit must be an integer greater than or equal to 1.", 400)
+    return page, min(limit, 100), None
+
+
 # ── GET /marketplace ──────────────────────────────────────────────────────────
 
 @bp.get("/marketplace")
@@ -42,8 +52,13 @@ def browse():
       200:
         description: List of active listings enriched with event details
     """
-    params = {k: request.args[k] for k in ("eventId", "page", "limit") if k in request.args}
-    listings_data, err = call_service("GET", f"{MARKETPLACE_SERVICE}/listings", params=params)
+    page, limit, pagination_error = _parse_pagination_args()
+    if pagination_error:
+        return pagination_error
+
+    event_id = request.args.get("eventId")
+    upstream_params = {"page": page, "limit": limit} if not event_id else None
+    listings_data, err = call_service("GET", f"{MARKETPLACE_SERVICE}/listings", params=upstream_params)
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not retrieve listings.", 503)
 
@@ -51,6 +66,8 @@ def browse():
     for listing in listings_data.get("listings", []):
         ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}")
         event,  _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}") if ticket else (None, None)
+        if event_id and (not event or str(event.get("eventId")) != str(event_id)):
+            continue
         seller, _ = call_service("GET", f"{USER_SERVICE}/users/{listing['sellerId']}")
         seller_email = seller.get("email") if seller else None
         seller_display = seller_email.split("@")[0] if seller_email else None
@@ -69,9 +86,25 @@ def browse():
             } if event else None,
         })
 
+    if event_id:
+        total = len(enriched)
+        start = (page - 1) * limit
+        enriched = enriched[start:start + limit]
+        pagination = {
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    else:
+        pagination = listings_data.get("pagination", {
+            "page": page,
+            "limit": limit,
+            "total": len(enriched),
+        })
+
     return jsonify({"data": {
         "listings":   enriched,
-        "pagination": listings_data.get("pagination", {}),
+        "pagination": pagination,
     }}), 200
 
 

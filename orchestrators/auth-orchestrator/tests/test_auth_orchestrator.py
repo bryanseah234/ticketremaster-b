@@ -42,6 +42,7 @@ def test_register_success(mock_svc, mock_credit, client):
     })
     assert res.status_code == 201
     assert res.get_json()["data"]["email"] == "a@b.com"
+    assert mock_credit.call_args.kwargs["json"] == {"userId": "u1", "creditBalance": 0}
 
 
 @patch("routes.call_credit_service")

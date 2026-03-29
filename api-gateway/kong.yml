@@ -80,9 +80,30 @@ services:
   - name: marketplace-orchestrator
     url: http://marketplace-orchestrator:5000
     routes:
-      - name: marketplace-route
+      - name: marketplace-browse-route
         paths:
           - /marketplace
+        methods:
+          - GET
+        strip_path: false
+      - name: marketplace-list-route
+        paths:
+          - /marketplace/list
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+      - name: marketplace-item-route
+        paths:
+          - ~/marketplace/[^/]+$
+        methods:
+          - DELETE
         strip_path: false
         plugins:
           - name: key-auth

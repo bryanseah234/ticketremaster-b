@@ -6,6 +6,7 @@ import os
 
 from flask import Blueprint, jsonify, request
 
+from middleware import require_admin
 from service_client import call_service
 
 bp = Blueprint("events", __name__)
@@ -82,7 +83,10 @@ def list_events():
             "seatsAvailable": seats_avail,
         })
 
-    return jsonify({"data": {"events": enriched}}), 200
+    return jsonify({"data": {
+        "events": enriched,
+        "pagination": events_data.get("pagination", {}),
+    }}), 200
 
 
 # ── GET /events/<event_id> ────────────────────────────────────────────────────
@@ -231,6 +235,7 @@ def get_seat_detail(event_id, inventory_id):
 # ── POST /admin/events ────────────────────────────────────────────────────────
 
 @bp.post("/admin/events")
+@require_admin
 def create_event_admin():
     """
     Admin endpoint: create event and auto-populate seat inventory
@@ -273,6 +278,10 @@ def create_event_admin():
         description: Event created and seats provisioned
       400:
         description: Validation error
+      401:
+        description: Missing or invalid token
+      403:
+        description: Admin role required
       503:
         description: Service unavailable
     """

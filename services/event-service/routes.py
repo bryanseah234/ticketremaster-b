@@ -29,8 +29,36 @@ def health():
 
 @bp.get('/events')
 def list_events():
-    events = Event.query.order_by(Event.date.asc()).all()
-    return jsonify({'events': [e.to_dict(summary=True) for e in events]}), 200
+    page = request.args.get('page', default=1, type=int)
+    limit = request.args.get('limit', default=20, type=int)
+    event_type = request.args.get('type', type=str)
+
+    if page is None or page < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'page must be an integer greater than or equal to 1')
+    if limit is None or limit < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'limit must be an integer greater than or equal to 1')
+
+    limit = min(limit, 100)
+
+    query = Event.query
+    if event_type:
+        query = query.filter(Event.type.ilike(event_type.strip()))
+
+    total = query.count()
+    events = (
+        query.order_by(Event.date.asc(), Event.createdAt.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+    return jsonify({
+        'events': [e.to_dict(summary=True) for e in events],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+        },
+    }), 200
 
 
 @bp.get('/events/<event_id>')

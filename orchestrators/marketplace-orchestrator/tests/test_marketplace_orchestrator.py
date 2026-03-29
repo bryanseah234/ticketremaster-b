@@ -61,10 +61,42 @@ def test_browse_success(mock_svc, client):
 
 
 @patch("routes.call_service")
+def test_browse_filters_by_event_id(mock_svc, client):
+    other_ticket = {**MOCK_TICKET, "ticketId": "tkt_002", "eventId": "evt_999"}
+    other_listing = {**MOCK_LISTING, "listingId": "lst_002", "ticketId": "tkt_002"}
+    other_event = {"eventId": "evt_999", "name": "Other Event", "date": "2025-04-01T20:00:00"}
+
+    mock_svc.side_effect = [
+        ({"listings": [MOCK_LISTING, other_listing], "pagination": {"page": 1, "limit": 20, "total": 2}}, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_SELLER, None),
+        (other_ticket, None),
+        (other_event, None),
+        (MOCK_SELLER, None),
+    ]
+
+    res = client.get("/marketplace?eventId=evt_001")
+
+    assert res.status_code == 200
+    payload = res.get_json()["data"]
+    assert payload["pagination"] == {"page": 1, "limit": 20, "total": 1}
+    assert [listing["listingId"] for listing in payload["listings"]] == ["lst_001"]
+
+
+@patch("routes.call_service")
 def test_browse_no_auth_required(mock_svc, client):
     """GET /marketplace must be accessible without a JWT."""
     mock_svc.return_value = ({"listings": [], "pagination": {}}, None)
     assert client.get("/marketplace").status_code == 200
+
+
+@patch("routes.call_service")
+def test_browse_rejects_invalid_limit(mock_svc, client):
+    res = client.get("/marketplace?limit=0")
+
+    assert res.status_code == 400
+    assert res.get_json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 # ── POST /marketplace/list ────────────────────────────────────────────────────

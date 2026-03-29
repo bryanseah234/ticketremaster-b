@@ -2,73 +2,235 @@
 
 ## Executive summary
 
-TicketRemaster is a microservice ticketing platform that supports event discovery, seat selection, hold-and-purchase flows, ticket QR retrieval, staff-side verification, resale marketplace listings, and peer-to-peer transfer workflows. The current repository already implements the orchestrator-driven backend, Redis-assisted purchase path, RabbitMQ-driven asynchronous flows, and a functional external credit provider hosted in OutSystems.
+TicketRemaster is a ticketing backend that supports:
 
-## Architecture snapshot
+- customer event discovery
+- seat-map browsing and seat holds
+- credit top-up and credit-funded checkout
+- owned-ticket retrieval and QR generation
+- staff ticket validation
+- resale marketplace listings
+- peer-to-peer transfer workflows
+
+The codebase already implements the core backend for these journeys. It is not a blank PRD for a future platform. This document reflects what is actually present in the repository today and where the main hardening gaps still remain.
+
+## Current product architecture
 
 ```mermaid
 flowchart LR
-    Browser[Customer App / Staff App] --> PublicAPI[ticketremasterapi.hong-yi.me]
-    PublicAPI --> Edge[Kong + cloudflared]
-    Edge --> Orch[Orchestrator Layer]
-    Orch --> Services[Atomic Services]
-    Orch --> Redis[(Redis)]
-    Orch --> Rabbit[(RabbitMQ)]
-    Services --> Databases[(Per-service PostgreSQL)]
-    Orch --> CreditAPI[OutSystems Credit API]
-    Orch --> OTP[SMU Notification API]
-    Orch --> Stripe[Stripe]
+    Client[Customer App or Staff App] --> PublicAPI[ticketremasterapi.hong-yi.me]
+    PublicAPI --> Edge[Edge Layer]
+    Edge --> Core[Core Layer]
+    Core --> Data[Data Layer]
+    Core --> External[External Providers]
+
+    External --> CreditAPI[OutSystems Credit API]
+    External --> Stripe[Stripe]
+    External --> SMU[SMU Notification API]
 ```
 
-## Platform model
+## Architectural layers
 
-### Edge, core, and data
+### Edge layer
 
-- **Edge**
-  - public ingress and policy layer
-  - currently represented by Kong plus `cloudflared`
-  - owns browser-facing routing, CORS behavior, and API-key enforcement at the gateway
-- **Core**
-  - application runtime layer
-  - contains orchestrators, atomic Flask services, and seed jobs
-  - handles business flows, sagas, gRPC seat operations, and internal REST traffic
-- **Data**
-  - stateful infrastructure layer
-  - contains PostgreSQL StatefulSets, Redis, and RabbitMQ
-  - should remain private to the cluster
+**Definition**: The public ingress and request policy layer where browser traffic first enters the platform.
+
+**Current implementation**:
+
+- namespace: `ticketremaster-edge`
+- workloads: `kong`, `cloudflared`
+- source of routing truth: `api-gateway/kong.yml`
+
+**Responsibilities**:
+
+- expose only orchestrator-facing routes
+- enforce CORS for approved local and production frontend origins
+- apply global rate limiting
+- apply Kong key-auth on protected route groups
+- keep atomic services and data infrastructure private
+
+**Non-responsibilities**:
+
+- does not own business workflows
+- does not store ticketing or credit data
+- does not perform seat-locking or QR validation logic
+
+### Core layer
+
+**Definition**: The application runtime layer where business workflows execute, translating frontend requests into service-to-service calls.
+
+**Current implementation**:
+
+- namespace: `ticketremaster-core`
+- 8 orchestrators
+- 12 internal services and wrappers
+- seed jobs for baseline data loading
+
+**Responsibilities**:
+
+- authenticate users and issue JWTs
+- aggregate data across atomic services for frontend consumption
+- run seat-hold, purchase, top-up, verification, marketplace, and transfer flows
+- call Redis, RabbitMQ, gRPC services, Stripe, OTP, and OutSystems where required
+- normalize downstream errors into consistent API responses
+
+**Core sublayers**:
+
+- **Orchestrator sublayer** (8 orchestrators):
+  - `auth-orchestrator`
+  - `event-orchestrator`
+  - `credit-orchestrator`
+  - `ticket-purchase-orchestrator`
+  - `qr-orchestrator`
+  - `marketplace-orchestrator`
+  - `transfer-orchestrator`
+  - `ticket-verification-orchestrator`
+- **Atomic service sublayer** (12 services and wrappers):
+  - `user-service`
+  - `venue-service`
+  - `seat-service`
+  - `event-service`
+  - `seat-inventory-service`
+  - `ticket-service`
+  - `ticket-log-service`
+  - `marketplace-service`
+  - `transfer-service`
+  - `credit-transaction-service`
+  - `stripe-wrapper`
+  - `otp-wrapper`
+
+### Data layer
+
+**Definition**: The stateful persistence and messaging layer holding long-lived application state or asynchronous workflow state.
+
+**Current implementation**:
+
+- namespace: `ticketremaster-data`
+- Redis StatefulSet
+- RabbitMQ StatefulSet
+- 10 Postgres StatefulSets, one per data-owning service
+
+**Responsibilities**:
+
+- persist service-owned records
+- provide the Redis hold cache used by purchase confirmation
+- hold RabbitMQ queues used for hold expiry and transfer notifications
+- isolate stateful infrastructure from direct browser access
+
+**Non-responsibilities**:
+
+- does not serve frontend requests directly
+- does not aggregate data for clients
+- does not expose public routes
 
 ```mermaid
 flowchart TB
     subgraph Edge[ticketremaster-edge]
-        Cloudflared[cloudflared]
+        Tunnel[cloudflared]
         Kong[Kong]
     end
 
     subgraph Core[ticketremaster-core]
-        Orchestrators[8 orchestrators]
-        Atomic[Atomic Flask services]
-        Seeds[Seed jobs]
+        Orch[8 Orchestrators]
+        Services[12 Services and Wrappers]
+        Jobs[Seed Jobs]
     end
 
     subgraph Data[ticketremaster-data]
-        Redis2[(Redis)]
-        Rabbit2[(RabbitMQ)]
-        Postgres[(PostgreSQL StatefulSets)]
+        Redis[(Redis)]
+        Rabbit[(RabbitMQ)]
+        PG[(PostgreSQL StatefulSets)]
     end
 
-    Cloudflared --> Kong
-    Kong --> Orchestrators
-    Orchestrators --> Atomic
-    Orchestrators --> Redis2
-    Orchestrators --> Rabbit2
-    Atomic --> Postgres
+    Tunnel --> Kong
+    Kong --> Orch
+    Orch --> Services
+    Orch --> Redis
+    Orch --> Rabbit
+    Services --> PG
 ```
 
-## Current implementation reality
+## Key implementation flows
 
-### Frontend-facing orchestrators
+### Event discovery
 
-The repository currently exposes these orchestrator route groups through Kong:
+- the frontend calls `event-orchestrator` through `/venues`, `/events`, `/events/{eventId}`, and seat-map endpoints
+- the orchestrator fans out to `venue-service`, `event-service`, `seat-service`, and `seat-inventory-service`
+- the returned shape is enriched for UI use rather than mirroring raw service responses
+
+### Credit top-up
+
+- the frontend calls `credit-orchestrator`
+- `credit-orchestrator` creates Stripe PaymentIntents through `stripe-wrapper`
+- confirm and webhook paths retrieve Stripe metadata, patch the OutSystems balance, and log `credit-transaction-service` entries
+
+### Seat hold and purchase
+
+- `ticket-purchase-orchestrator` holds, releases, and sells seats through `seat-inventory-service` gRPC
+- hold state is cached in Redis for faster confirm checks
+- hold-expiry behavior relies on RabbitMQ messaging
+- the purchase saga creates the ticket, deducts OutSystems credits, and logs a credit transaction
+
+### Marketplace and transfer
+
+- `marketplace-orchestrator` exposes browse, list, and delist flows
+- `transfer-orchestrator` manages the multi-step buyer and seller verification flow
+- OTP is delegated to `otp-wrapper`
+- seller notifications are decoupled through RabbitMQ
+- final ownership transfer updates transfer, marketplace, ticket, and credit state together
+
+### QR retrieval and verification
+
+- `qr-orchestrator` generates a fresh QR hash for each open and stores the hash on `ticket-service`
+- `ticket-verification-orchestrator` validates QR TTL, seat status, ticket state, duplicate scans, and venue ownership
+- check-in results are logged to `ticket-log-service`
+
+## External systems
+
+### OutSystems credit service
+
+This repository treats OutSystems as the source of truth for `creditBalance`.
+
+- API base URL: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI`
+- docs URL: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI/`
+- published Swagger: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI/swagger.json`
+- auth: `X-API-KEY`
+
+Integration points:
+
+- `auth-orchestrator`
+  - initializes a credit record during registration
+- `credit-orchestrator`
+  - fetches balance
+  - applies top-up balance changes
+  - logs top-up history internally
+- `ticket-purchase-orchestrator`
+  - reads buyer balance before sale
+  - patches the new balance after sale
+- `transfer-orchestrator`
+  - checks buyer and seller balances
+  - patches both balances during the transfer saga
+
+Current contract note:
+
+- repository callers use `POST /credits`, `GET /credits/{user_id}`, and `PATCH /credits/{user_id}`
+- the published OutSystems Swagger currently models `CreateCreditRequest` with both `userId` and `creditBalance`
+- the repository registration flow currently sends only `userId`, so provider behavior should be revalidated whenever the OutSystems contract changes
+
+### Stripe
+
+- used only through `stripe-wrapper`
+- supports create-payment-intent, retrieve-payment-intent, and webhook verification paths
+- currently powers the credit top-up workflow
+
+### SMU Notification API
+
+- used only through `otp-wrapper`
+- powers OTP send and verify steps for transfer workflows
+
+## Frontend-facing surface
+
+The gateway currently exposes these route groups:
 
 - `/auth`
 - `/events`
@@ -81,102 +243,87 @@ The repository currently exposes these orchestrator route groups through Kong:
 - `/transfer`
 - `/verify`
 
-### Core technical choices
+Important implementation details:
 
-- **HTTP orchestration**
-  - orchestrators aggregate and normalize atomic-service responses
-- **gRPC seat path**
-  - `ticket-purchase-orchestrator` uses `seat-inventory-service` gRPC calls for `HoldSeat`, `ReleaseSeat`, `SellSeat`, and `GetSeatStatus`
-- **Redis acceleration**
-  - hold metadata is cached in Redis after the database commit succeeds
-  - purchase confirmation checks Redis first, then falls back to gRPC when needed
-- **RabbitMQ workflows**
-  - seat-hold expiry uses TTL + DLX behavior
-  - transfer flows use asynchronous seller notification messaging
-- **External integrations**
-  - Stripe is used for top-up payment flow support
-  - SMU Notification API is used for OTP send/verify
-  - OutSystems Credit API is the live credit source of truth
+- `/tickets/*` at Kong routes to `qr-orchestrator`
+- `ticket-purchase-orchestrator` also defines `GET /tickets` on its own service port, but that route is not reachable through the current gateway mapping
+- `/marketplace` browse is public in orchestrator code but still requires Kong `apikey`
+- `/admin/events` is not currently protected by JWT or Kong key-auth even though it is conceptually an admin route
 
-## OutSystems credit platform
-
-The credit service is no longer a planned dependency. It is functional and already wired into the repo configuration.
-
-- Base URL: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI`
-- Docs: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI/`
-- Raw Swagger: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI/swagger.json`
-- Current contract used by orchestrators:
-  - `POST /credits`
-  - `GET /credits/{user_id}`
-  - `PATCH /credits/{user_id}`
-- Required header: `X-API-KEY`
-
-## Feature requirements reflected in the codebase
+## Functional requirements reflected in code
 
 ### Identity and access
 
-- JWT-based auth is handled by `auth-orchestrator`
-- user password hashing is handled before persistence
-- staff verification flows depend on venue-aware claims
+- registration creates a user and attempts OutSystems credit initialization
+- login returns a JWT containing `userId`, `email`, `role`, and optionally `venueId` for staff users
+- `/auth/me` returns the current user profile
 
 ### Event discovery and seat visibility
 
-- public read flows are routed through `event-orchestrator`
-- venue, event, seat, and inventory data are aggregated there
-- admin event creation currently exists through `POST /admin/events`
+- venues and events are readable without JWT
+- seat maps are enriched with seat metadata and inventory status
+- event creation provisions seat inventory after event creation
 
-### Seat hold and purchase
+### Purchase and ticket ownership
 
-- pessimistic locking lives in `seat-inventory-service`
-- hold lifecycle is protected with gRPC plus Redis-assisted confirmation checks
-- purchase orchestration coordinates credit balance, seat sale, ticket creation, and credit transaction logging
+- users can hold a seat, release a hold, and confirm a purchase
+- tickets are created with statuses `active`, `listed`, `used`, or `pending_transfer`
+- owned tickets and QR retrieval are available through `qr-orchestrator`
 
-### Marketplace and transfer
+### Resale marketplace and transfers
 
-- marketplace browse and list/delete flows are implemented
-- transfer flow supports initiate, buyer verify, seller accept, seller reject, resend OTP, seller verify, status lookup, and cancel
-- RabbitMQ supports transfer-related asynchronous messaging
+- users can list active tickets
+- sellers can delist active listings
+- buyers can initiate transfers from listings
+- transfers support seller accept, seller reject, buyer verify, seller verify, resend OTP, pending lookups, direct lookup, and cancel
 
-### Ticket access and verification
+### Staff-side verification
 
-- `qr-orchestrator` serves user ticket list and QR generation
-- `ticket-verification-orchestrator` supports QR scan and manual verification paths
-- duplicate-scan protection is logged to `ticket-log-service`
+- scan flow validates QR age and venue
+- manual flow validates by ticket ID without QR
+- duplicate scans are blocked and logged
 
 ## Non-functional requirements
 
-- **Scalability**
-  - orchestrators are stateless and horizontally scalable in principle
-  - `seat-inventory-service` is the main concurrency-sensitive workload
-- **Performance**
-  - Redis reduces purchase confirmation pressure on gRPC and PostgreSQL
-  - gRPC keeps the seat-hold path efficient and explicit
-- **Security**
-  - browser traffic is intended to go through Kong only
-  - secrets are environment-injected in Docker Compose and Kubernetes manifests
-  - gateway policy enforces CORS and selected route-level API-key checks
-- **Fault tolerance**
-  - sagas use compensating actions where cross-service workflows can partially fail
-  - RabbitMQ decouples expiry and notification work from synchronous request paths
+### Performance
+
+- Redis reduces the need to re-check held seats through gRPC on every confirm call
+- gRPC keeps seat-state transitions explicit and low-latency
+- gateway aggregation keeps frontend calls coarse-grained
+
+### Security
+
+- JWT is the primary identity mechanism inside orchestrators
+- Kong key-auth protects selected route groups
+- browser clients should call Kong only
+- OutSystems calls require `OUTSYSTEMS_API_KEY`
+
+### Reliability
+
+- purchase and transfer flows use compensating logic where feasible
+- RabbitMQ decouples time-based and notification-based work from synchronous request latency
+- critical state remains in Postgres and OutSystems, not Redis
+
+### Scalability
+
+- orchestrators and most services are stateless in principle
+- `seat-inventory-service` is the main concurrency-sensitive service
+- current Kubernetes manifests are deployable but not yet tuned for multi-node production resilience
 
 ## Current infrastructure status
 
-The Kubernetes base is already committed and organized by plane, but the hardening backlog is still open:
+The Kubernetes base is real and organized by plane, but it is still in a hardening phase.
 
-- many core workloads are still single replica
-- startup probes are not broadly rolled out yet
-- requests and limits are still incomplete
+- many core Deployments remain single replica
+- startup probes are not yet universal
+- resource requests and limits are still incomplete
 - PodDisruptionBudgets and HPAs are not yet part of the committed base
-- single-node Docker Desktop still limits node-level resilience testing
+- RabbitMQ, Redis, and Postgres still use simple single-replica stateful patterns
 
-## Future roadmap
+## Roadmap focus
 
-- **Kubernetes hardening**
-  - scale critical stateless services
-  - add startup probes, requests/limits, PodDisruptionBudgets, and HPAs
-- **Stateful HA**
-  - move RabbitMQ, Redis, and eventually Postgres toward stronger HA or managed patterns
-- **API visibility**
-  - continue improving the offline API hub and live Swagger access paths
-- **Business journey testing**
-  - expand from unit checks into repeatable Postman and cluster validation flows
+- harden gateway and admin-route protection
+- align the OutSystems create-credit contract with the repository caller expectations
+- improve pagination and filtering on event and marketplace browse endpoints
+- continue expanding the offline API hub and unified OpenAPI surface
+- move from local-cluster validation toward stronger multi-node resilience testing

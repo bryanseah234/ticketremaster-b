@@ -37,6 +37,7 @@ def test_get_all_active_listings(client):
 
     assert response.status_code == 200
     payload = response.get_json()
+    assert payload['pagination'] == {'page': 1, 'limit': 20, 'total': 2}
     assert len(payload['listings']) == 2
     # createdAt desc, second inserted appears first
     assert payload['listings'][0]['ticketId'] == 'ticket-2'
@@ -97,6 +98,28 @@ def test_listings_only_returns_active(client):
 
     assert response.status_code == 200
     payload = response.get_json()
+    assert payload['pagination'] == {'page': 1, 'limit': 20, 'total': 1}
     assert len(payload['listings']) == 1
     assert payload['listings'][0]['listingId'] == active_listing['listingId']
     assert payload['listings'][0]['status'] == 'active'
+
+
+def test_listings_paginates(client):
+    create_listing(client, ticket_id='ticket-1')
+    create_listing(client, ticket_id='ticket-2')
+    create_listing(client, ticket_id='ticket-3')
+
+    response = client.get('/listings?page=2&limit=1')
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['pagination'] == {'page': 2, 'limit': 1, 'total': 3}
+    assert len(payload['listings']) == 1
+    assert payload['listings'][0]['ticketId'] == 'ticket-2'
+
+
+def test_listings_reject_invalid_limit(client):
+    response = client.get('/listings?limit=0')
+
+    assert response.status_code == 400
+    assert response.get_json()['error']['code'] == 'VALIDATION_ERROR'

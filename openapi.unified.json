@@ -1,0 +1,1643 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "TicketRemaster Unified API",
+    "version": "2026-03-29",
+    "description": "Unified OpenAPI document for the current TicketRemaster gateway-facing orchestrator API plus the external OutSystems credit service."
+  },
+  "servers": [
+    {
+      "url": "https://ticketremasterapi.hong-yi.me",
+      "description": "Production gateway"
+    },
+    {
+      "url": "http://localhost:8000",
+      "description": "Local gateway"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Events"
+    },
+    {
+      "name": "Credits"
+    },
+    {
+      "name": "Purchase"
+    },
+    {
+      "name": "Tickets"
+    },
+    {
+      "name": "Marketplace"
+    },
+    {
+      "name": "Transfer"
+    },
+    {
+      "name": "Verification"
+    },
+    {
+      "name": "External Credit Service"
+    }
+  ],
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register a new user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login and receive a JWT",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get current profile",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          }
+        }
+      }
+    },
+    "/venues": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "List venues",
+        "responses": {
+          "200": {
+            "description": "Venues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "List events",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enriched events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/{eventId}": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "Get event",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        }
+      }
+    },
+    "/events/{eventId}/seats": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "Get event seat map",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seat map",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/{eventId}/seats/{inventoryId}": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "Get seat detail",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seat detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        }
+      }
+    },
+    "/admin/events": {
+      "post": {
+        "tags": ["Events"],
+        "summary": "Create event and populate seat inventory",
+        "description": "Conceptually an admin endpoint, but current backend auth enforcement is not yet wired.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminEventRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          }
+        }
+      }
+    },
+    "/credits/balance": {
+      "get": {
+        "tags": ["Credits"],
+        "summary": "Get current user credit balance",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Balance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          }
+        }
+      }
+    },
+    "/credits/topup/initiate": {
+      "post": {
+        "tags": ["Credits"],
+        "summary": "Initiate credit top-up",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopupInitiateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment intent created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          }
+        }
+      }
+    },
+    "/credits/topup/confirm": {
+      "post": {
+        "tags": ["Credits"],
+        "summary": "Confirm top-up",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopupConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Top-up confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/credits/topup/webhook": {
+      "post": {
+        "tags": ["Credits"],
+        "summary": "Stripe webhook relay",
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook processed"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          }
+        }
+      }
+    },
+    "/credits/transactions": {
+      "get": {
+        "tags": ["Credits"],
+        "summary": "Get current user credit transactions",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transactions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/purchase/hold/{inventoryId}": {
+      "post": {
+        "tags": ["Purchase"],
+        "summary": "Hold a seat",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seat held",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Purchase"],
+        "summary": "Release a seat hold",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldReleaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hold released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/purchase/confirm/{inventoryId}": {
+      "post": {
+        "tags": ["Purchase"],
+        "summary": "Confirm a held seat purchase",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ticket created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "402": {
+            "$ref": "#/components/responses/Error402"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          }
+        }
+      }
+    },
+    "/tickets": {
+      "get": {
+        "tags": ["Tickets"],
+        "summary": "List current user's tickets",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{ticketId}/qr": {
+      "get": {
+        "tags": ["Tickets"],
+        "summary": "Generate fresh QR for ticket",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "QR generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/marketplace": {
+      "get": {
+        "tags": ["Marketplace"],
+        "summary": "Browse marketplace listings",
+        "security": [
+          {
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/list": {
+      "post": {
+        "tags": ["Marketplace"],
+        "summary": "Create marketplace listing",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketplaceListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Listing created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/{listingId}": {
+      "delete": {
+        "tags": ["Marketplace"],
+        "summary": "Cancel marketplace listing",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "listingId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/initiate": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Initiate transfer",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferInitiateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transfer created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/pending": {
+      "get": {
+        "tags": ["Transfer"],
+        "summary": "List pending transfers for seller",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/{transferId}": {
+      "get": {
+        "tags": ["Transfer"],
+        "summary": "Get transfer status",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/{transferId}/buyer-verify": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Buyer OTP verify",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Buyer verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/{transferId}/seller-accept": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Seller accepts transfer",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/{transferId}/seller-reject": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Seller rejects transfer",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/{transferId}/seller-verify": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Seller OTP verify and execute transfer saga",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "402": {
+            "$ref": "#/components/responses/Error402"
+          }
+        }
+      }
+    },
+    "/transfer/{transferId}/resend-otp": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Resend OTP based on current transfer state",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OTP resent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer/{transferId}/cancel": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Cancel transfer",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/verify/scan": {
+      "post": {
+        "tags": ["Verification"],
+        "summary": "Scan and validate QR ticket",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QrScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checked in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          }
+        }
+      }
+    },
+    "/verify/manual": {
+      "post": {
+        "tags": ["Verification"],
+        "summary": "Manual ticket verification",
+        "security": [
+          {
+            "BearerAuth": [],
+            "GatewayApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualVerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checked in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/credits": {
+      "post": {
+        "tags": ["External Credit Service"],
+        "summary": "Create or initialize credit record",
+        "servers": [
+          {
+            "url": "https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI",
+            "description": "OutSystems credit service"
+          }
+        ],
+        "security": [
+          {
+            "OutSystemsApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalCreateCreditRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credit record created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalCreditResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/credits/{user_id}": {
+      "get": {
+        "tags": ["External Credit Service"],
+        "summary": "Get credit balance",
+        "servers": [
+          {
+            "url": "https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI",
+            "description": "OutSystems credit service"
+          }
+        ],
+        "security": [
+          {
+            "OutSystemsApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Balance returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalCreditResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["External Credit Service"],
+        "summary": "Replace credit balance",
+        "servers": [
+          {
+            "url": "https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI",
+            "description": "OutSystems credit service"
+          }
+        ],
+        "security": [
+          {
+            "OutSystemsApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalUpdateCreditRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Balance updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalCreditResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "GatewayApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "apikey"
+      },
+      "OutSystemsApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-KEY"
+      }
+    },
+    "responses": {
+      "Error400": {
+        "description": "Bad request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error401": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error402": {
+        "description": "Payment or credit issue",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error403": {
+        "description": "Forbidden",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error404": {
+        "description": "Not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error409": {
+        "description": "Conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error410": {
+        "description": "Gone",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "DataEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "integer"
+              },
+              "traceId": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["error"]
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "password", "phoneNumber"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string"
+          },
+          "phoneNumber": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "venueId": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "AdminEventRequest": {
+        "type": "object",
+        "required": ["name", "type", "venueId", "event_date"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "venueId": {
+            "type": "string"
+          },
+          "event_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "pricing_tiers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "TopupInitiateRequest": {
+        "type": "object",
+        "required": ["amount"],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "TopupConfirmRequest": {
+        "type": "object",
+        "required": ["paymentIntentId"],
+        "properties": {
+          "paymentIntentId": {
+            "type": "string"
+          }
+        }
+      },
+      "HoldReleaseRequest": {
+        "type": "object",
+        "required": ["holdToken"],
+        "properties": {
+          "holdToken": {
+            "type": "string"
+          }
+        }
+      },
+      "PurchaseConfirmRequest": {
+        "type": "object",
+        "required": ["eventId", "holdToken"],
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "holdToken": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketplaceListRequest": {
+        "type": "object",
+        "required": ["ticketId"],
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          }
+        }
+      },
+      "TransferInitiateRequest": {
+        "type": "object",
+        "required": ["listingId"],
+        "properties": {
+          "listingId": {
+            "type": "string"
+          }
+        }
+      },
+      "OtpRequest": {
+        "type": "object",
+        "required": ["otp"],
+        "properties": {
+          "otp": {
+            "type": "string"
+          }
+        }
+      },
+      "QrScanRequest": {
+        "type": "object",
+        "required": ["qrHash"],
+        "properties": {
+          "qrHash": {
+            "type": "string"
+          }
+        }
+      },
+      "ManualVerifyRequest": {
+        "type": "object",
+        "required": ["ticketId"],
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          }
+        }
+      },
+      "ExternalCreateCreditRequest": {
+        "type": "object",
+        "required": ["userId", "creditBalance"],
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "creditBalance": {
+            "type": "number"
+          }
+        }
+      },
+      "ExternalUpdateCreditRequest": {
+        "type": "object",
+        "required": ["creditBalance"],
+        "properties": {
+          "creditBalance": {
+            "type": "number"
+          }
+        }
+      },
+      "ExternalCreditResponse": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "creditBalance": {
+            "type": "number"
+          },
+          "lastToppedUpAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

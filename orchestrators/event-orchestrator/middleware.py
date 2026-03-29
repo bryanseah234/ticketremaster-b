@@ -48,3 +48,23 @@ def require_staff(f):
             return _error("AUTH_FORBIDDEN", "Staff or admin role required.", 403)
         return f(*args, **kwargs)
     return decorated
+
+
+def require_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return _error("AUTH_MISSING_TOKEN", "Authorization header missing or malformed.", 401)
+        token = auth[len("Bearer "):]
+        try:
+            payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
+            request.user = payload
+        except jwt.ExpiredSignatureError:
+            return _error("AUTH_TOKEN_EXPIRED", "Token has expired.", 401)
+        except jwt.InvalidTokenError:
+            return _error("AUTH_MISSING_TOKEN", "Token is invalid.", 401)
+        if payload.get("role") != "admin":
+            return _error("AUTH_FORBIDDEN", "Admin role required.", 403)
+        return f(*args, **kwargs)
+    return decorated

@@ -101,7 +101,10 @@ def register():
         return _error(err, "Could not create user account.", 400)
 
     # Initialise credit balance in OutSystems
-    _, credit_err = call_credit_service("POST", "/credits", json={"userId": user_data["userId"]})
+    _, credit_err = call_credit_service("POST", "/credits", json={
+        "userId": user_data["userId"],
+        "creditBalance": 0,
+    })
     if credit_err:
         # Compensating action — delete the user we just created
         call_service("DELETE", f"{USER_SERVICE}/users/{user_data['userId']}")

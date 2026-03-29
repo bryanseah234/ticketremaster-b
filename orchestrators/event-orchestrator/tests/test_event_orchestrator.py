@@ -1,5 +1,9 @@
 """Tests for event-orchestrator."""
+import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+
+import jwt
 
 
 MOCK_EVENT = {"eventId": "evt_001", "venueId": "ven_001", "name": "Symphony Night",
@@ -19,6 +23,23 @@ MOCK_SEATS = {"seats": [
 ]}
 
 
+def _token(role="user"):
+    return jwt.encode(
+        {
+            "userId": "usr_001",
+            "email": "admin@ticketremaster.local",
+            "role": role,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        },
+        os.environ["JWT_SECRET"],
+        algorithm="HS256",
+    )
+
+
+def _auth(role="user"):
+    return {"Authorization": f"Bearer {_token(role)}"}
+
+
 def test_health(client):
     assert client.get("/health").status_code == 200
 
@@ -26,7 +47,7 @@ def test_health(client):
 @patch("routes.call_service")
 def test_list_events(mock_svc, client):
     mock_svc.side_effect = [
-        ({"events": [MOCK_EVENT]}, None),
+        ({"events": [MOCK_EVENT], "pagination": {"page": 1, "limit": 20, "total": 1}}, None),
         (MOCK_VENUE, None),
         (MOCK_INV,   None),
     ]
@@ -34,6 +55,7 @@ def test_list_events(mock_svc, client):
     assert res.status_code == 200
     data = res.get_json()["data"]
     assert len(data["events"]) == 1
+    assert data["pagination"] == {"page": 1, "limit": 20, "total": 1}
     assert data["events"][0]["seatsAvailable"] == 1
     assert data["events"][0]["venue"]["name"] == "Esplanade"
 
@@ -89,5 +111,45 @@ def test_events_no_auth_required(client):
     """All event endpoints are public."""
     # No Authorization header — should not 401
     with patch("routes.call_service") as mock_svc:
-        mock_svc.return_value = ({"events": []}, None)
+        mock_svc.return_value = ({"events": [], "pagination": {"page": 1, "limit": 20, "total": 0}}, None)
         assert client.get("/events").status_code == 200
+
+
+def test_admin_event_requires_token(client):
+    res = client.post("/admin/events", json={"name": "Concert"})
+
+    assert res.status_code == 401
+    assert res.get_json()["error"]["code"] == "AUTH_MISSING_TOKEN"
+
+
+def test_admin_event_requires_admin_role(client):
+    res = client.post("/admin/events", json={"name": "Concert"}, headers=_auth("staff"))
+
+    assert res.status_code == 403
+    assert res.get_json()["error"]["code"] == "AUTH_FORBIDDEN"
+
+
+@patch("routes.call_service")
+def test_admin_event_accepts_admin_role(mock_svc, client):
+    mock_svc.side_effect = [
+        (MOCK_VENUE, None),
+        (MOCK_EVENT, None),
+        (MOCK_SEATS, None),
+        ({"created": 3}, None),
+    ]
+
+    res = client.post(
+        "/admin/events",
+        json={
+            "venueId": "ven_001",
+            "name": "Symphony Night",
+            "event_date": "2025-03-20T19:30:00",
+            "description": "Test",
+            "pricing_tiers": {"standard": 80},
+            "type": "orchestra",
+        },
+        headers=_auth("admin"),
+    )
+
+    assert res.status_code == 201
+    assert res.get_json()["data"]["seatsCreated"] == 3

@@ -19,7 +19,10 @@ def test_health_check(client):
 def test_list_events_empty(client):
     response = client.get("/events")
     assert response.status_code == 200
-    assert response.get_json() == {"events": []}
+    assert response.get_json() == {
+        "events": [],
+        "pagination": {"page": 1, "limit": 20, "total": 0},
+    }
 
 
 def test_create_event(client):
@@ -72,6 +75,7 @@ def test_list_events_returns_created_events(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert len(payload["events"]) == 2
+    assert payload["pagination"] == {"page": 1, "limit": 20, "total": 2}
     assert payload["events"][0]["name"] == "Event One"
     assert payload["events"][1]["name"] == "Event Two"
 
@@ -90,4 +94,36 @@ def test_list_excludes_detail_fields(client):
     assert "name" in event
     assert "type" in event
     assert "price" in event
+
+
+def test_list_events_filters_by_type(client):
+    client.post("/events", json=event_data("Concert Event", type="concert"))
+    client.post("/events", json=event_data("Sport Event", type="sports"))
+
+    response = client.get("/events?type=concert")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["pagination"] == {"page": 1, "limit": 20, "total": 1}
+    assert [event["name"] for event in payload["events"]] == ["Concert Event"]
+
+
+def test_list_events_paginates(client):
+    client.post("/events", json=event_data("Event One", date="2025-06-15T19:30:00"))
+    client.post("/events", json=event_data("Event Two", date="2025-06-16T19:30:00"))
+    client.post("/events", json=event_data("Event Three", date="2025-06-17T19:30:00"))
+
+    response = client.get("/events?page=2&limit=1")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["pagination"] == {"page": 2, "limit": 1, "total": 3}
+    assert [event["name"] for event in payload["events"]] == ["Event Two"]
+
+
+def test_list_events_rejects_invalid_page(client):
+    response = client.get("/events?page=0")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "VALIDATION_ERROR"
 
