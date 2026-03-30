@@ -25,6 +25,15 @@ def init_sentry(
         traces_sample_rate: Sample rate for performance tracing (0.0-1.0)
     """
     dsn = os.getenv("SENTRY_DSN")
+    env = os.getenv("APP_ENV", "development")
+    
+    # Fail fast in production if Sentry not configured
+    if env == "production" and not dsn:
+        raise RuntimeError(
+            "SENTRY_DSN environment variable is required in production. "
+            "Set it to your Sentry project DSN or set APP_ENV=development to skip."
+        )
+    
     if not dsn:
         # Sentry not configured, skip initialization
         return

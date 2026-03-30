@@ -9,3 +9,4 @@ sentry-sdk[flask]==2.20.0
 redis==5.2.1
 pydantic==2.10.4
 urllib3>=2.0.0,<3.0.0
+posthog==3.0.0
