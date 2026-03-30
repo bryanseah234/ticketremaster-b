@@ -532,6 +532,21 @@ services:
       retries: 5
       start_period: 15s
 
+  notification-service:
+    <<: [*service-defaults, *flask-healthcheck]
+    build:
+      context: ./services/notification-service
+    ports:
+      - "8109:8109"
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET}
+      SENTRY_DSN: ${SENTRY_DSN}
+      FRONTEND_URL: http://localhost:5173
+    depends_on:
+      redis:
+        condition: service_healthy
+
 networks:
   ticketremaster:
     driver: bridge

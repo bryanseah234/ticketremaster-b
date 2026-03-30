@@ -1,10 +1,20 @@
+import os
+import sys
+
 from flask import Flask, jsonify
 from dotenv import load_dotenv
 from flasgger import Swagger
 
+load_dotenv()
+
+# Initialize Sentry for error tracking and performance monitoring
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+from sentry import init_sentry
+
+init_sentry(service_name="auth-orchestrator")
+
 
 def create_app(test_config=None):
-    load_dotenv()
     app = Flask(__name__)
     app.config.update(
         JSON_SORT_KEYS=False,

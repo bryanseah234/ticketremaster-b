@@ -1,11 +1,25 @@
+import os
+import sys
+
 from flask import Flask, jsonify
 from dotenv import load_dotenv
 from flasgger import Swagger
 
+load_dotenv()
+
+# Initialize Sentry for error tracking and performance monitoring
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+from sentry import init_sentry
+
+init_sentry(service_name="event-orchestrator")
+
+
 def create_app(test_config=None):
-    load_dotenv()
     app = Flask(__name__)
-    app.config.update(JSON_SORT_KEYS=False, TESTING=False)
+    app.config.update(
+        JSON_SORT_KEYS=False,
+        TESTING=False,
+    )
     if test_config:
         app.config.update(test_config)
 
@@ -13,7 +27,15 @@ def create_app(test_config=None):
         "title": "Event Orchestrator",
         "uiversion": 3,
         "version": "1.0.0",
-        "description": "Public event browsing — no authentication required.",
+        "description": "Event management — list, create, and manage events with venues and seats.",
+        "securityDefinitions": {
+            "BearerAuth": {
+                "type": "apiKey",
+                "name": "Authorization",
+                "in": "header",
+                "description": "Enter: Bearer <your_token>",
+            }
+        },
     }
     Swagger(app)    
 

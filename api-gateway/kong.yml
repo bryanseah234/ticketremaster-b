@@ -195,6 +195,36 @@ services:
               hide_credentials: true
               run_on_preflight: false
 
+  - name: notification-service
+    url: http://notification-service:8109
+    routes:
+      - name: notification-health-route
+        paths:
+          - /notifications/health
+        strip_path: false
+      - name: notification-stats-route
+        paths:
+          - /notifications/stats
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+      - name: notification-broadcast-route
+        paths:
+          - /notifications/broadcast
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+
 # ── CONSUMERS ───────────────────────
 consumers:
   - username: frontend_app

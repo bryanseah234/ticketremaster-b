@@ -1,18 +1,23 @@
 from datetime import datetime
+from typing import Optional, Tuple
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy import func
 
 from app import db
 from models import Event
 
 bp = Blueprint('events', __name__)
 
+# Valid event types
+VALID_EVENT_TYPES = {'concert', 'sports', 'theater', 'conference', 'festival', 'other'}
 
-def error_response(status_code, code, message):
+
+def error_response(status_code: int, code: str, message: str) -> Tuple[dict, int]:
     return jsonify({'error': {'code': code, 'message': message}}), status_code
 
 
-def parse_datetime(value):
+def parse_datetime(value: Optional[str]) -> Optional[datetime]:
     """Parse ISO datetime string to datetime object."""
     if not value:
         return None
@@ -60,6 +65,150 @@ def list_events():
             'total': total,
         },
     }), 200
+
+
+@bp.post('/admin/events/<event_id>/publish')
+def publish_event(event_id: str):
+    """Admin endpoint to publish an event (make it visible to public)."""
+    event = db.session.get(Event, event_id)
+    if not event:
+        return error_response(404, 'EVENT_NOT_FOUND', 'Event not found')
+
+    if event.cancelledAt is not None:
+        return error_response(400, 'EVENT_CANCELLED', 'Cannot publish a cancelled event')
+
+    # Check if event date is in the past
+    if event.date < datetime.now(datetime.timezone.utc):
+        return error_response(400, 'EVENT_IN_PAST', 'Cannot publish an event that has already passed')
+
+    # Mark as published (using updatedAt as a simple publish indicator)
+    event.updatedAt = datetime.now(datetime.timezone.utc)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Event published successfully',
+        'event': event.to_dict()
+    }), 200
+
+
+@bp.post('/admin/events/<event_id>/duplicate')
+def duplicate_event(event_id: str):
+    """Admin endpoint to duplicate an event."""
+    event = db.session.get(Event, event_id)
+    if not event:
+        return error_response(404, 'EVENT_NOT_FOUND', 'Event not found')
+
+    data = request.get_json(silent=True) or {}
+    new_name = data.get('name', f"{event.name} (Copy)")
+
+    new_event = Event(
+        venueId=event.venueId,
+        name=new_name,
+        date=event.date,
+        description=event.description,
+        type=event.type,
+        image=event.image,
+        price=event.price,
+    )
+    db.session.add(new_event)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Event duplicated successfully',
+        'event': new_event.to_dict()
+    }), 201
+
+
+@bp.get('/events/upcoming')
+def list_upcoming_events():
+    """Get upcoming events (not cancelled, date in future)."""
+    page = request.args.get('page', default=1, type=int)
+    limit = request.args.get('limit', default=20, type=int)
+    event_type = request.args.get('type', type=str)
+
+    if page < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'page must be >= 1')
+    if limit < 1 or limit > 100:
+        return error_response(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
+
+    now = datetime.now(datetime.timezone.utc)
+    query = Event.query.filter(
+        Event.cancelledAt.is_(None),
+        Event.date >= now
+    )
+
+    if event_type:
+        query = query.filter(Event.type.ilike(event_type.strip()))
+
+    total = query.count()
+    events = (
+        query.order_by(Event.date.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    return jsonify({
+        'events': [e.to_dict(summary=True) for e in events],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+        },
+    }), 200
+
+
+@bp.get('/events/search')
+def search_events():
+    """Search events by name or description."""
+    query_param = request.args.get('q', default='', type=str)
+    page = request.args.get('page', default=1, type=int)
+    limit = request.args.get('limit', default=20, type=int)
+
+    if not query_param:
+        return error_response(400, 'VALIDATION_ERROR', 'Search query "q" is required')
+
+    if page < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'page must be >= 1')
+    if limit < 1 or limit > 100:
+        return error_response(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
+
+    search_term = f"%{query_param.strip()}%"
+    query = Event.query.filter(
+        Event.cancelledAt.is_(None),
+        (Event.name.ilike(search_term)) | (Event.description.ilike(search_term))
+    )
+
+    total = query.count()
+    events = (
+        query.order_by(Event.date.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    return jsonify({
+        'events': [e.to_dict(summary=True) for e in events],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+        },
+    }), 200
+
+
+@bp.get('/events/types')
+def list_event_types():
+    """Get list of available event types."""
+    types = [
+        {'value': 'concert', 'label': 'Concert'},
+        {'value': 'sports', 'label': 'Sports'},
+        {'value': 'theater', 'label': 'Theater'},
+        {'value': 'conference', 'label': 'Conference'},
+        {'value': 'festival', 'label': 'Festival'},
+        {'value': 'other', 'label': 'Other'},
+    ]
+    return jsonify({'types': types}), 200
 
 
 @bp.get('/events/<event_id>')

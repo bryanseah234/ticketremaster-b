@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy.exc import IntegrityError
 import secrets
 from datetime import datetime, timezone, timedelta
+from typing import Optional, Tuple
 
 from app import db
 from models import User, PasswordResetToken
@@ -9,13 +10,17 @@ from models import User, PasswordResetToken
 bp = Blueprint('users', __name__)
 
 
-@bp.get('/health')
-def health():
-    return jsonify({'status': 'ok'}), 200
+def error_response(status_code: int, code: str, message: str) -> Tuple[dict, int]:
+    return jsonify({'error': {'code': code, 'message': message}}), status_code
 
 
 REQUIRED_FIELDS = ('email', 'password', 'salt', 'phoneNumber')
 UPDATABLE_FIELDS = {'email', 'password', 'salt', 'phoneNumber', 'role', 'isFlagged', 'venueId'}
+
+
+@bp.get('/health')
+def health():
+    return jsonify({'status': 'ok'}), 200
 
 
 def error_response(status_code, code, message):
@@ -275,3 +280,101 @@ def verify_reset_token():
         return jsonify({'valid': False, 'reason': 'expired'}), 200
 
     return jsonify({'valid': True}), 200
+
+
+@bp.get('/admin/users/flagged')
+def list_flagged_users():
+    """Admin endpoint to list all flagged users."""
+    page = request.args.get('page', default=1, type=int)
+    limit = request.args.get('limit', default=20, type=int)
+
+    if page < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'page must be >= 1')
+    if limit < 1 or limit > 100:
+        return error_response(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
+
+    query = User.query.filter(User.isFlagged == True)
+
+    total = query.count()
+    users = (
+        query.order_by(User.createdAt.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    return jsonify({
+        'users': [u.to_dict() for u in users],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+        },
+    }), 200
+
+
+@bp.patch('/admin/users/<user_id>/unflag')
+def admin_unflag_user(user_id: str):
+    """Admin endpoint to unflag a user."""
+    user = db.session.get(User, user_id)
+    if not user:
+        return error_response(404, 'USER_NOT_FOUND', 'User not found')
+
+    if not user.isFlagged:
+        return error_response(400, 'USER_NOT_FLAGGED', 'User is not flagged')
+
+    user.isFlagged = False
+    db.session.commit()
+
+    return jsonify({
+        'message': 'User unflagged successfully',
+        'user': user.to_dict()
+    }), 200
+
+
+@bp.get('/admin/users/<user_id>')
+def admin_get_user(user_id: str):
+    """Admin endpoint to get full user details."""
+    user = db.session.get(User, user_id)
+    if not user:
+        return error_response(404, 'USER_NOT_FOUND', 'User not found')
+
+    return jsonify(user.to_dict(include_sensitive=True)), 200
+
+
+@bp.get('/admin/users/search')
+def admin_search_users():
+    """Admin endpoint to search users by email or phone."""
+    query_param = request.args.get('q', default='', type=str)
+    page = request.args.get('page', default=1, type=int)
+    limit = request.args.get('limit', default=20, type=int)
+
+    if not query_param:
+        return error_response(400, 'VALIDATION_ERROR', 'Search query "q" is required')
+
+    if page < 1:
+        return error_response(400, 'VALIDATION_ERROR', 'page must be >= 1')
+    if limit < 1 or limit > 100:
+        return error_response(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
+
+    search_term = f"%{query_param.strip()}%"
+    query = User.query.filter(
+        (User.email.ilike(search_term)) | (User.phoneNumber.ilike(search_term))
+    )
+
+    total = query.count()
+    users = (
+        query.order_by(User.createdAt.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    return jsonify({
+        'users': [u.to_dict() for u in users],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+        },
+    }), 200

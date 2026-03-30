@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -12,6 +13,12 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.exceptions import HTTPException
 
 load_dotenv()
+
+# Initialize Sentry for error tracking and performance monitoring
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+from sentry import init_sentry
+
+init_sentry(service_name="event-service")
 
 db = SQLAlchemy()
 migrate = Migrate()
