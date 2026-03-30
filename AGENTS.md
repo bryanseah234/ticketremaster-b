@@ -1,215 +1,175 @@
-# TicketRemaster Backend - AI Agent Guidelines
+---
+description: Central configuration and documentation for all AI coding agents across repositories
+---
 
-This document provides guidance for AI agents working with the TicketRemaster backend codebase.
+# AI Agents Configuration
 
-## Project Overview
+This file defines how AI coding agents (Cursor, Antigravity, Claude Code, GitHub Copilot, etc.) should behave across all repositories in this workspace.
 
-TicketRemaster is a Flask-based microservice architecture for event ticketing with:
-- 8 browser-facing orchestrators
-- 12 atomic services and wrappers
-- 1 notification service for real-time WebSocket updates
-- 10 isolated PostgreSQL databases
-- Redis for caching and pub/sub
-- RabbitMQ for async workflows
-- Kong API Gateway
-- Kubernetes deployment manifests
+## Agent Types and Roles
 
-## Key Architecture Principles
+### 1. Primary Coding Agent (Cursor/Claude Code)
+**Purpose**: Main development assistant for code changes
+**Capabilities**: Full codebase access, file editing, terminal commands
+**Behavior**: Follows all conventions in this file
 
-1. **Service Isolation**: Each service owns its database and is accessed only through its API
-2. **Orchestrator Pattern**: Orchestrators aggregate data from multiple services for frontend consumption
-3. **Async First**: Long-running operations use RabbitMQ for reliability
-4. **Real-time Updates**: WebSocket notifications for immediate UI updates
-5. **Idempotency**: All state-changing operations support idempotency keys
-6. **Graceful Degradation**: Services handle failures with retries and circuit breakers
+### 2. Review Agent (GitHub PR Review)
+**Purpose**: Automated code review on pull requests
+**Capabilities**: Read-only access to PR changes
+**Behavior**: Strict adherence to coding standards
 
-## Code Organization
+### 3. Documentation Agent
+**Purpose**: Maintains and updates documentation
+**Capabilities**: Can modify markdown files
+**Behavior**: Never creates new docs without explicit request
 
-```
-ticketremaster-b/
-├── api-gateway/           # Kong configuration
-├── k8s/base/              # Kubernetes manifests
-├── orchestrators/         # 8 orchestrator services
-│   ├── auth-orchestrator/
-│   ├── credit-orchestrator/
-│   ├── event-orchestrator/
-│   ├── marketplace-orchestrator/
-│   ├── qr-orchestrator/
-│   ├── ticket-purchase-orchestrator/
-│   ├── ticket-verification-orchestrator/
-│   └── transfer-orchestrator/
-├── services/              # 12 atomic services
-│   ├── credit-transaction-service/
-│   ├── event-service/
-│   ├── marketplace-service/
-│   ├── notification-service/  # NEW: WebSocket notifications
-│   ├── otp-wrapper/
-│   ├── seat-inventory-service/
-│   ├── seat-service/
-│   ├── stripe-wrapper/
-│   ├── ticket-log-service/
-│   ├── ticket-service/
-│   ├── transfer-service/
-│   ├── user-service/
-│   └── venue-service/
-├── shared/                # Shared libraries
-│   ├── sentry.py          # Sentry integration
-│   ├── graceful_shutdown.py
-│   └── requirements.txt
-├── docker-compose.yml     # Local development
-└── .env                   # Environment configuration
-```
+### 4. Security Agent (TruffleHog, CodeQL)
+**Purpose**: Security scanning and vulnerability detection
+**Capabilities**: Full codebase scan
+**Behavior**: Blocks PRs on security issues
 
-## Common Patterns
+## Universal Rules (Apply to All Agents)
 
-### Error Handling
+### 1. File Operations
+- **NEVER** create new markdown files without explicit user request
+- **ALWAYS** update existing documentation when possible
+- **NEVER** delete files without confirmation
+- **ALWAYS** preserve file history and git history
 
-All services use a consistent error response format:
+### 2. Code Style
+- Follow language-specific conventions (see skill files)
+- Use consistent naming patterns
+- Keep functions small and focused
+- Add type hints for Python, TypeScript interfaces for JS
 
-```python
-def error_response(status_code, code, message):
-    return jsonify({'error': {'code': code, 'message': message}}), status_code
-```
+### 3. Git Conventions
+- Commit messages: `type: description`
+- Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `style`
+- Keep commits atomic and focused
+- Never force push to main branches
 
-### Database Access
+### 4. Communication
+- Be concise and direct
+- Explain complex changes briefly
+- Admit uncertainty when present
+- Ask for clarification when requirements are ambiguous
 
-Services use SQLAlchemy with Flask-SQLAlchemy:
+## Repository-Specific Overrides
 
-```python
-from app import db
-from models import Event
+### source-repo-code (Template/Source)
+- **Purpose**: Source of truth for shared configurations
+- **Special Rules**: Changes here should be synced to all repos
 
-# Query
-events = Event.query.filter_by(type='concert').all()
+## Skill System
 
-# Create
-event = Event(name='Concert', date='2025-06-15')
-db.session.add(event)
-db.session.commit()
-```
+Skills are modular documentation files that teach agents specific patterns for each repository. They are located in `.github/skills/` folders.
 
-### Sentry Integration
+### Available Skills
+1. **flask-service**: REST endpoint patterns
+2. **database-models**: SQLAlchemy and migration conventions
+3. **grpc-service**: gRPC proto and stub management
+4. **orchestrator-flow**: Saga pattern and multi-step flows
+5. **qr-encryption**: QR generation and verification
+6. **error-handling**: Error response patterns
+7. **vercel-deployment**: Vercel configuration and edge function patterns
+8. **shell-scripting**: Bash, sh, and PowerShell best practices
+9. **ai-agent-interaction**: Guidelines for AI Coding Agents
+10. **git-best-practices**: Universal Git workflows, Conventional Commits, and branch management
+11. **clean-code-principles**: Language-agnostic principles for writing maintainable code
+12. **multi-agent-orchestration**: Delegating tasks to specialized sub-agents (Explorer, Oracle, Designer, Builder)
+13. **mcp-tool-integration**: Best practices for using Model Context Protocol (MCP) servers and external tools
 
-All services initialize Sentry:
+### Skill Format
+Each skill file follows this structure:
+```markdown
+---
+name: skill-name
+description: Brief description of what this skill teaches
+---
 
-```python
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
-from sentry import init_sentry
+# Skill Title
 
-init_sentry(service_name="my-service")
+## When to Use
+[Context for when this skill applies]
+
+## Step-by-Step
+[Detailed instructions with code examples]
+
+## References
+[Links to related documentation]
 ```
 
-### Broadcasting Notifications
+## Agent Workflows
 
-Services broadcast events to the notification service:
+Agent workflows are step-by-step instructions for common tasks. They are located in `.agents/workflows/` folders.
 
-```python
-import requests
+### Available Workflows
+- **start-backend.md**: How to start the ticketremaster-b backend stack
+- **system.md**: DejaVista system initialization
+- **standard-pr-process.md**: Standard process for creating, reviewing, and merging Pull Requests
 
-def broadcast_event(event_type, payload, trace_id=None):
-    requests.post('http://notification-service:8109/notifications/broadcast', json={
-        'type': event_type,
-        'payload': payload,
-        'traceId': trace_id
-    })
+### Workflow Format
+```markdown
+---
+description: Brief description of the workflow
+---
+
+// workflow-command-or-tag
+
+## Steps
+1. [Step-by-step instructions]
+2. [Include verification steps]
+3. [Include troubleshooting if needed]
 ```
 
-## Testing
+## Syncing Strategy
 
-### Unit Tests
+### Source of Truth
+- **Primary**: `source-repo-code` repository for shared configurations (`agents.md`, `.github/skills/`, `.agents/workflows/`)
+- **Secondary**: Individual repository overrides
 
-```bash
-pytest services/user-service/tests/
-```
+### Sync Process
+1. Changes to shared configurations should be made in `source-repo-code`
+2. Pushing to `main` in `source-repo-code` will trigger a GitHub Action to propagate changes to all repositories
+3. The sync workflow automatically updates all configuration files across the workspace
 
-### Integration Tests
+### New Repository Setup
+When creating a new repository:
+1. Copy `.github/skills/` from `source-repo-code`
+2. Copy `.agents/workflows/` if applicable
+3. Add repository-specific overrides if needed
+4. Run sync verification
 
-```bash
-docker compose up -d
-pytest --integration
-```
+## Maintenance
 
-### API Testing
+### Quarterly Reviews
+- Review and update skill files
+- Check for outdated action versions
+- Verify agent behavior consistency
+- Update this configuration as needed
 
-Use Postman collection in `postman/` directory or Swagger UI at `http://localhost:810X/apidocs`.
+### Automated Monitoring
+- Use Dependabot for dependency updates
+- Use TruffleHog for secret scanning
+- Use custom scripts to detect outdated GitHub Actions
 
-## Deployment
+## Troubleshooting
 
-### Local Development
+### Agent Not Following Conventions
+1. Check repository-specific overrides in this file
+2. Verify skill files are present and up-to-date
+3. Review recent changes to conventions
+4. Re-sync configurations from source
 
-```bash
-docker compose up -d --build
-```
+### Sync Failures
+1. Run sync script with `--dry-run` flag
+2. Check for git conflicts in target repositories
+3. Verify file permissions
+4. Review sync logs for specific errors
 
-### Kubernetes
+## References
 
-```bash
-kubectl apply -k k8s/base
-```
-
-### Environment Variables
-
-Required variables are documented in `.env.example`. Key variables:
-- `SENTRY_DSN` - Error tracking
-- `JWT_SECRET` - Token signing
-- `DATABASE_URL` - Service database connection
-- `REDIS_URL` - Cache and pub/sub
-- `RABBITMQ_HOST` - Message queue
-
-## Debugging
-
-### Check Service Health
-
-```bash
-curl http://localhost:5000/health
-```
-
-### View Logs
-
-```bash
-docker compose logs -f service-name
-```
-
-### Database Access
-
-```bash
-docker compose exec user-service-db psql -U ticketremaster -d user_service
-```
-
-### Redis CLI
-
-```bash
-docker compose exec redis redis-cli
-```
-
-## Common Issues
-
-### Service Won't Start
-
-1. Check `.env` file for required variables
-2. Verify database is running: `docker compose ps`
-3. Check logs: `docker compose logs service-name`
-
-### Database Migration Fails
-
-```bash
-docker compose run --rm service-name python -m flask --app app.py db upgrade
-```
-
-### Sentry Not Receiving Data
-
-1. Verify `SENTRY_DSN` is set
-2. Check `sentry-sdk` is installed
-3. Test with `sentry_sdk.capture_message("test")`
-
-## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| [README.md](README.md) | System overview |
-| [API.md](API.md) | API reference |
-| [COMPLETE_SYSTEM_DOCUMENTATION.md](COMPLETE_SYSTEM_DOCUMENTATION.md) | Full architecture |
-| [TESTING.md](TESTING.md) | Testing guide |
-| [services/notification-service/NOTIFICATIONS.md](services/notification-service/NOTIFICATIONS.md) | WebSocket events |
+- [GitHub Skills Documentation](https://docs.github.com/en/contributing/collaborating-with-github-docs/using-skills)
+- [Cursor AI Documentation](https://docs.cursor.com/)
+- [Claude Code Documentation](https://docs.anthropic.com/claude/code)
+- [Dependabot Configuration](https://docs.github.com/en/code-security/dependabot)
