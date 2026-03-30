@@ -1,7 +1,6 @@
 from urllib.parse import urljoin
 import logging
 import os
-import time
 
 import redis
 import requests
