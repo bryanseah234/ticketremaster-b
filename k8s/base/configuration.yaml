@@ -205,9 +205,24 @@ data:
             paths:
               - /webhooks/stripe
             strip_path: false
+          - name: api-stripe-webhook-route
+            paths:
+              - /api/webhooks/stripe
+            strip_path: false
           - name: users-route
             paths:
               - /users
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+          - name: api-users-route
+            paths:
+              - /api/users
             strip_path: false
             plugins:
               - name: key-auth
@@ -226,7 +241,7 @@ data:
           - name: api-events-route
             paths:
               - /api/events
-            strip_path: false
+            strip_path: true
           - name: admin-event-route
             paths:
               - /admin/events
@@ -324,12 +339,34 @@ data:
                     - apikey
                   hide_credentials: true
                   run_on_preflight: false
+          - name: api-transfer-route
+            paths:
+              - /api/transfer
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
       - name: credit-orchestrator
         url: http://credit-orchestrator.ticketremaster-core.svc.cluster.local:5000
         routes:
           - name: credit-route
             paths:
               - /credits
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+          - name: api-credit-route
+            paths:
+              - /api/credits
             strip_path: false
             plugins:
               - name: key-auth
@@ -352,12 +389,34 @@ data:
                     - apikey
                   hide_credentials: true
                   run_on_preflight: false
+          - name: api-purchase-route
+            paths:
+              - /api/purchase
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
       - name: qr-orchestrator
         url: http://qr-orchestrator.ticketremaster-core.svc.cluster.local:5000
         routes:
           - name: tickets-route
             paths:
               - /tickets
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+          - name: api-tickets-route
+            paths:
+              - /api/tickets
             strip_path: false
             plugins:
               - name: key-auth
@@ -377,12 +436,34 @@ data:
                     - apikey
                   hide_credentials: true
                   run_on_preflight: false
+          - name: api-qr-tickets-route
+            paths:
+              - /api/qr/tickets
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
       - name: ticket-verification-orchestrator
         url: http://ticket-verification-orchestrator.ticketremaster-core.svc.cluster.local:5000
         routes:
           - name: verify-route
             paths:
               - /verify
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+          - name: api-verify-route
+            paths:
+              - /api/verify
             strip_path: false
             plugins:
               - name: key-auth
