@@ -147,9 +147,56 @@ data:
                 config:
                   minute: 5
                   policy: local
+          - name: api-auth-register-route
+            paths:
+              - /api/auth/register
+            strip_path: false
+            plugins:
+              - name: rate-limiting
+                config:
+                  minute: 5
+                  policy: local
+          - name: auth-login-route
+            paths:
+              - /auth/login
+            strip_path: false
+            plugins:
+              - name: rate-limiting
+                config:
+                  minute: 10
+                  policy: local
+          - name: api-auth-login-route
+            paths:
+              - /api/auth/login
+            strip_path: false
+            plugins:
+              - name: rate-limiting
+                config:
+                  minute: 10
+                  policy: local
+          - name: auth-verify-route
+            paths:
+              - /auth/verify-registration
+            strip_path: false
+          - name: api-auth-verify-route
+            paths:
+              - /api/auth/verify-registration
+            strip_path: false
+          - name: auth-me-route
+            paths:
+              - /auth/me
+            strip_path: false
+          - name: api-auth-me-route
+            paths:
+              - /api/auth/me
+            strip_path: false
           - name: auth-route
             paths:
               - /auth
+            strip_path: false
+          - name: api-auth-route
+            paths:
+              - /api/auth
             strip_path: false
       - name: user-service
         url: http://user-service.ticketremaster-core.svc.cluster.local:5000
@@ -158,6 +205,17 @@ data:
             paths:
               - /webhooks/stripe
             strip_path: false
+          - name: users-route
+            paths:
+              - /users
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
       - name: event-orchestrator
         url: http://event-orchestrator.ticketremaster-core.svc.cluster.local:5000
         routes:
@@ -165,13 +223,25 @@ data:
             paths:
               - /events
             strip_path: false
+          - name: api-events-route
+            paths:
+              - /api/events
+            strip_path: false
           - name: admin-event-route
             paths:
               - /admin/events
             strip_path: false
+          - name: api-admin-events-route
+            paths:
+              - /api/admin/events
+            strip_path: false
           - name: venue-route
             paths:
               - /venues
+            strip_path: false
+          - name: api-venues-route
+            paths:
+              - /api/venues
             strip_path: false
       - name: marketplace-orchestrator
         url: http://marketplace-orchestrator.ticketremaster-core.svc.cluster.local:5000
@@ -179,6 +249,12 @@ data:
           - name: marketplace-browse-route
             paths:
               - /marketplace
+            methods:
+              - GET
+            strip_path: false
+          - name: api-marketplace-browse-route
+            paths:
+              - /api/marketplace
             methods:
               - GET
             strip_path: false
@@ -195,9 +271,35 @@ data:
                     - apikey
                   hide_credentials: true
                   run_on_preflight: false
+          - name: api-marketplace-list-route
+            paths:
+              - /api/marketplace/list
+            methods:
+              - POST
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
           - name: marketplace-item-route
             paths:
               - ~/marketplace/[^/]+$
+            methods:
+              - DELETE
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+          - name: api-marketplace-item-route
+            paths:
+              - ~/api/marketplace/[^/]+$
             methods:
               - DELETE
             strip_path: false
@@ -256,6 +358,17 @@ data:
           - name: tickets-route
             paths:
               - /tickets
+            strip_path: false
+            plugins:
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: true
+                  run_on_preflight: false
+          - name: qr-tickets-route
+            paths:
+              - /qr/tickets
             strip_path: false
             plugins:
               - name: key-auth
