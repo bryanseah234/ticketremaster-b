@@ -18,12 +18,13 @@ def call_service(method, url, **kwargs):
     Propagates the downstream error code where possible.
     """
     try:
-        kwargs.setdefault("timeout", 5)
+        # Increase default timeout to 15 seconds for complex aggregations
+        kwargs.setdefault("timeout", 15)
         resp = requests.request(method, url, **kwargs)
         resp.raise_for_status()
         return resp.json(), None
     except requests.exceptions.Timeout:
-        return None, "SERVICE_UNAVAILABLE"
+        return None, "SERVICE_TIMEOUT"
     except requests.exceptions.ConnectionError:
         return None, "SERVICE_UNAVAILABLE"
     except requests.exceptions.HTTPError as exc:
