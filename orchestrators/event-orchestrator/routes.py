@@ -90,20 +90,40 @@ def list_events():
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not fetch events.", 503)
 
-    enriched = []
-    for event in events_data.get("events", []):
-        venue, _      = call_service("GET", f"{VENUE_SERVICE}/venues/{event['venueId']}")
-        inv, _        = call_service("GET", f"{SEAT_INVENTORY_SERVICE}/inventory/event/{event['eventId']}")
-        seats_avail   = sum(1 for s in (inv or {}).get("inventory", []) if s["status"] == "available")
-        enriched.append({
-            **event,
-            "venue": {
-                "venueId": venue["venueId"],
-                "name": venue["name"],
-                "address": venue.get("address"),
-            } if venue else None,
-            "seatsAvailable": seats_avail,
-        })
+    # Batch fetch venues and inventory to avoid N+1 queries
+    events_list = events_data.get("events", [])
+    if events_list:
+        # Collect unique venue IDs and event IDs
+        venue_ids = list(set(event['venueId'] for event in events_list))
+        event_ids = list(set(event['eventId'] for event in events_list))
+        
+        # Batch fetch all venues
+        venues_data, _ = call_service("GET", f"{VENUE_SERVICE}/venues")
+        venues_map = {v['venueId']: v for v in (venues_data or [])}
+        
+        # Batch fetch inventory for all events
+        inventory_map = {}
+        for event_id in event_ids:
+            inv, _ = call_service("GET", f"{SEAT_INVENTORY_SERVICE}/inventory/event/{event_id}")
+            inventory_map[event_id] = inv or {}
+        
+        # Enrich events with batched data
+        enriched = []
+        for event in events_list:
+            venue = venues_map.get(event['venueId'])
+            inv = inventory_map.get(event['eventId'])
+            seats_avail = sum(1 for s in inv.get("inventory", []) if s["status"] == "available")
+            enriched.append({
+                **event,
+                "venue": {
+                    "venueId": venue["venueId"],
+                    "name": venue["name"],
+                    "address": venue.get("address"),
+                } if venue else None,
+                "seatsAvailable": seats_avail,
+            })
+    else:
+        enriched = []
 
     return jsonify({"data": {
         "events": enriched,

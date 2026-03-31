@@ -23,10 +23,6 @@ def health():
     return jsonify({'status': 'ok'}), 200
 
 
-def error_response(status_code, code, message):
-    return jsonify({'error': {'code': code, 'message': message}}), status_code
-
-
 # List all users for internal service and admin-facing lookups.
 @bp.get('/users')
 def list_users():

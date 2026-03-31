@@ -229,7 +229,7 @@ services:
 consumers:
   - username: frontend_app
     keyauth_credentials:
-      - key: "tk_front_123456789"
+      - key: "${KONG_FRONTEND_API_KEY:-tk_front_123456789}"
   - username: partner_app
     keyauth_credentials:
-      - key: "tk_partner_abcdefg"
+      - key: "${KONG_PARTNER_API_KEY:-tk_partner_abcdefg}"
