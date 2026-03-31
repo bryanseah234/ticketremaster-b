@@ -9,6 +9,8 @@ data:
   PYTHONUNBUFFERED: "1"
   QR_TTL_SECONDS: "60"
   SEAT_HOLD_DURATION_SECONDS: "300"
+  # Increased timeout for complex aggregations (default 15 seconds)
+  SERVICE_TIMEOUT_SECONDS: "15"
   CREDIT_SERVICE_URL: https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI
   SMU_API_URL: https://smuedu-dev.outsystemsenterprise.com/SMULab_Notification/rest/Notification
   USER_SERVICE_URL: http://user-service.ticketremaster-core.svc.cluster.local:5000

@@ -54,6 +54,13 @@ spec:
               value: X-Forwarded-For
             - name: KONG_REAL_IP_RECURSIVE
               value: "on"
+            # Increase proxy timeouts for complex aggregations
+            - name: KONG_PROXY_READ_TIMEOUT
+              value: "30s"
+            - name: KONG_PROXY_SEND_TIMEOUT
+              value: "30s"
+            - name: KONG_PROXY_CONNECT_TIMEOUT
+              value: "10s"
           volumeMounts:
             - name: kong-config
               mountPath: /kong/declarative

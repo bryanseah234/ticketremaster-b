@@ -8,6 +8,8 @@ import requests
 
 # Configurable timeout for OutSystems calls (default 5 seconds)
 OUTSYSTEMS_TIMEOUT = int(os.environ.get("OUTSYSTEMS_TIMEOUT_SECONDS", "5"))
+# Timeout for internal service calls (default 15 seconds for complex aggregations)
+SERVICE_TIMEOUT = int(os.environ.get("SERVICE_TIMEOUT_SECONDS", "15"))
 
 
 def call_service(method, url, **kwargs):
@@ -18,8 +20,8 @@ def call_service(method, url, **kwargs):
     Propagates the downstream error code where possible.
     """
     try:
-        # Increase default timeout to 15 seconds for complex aggregations
-        kwargs.setdefault("timeout", 15)
+        # Use configurable timeout, default 15 seconds for complex aggregations
+        kwargs.setdefault("timeout", SERVICE_TIMEOUT)
         resp = requests.request(method, url, **kwargs)
         resp.raise_for_status()
         return resp.json(), None
