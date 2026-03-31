@@ -123,6 +123,44 @@ services:
   - name: transfer-orchestrator
     url: http://transfer-orchestrator:5000
     routes:
+      - name: transfer-otp-buyer-route
+        paths:
+          - ~/transfer/[^/]+/buyer-verify$
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+          - name: rate-limiting
+            config:
+              minute: 3
+              policy: local
+              fault_tolerant: true
+              hide_client_headers: false
+      - name: transfer-otp-seller-route
+        paths:
+          - ~/transfer/[^/]+/seller-verify$
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+              run_on_preflight: false
+          - name: rate-limiting
+            config:
+              minute: 3
+              policy: local
+              fault_tolerant: true
+              hide_client_headers: false
       - name: transfer-route
         paths:
           - /transfer
