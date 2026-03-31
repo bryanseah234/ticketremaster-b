@@ -154,6 +154,37 @@ This demonstrates significant independent research into container orchestration,
 
 ---
 
+## BTL Feature #7: Cloudflare Tunnel Zero-Trust Networking
+
+**Identified BTL Feature:** Cloudflare Tunnel (cloudflared) for secure, zero-trust edge exposure
+
+**Code Location:**
+- Kubernetes deployment: `ticketremaster-b/k8s/base/edge-workloads.yaml` (lines 87-137)
+- Network policies: `ticketremaster-b/k8s/base/network-policies.yaml` (lines 48-104)
+- Kustomization: `ticketremaster-b/k8s/base/kustomization.yaml`
+- Documentation: `ticketremaster-b/README.md` (line 101)
+
+**BTL Category:** Independent Research
+
+**Scenario Justification:**
+The platform uses Cloudflare Tunnel (`cloudflared`) to expose the Kong API Gateway to the internet through a zero-trust architecture. This approach provides:
+
+- **No public IP required** - The cluster remains completely private; `cloudflared` initiates outbound-only connections to Cloudflare's edge
+- **Built-in DDoS protection** - All traffic is routed through Cloudflare's global edge network, absorbing volumetric attacks
+- **Zero-trust security model** - Eliminates traditional perimeter security in favor of identity-aware access controls
+- **Global edge performance** - API requests are routed to the nearest Cloudflare edge location, reducing latency
+- **Simplified infrastructure** - No need for load balancers, firewall rules, or VPN infrastructure
+
+The deployment includes:
+- **High availability** with 2 replicas
+- **Metrics exposure** on port 2000 for monitoring
+- **Restricted network policies** limiting `cloudflared` to only necessary communication paths
+- **Secret-based authentication** using Cloudflare tunnel tokens
+
+This demonstrates independent research into modern zero-trust networking patterns and edge computing architectures.
+
+---
+
 ## Summary Table
 
 | BTL Feature | Category | Primary Location | Complexity Level |
@@ -164,6 +195,7 @@ This demonstrates significant independent research into container orchestration,
 | WebSocket + Redis Pub/Sub | Distributed Communication | `services/notification-service/` | High |
 | OutSystems Integration | External Service Integration | `OUTSYSTEMS.md` | Medium |
 | Kubernetes Multi-Namespace | Independent Research | `k8s/base/` | High |
+| Cloudflare Tunnel Zero-Trust | Independent Research | `k8s/base/edge-workloads.yaml` | High |
 
 ---
 
