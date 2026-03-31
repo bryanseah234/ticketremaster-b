@@ -558,12 +558,18 @@ def confirm_purchase(inventory_id):
         if err:
             # Compensating action: mark ticket as payment_failed and release seat
             logger.error("Credit deduction failed for user %s — ticket %s created but credits not deducted", user_id, ticket_id)
+            compensation_errors = []
+            
             try:
                 # Mark ticket as payment_failed for manual reconciliation
-                call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={
+                _, patch_err = call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={
                     "status": "payment_failed",
                 })
+                if patch_err:
+                    compensation_errors.append(f"Failed to mark ticket status: {patch_err}")
+                    logger.error("Failed to mark ticket %s as payment_failed: %s", ticket_id, patch_err)
             except Exception as patch_err:
+                compensation_errors.append(f"Exception marking ticket status: {str(patch_err)}")
                 logger.error("Failed to mark ticket %s as payment_failed: %s", ticket_id, patch_err)
             
             try:
@@ -574,7 +580,52 @@ def confirm_purchase(inventory_id):
                     hold_token=hold_token,
                 ))
             except Exception as release_err:
+                compensation_errors.append(f"Failed to release seat: {str(release_err)}")
                 logger.error("Failed to release seat %s after credit deduction failure: %s", inventory_id, release_err)
+            
+            # Log compensation failures to DLQ for manual intervention
+            if compensation_errors:
+                logger.error(
+                    "Compensation incomplete for purchase failure. Ticket: %s, Errors: %s",
+                    ticket_id,
+                    "; ".join(compensation_errors)
+                )
+                # Send to DLQ for manual reconciliation
+                try:
+                    import pika
+                    import json as json_module
+                    from datetime import UTC
+                    
+                    message = json_module.dumps({
+                        "event": "purchase_compensation_failed",
+                        "ticket_id": ticket_id,
+                        "inventory_id": inventory_id,
+                        "user_id": user_id,
+                        "errors": compensation_errors,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    })
+                    
+                    conn = pika.BlockingConnection(pika.ConnectionParameters(
+                        host=os.environ.get("RABBITMQ_HOST", "rabbitmq"),
+                        port=int(os.environ.get("RABBITMQ_PORT", "5672")),
+                        credentials=pika.PlainCredentials(
+                            os.environ.get("RABBITMQ_USER", "guest"),
+                            os.environ.get("RABBITMQ_PASS", "guest"),
+                        ),
+                        connection_attempts=2,
+                        retry_delay=1,
+                    ))
+                    ch = conn.channel()
+                    ch.basic_publish(
+                        exchange="",
+                        routing_key="purchase_compensation_dlq",
+                        body=message,
+                        properties=pika.BasicProperties(delivery_mode=2),
+                    )
+                    conn.close()
+                    logger.info("Purchase compensation failure logged to DLQ for ticket %s", ticket_id)
+                except Exception as dlq_err:
+                    logger.error("Failed to log compensation failure to DLQ: %s", dlq_err)
             
             return _error("CREDIT_DEDUCTION_FAILED", "Ticket created but credit deduction failed. Please contact support.", 500)
 

@@ -62,29 +62,66 @@ def browse():
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not retrieve listings.", 503)
 
-    enriched = []
-    for listing in listings_data.get("listings", []):
-        ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}")
-        event,  _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}") if ticket else (None, None)
-        if event_id and (not event or str(event.get("eventId")) != str(event_id)):
-            continue
-        seller, _ = call_service("GET", f"{USER_SERVICE}/users/{listing['sellerId']}")
-        seller_email = seller.get("email") if seller else None
-        seller_display = seller_email.split("@")[0] if seller_email else None
-        enriched.append({
-            "listingId":   listing["listingId"],
-            "ticketId":    listing["ticketId"],
-            "sellerId":    listing["sellerId"],
-            "sellerName":  seller_display,
-            "price":       listing["price"],
-            "status":      listing["status"],
-            "createdAt":   listing["createdAt"],
-            "event": {
-                "eventId": event["eventId"],
-                "name":    event["name"],
-                "date":    event["date"],
-            } if event else None,
-        })
+    listings_list = listings_data.get("listings", [])
+    
+    if listings_list:
+        # Collect unique IDs for batch fetching
+        ticket_ids = list(set(listing['ticketId'] for listing in listings_list))
+        seller_ids = list(set(listing['sellerId'] for listing in listings_list))
+        
+        # Batch fetch all tickets
+        tickets_map = {}
+        for ticket_id in ticket_ids:
+            ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{ticket_id}")
+            if ticket:
+                tickets_map[ticket_id] = ticket
+        
+        # Collect unique event IDs from tickets
+        event_ids = list(set(ticket['eventId'] for ticket in tickets_map.values()))
+        
+        # Batch fetch all events
+        events_map = {}
+        for event_id in event_ids:
+            event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
+            if event:
+                events_map[event_id] = event
+        
+        # Batch fetch all sellers
+        sellers_map = {}
+        for seller_id in seller_ids:
+            seller, _ = call_service("GET", f"{USER_SERVICE}/users/{seller_id}")
+            if seller:
+                sellers_map[seller_id] = seller
+        
+        # Enrich listings with batched data
+        enriched = []
+        for listing in listings_list:
+            ticket = tickets_map.get(listing['ticketId'])
+            event = events_map.get(ticket['eventId']) if ticket else None
+            seller = sellers_map.get(listing['sellerId'])
+            seller_email = seller.get("email") if seller else None
+            seller_display = seller_email.split("@")[0] if seller_email else None
+            
+            # Apply eventId filter if specified
+            if event_id and (not event or str(event.get("eventId")) != str(event_id)):
+                continue
+            
+            enriched.append({
+                "listingId":   listing["listingId"],
+                "ticketId":    listing["ticketId"],
+                "sellerId":    listing["sellerId"],
+                "sellerName":  seller_display,
+                "price":       listing["price"],
+                "status":      listing["status"],
+                "createdAt":   listing["createdAt"],
+                "event": {
+                    "eventId": event["eventId"],
+                    "name":    event["name"],
+                    "date":    event["date"],
+                } if event else None,
+            })
+    else:
+        enriched = []
 
     if event_id:
         total = len(enriched)

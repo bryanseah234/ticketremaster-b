@@ -9,8 +9,11 @@ import sys
 import signal
 from shared.graceful_shutdown import setup_graceful_shutdown, create_cleanup_function
 
+# Global cleanup function for graceful shutdown
+_cleanup_func = None
 
 def create_app(test_config=None):
+    global _cleanup_func
     load_dotenv()
     app = Flask(__name__)
     app.config.update(JSON_SORT_KEYS=False, TESTING=False)
@@ -64,21 +67,21 @@ def create_app(test_config=None):
         return jsonify({"status": "ready"}), 200
 
     # Setup graceful shutdown
-    cleanup = create_cleanup_function()
-    setup_graceful_shutdown(app, cleanup_func=cleanup)
+    _cleanup_func = create_cleanup_function()
+    setup_graceful_shutdown(app, cleanup_func=_cleanup_func)
 
     return app
 
 
 def main():
     """Main entry point with graceful shutdown support."""
+    global _cleanup_func
     app = create_app()
     
     # Register signal handlers
     def shutdown_handler(signum, frame):
-        import sys
         from shared.graceful_shutdown import graceful_shutdown
-        graceful_shutdown(signum, frame, cleanup)
+        graceful_shutdown(signum, frame, _cleanup_func)
     
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)

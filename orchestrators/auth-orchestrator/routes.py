@@ -1,11 +1,12 @@
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
 from flask import Blueprint, jsonify, request
 
-from middleware import require_auth
+from middleware import require_auth, revoke_token
 from service_client import call_credit_service, call_service
 
 bp = Blueprint("auth", __name__)
@@ -23,6 +24,7 @@ def _generate_token(user):
         "userId": user["userId"],
         "email": user["email"],
         "role": user["role"],
+        "jti": str(uuid.uuid4()),  # JWT ID for token revocation
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
     }
     # Staff users carry venueId so ticket-verification-orchestrator
@@ -212,3 +214,67 @@ def me():
         "isFlagged": user_data.get("isFlagged", False),
         "createdAt": user_data["createdAt"],
     }}), 200
+
+
+# ── POST /auth/logout ────────────────────────────────────────────────────────
+
+@bp.post("/auth/logout")
+@require_auth
+def logout():
+    """
+    Logout and revoke the current token
+    ---
+    tags:
+      - Auth
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: Logout successful — token revoked
+      401:
+        description: Missing or invalid token
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return _error("AUTH_MISSING_TOKEN", "Authorization header missing or malformed.", 401)
+    
+    token = auth[len("Bearer "):]
+    if revoke_token(token):
+        return jsonify({"data": {"message": "Logout successful"}}), 200
+    else:
+        # Even if blacklist fails, we consider the user logged out from the client perspective
+        return jsonify({"data": {"message": "Logout successful (token revocation may be unavailable)"}}), 200
+
+
+# ── POST /auth/logout-all ────────────────────────────────────────────────────
+
+@bp.post("/auth/logout-all")
+@require_auth
+def logout_all():
+    """
+    Logout from all devices by revoking all tokens for this user
+    Note: Full implementation requires storing token-user mappings in Redis.
+    Currently, this is a placeholder that revokes the current token.
+    ---
+    tags:
+      - Auth
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: All tokens revoked
+      401:
+        description: Missing or invalid token
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return _error("AUTH_MISSING_TOKEN", "Authorization header missing or malformed.", 401)
+    
+    token = auth[len("Bearer "):]
+    if revoke_token(token):
+        # TODO: Implement full logout-all by scanning Redis for all user tokens
+        return jsonify({"data": {
+            "message": "Current token revoked. Full logout-all requires additional implementation."
+        }}), 200
+    else:
+        return jsonify({"data": {"message": "Token revocation may be unavailable"}}), 200

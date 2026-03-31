@@ -3,33 +3,65 @@ Graceful Shutdown Handler.
 
 Provides graceful shutdown functionality for all Flask services.
 Handles SIGTERM/SIGINT signals and ensures proper cleanup of resources.
+Implements request draining to avoid dropping in-flight requests.
 """
 import logging
 import os
 import signal
 import sys
 import time
-from threading import Thread
+import threading
+from datetime import datetime, timezone
+from typing import Optional, Callable
+from flask import has_request_context
 
 logger = logging.getLogger(__name__)
 
 # Shutdown configuration
 GRACEFUL_SHUTDOWN_TIMEOUT = int(os.environ.get("GRACEFUL_SHUTDOWN_TIMEOUT", "30"))
 LB_DEREGISTRATION_DELAY = int(os.environ.get("LB_DEREGISTRATION_DELAY", "5"))
+REQUEST_DRAIN_INTERVAL = float(os.environ.get("REQUEST_DRAIN_INTERVAL", "0.5"))
 
 # Global shutdown flag
 _is_shutting_down = False
+_active_requests = 0
+_request_lock = threading.Lock()
+_shutdown_event = threading.Event()
+
+# Request tracking middleware
+_request_counter_lock = threading.Lock()
 
 
 def set_shutting_down():
     """Set the global shutting down flag."""
     global _is_shutting_down
     _is_shutting_down = True
+    _shutdown_event.set()
 
 
 def is_shutting_down():
     """Check if the service is shutting down."""
     return _is_shutting_down
+
+
+def get_active_requests():
+    """Get the current count of active requests."""
+    with _request_counter_lock:
+        return _active_requests
+
+
+def track_request_start():
+    """Track the start of a request."""
+    global _active_requests
+    with _request_counter_lock:
+        _active_requests += 1
+
+
+def track_request_end():
+    """Track the end of a request."""
+    global _active_requests
+    with _request_counter_lock:
+        _active_requests = max(0, _active_requests - 1)
 
 
 def graceful_shutdown(signum, frame, cleanup_func=None):
@@ -43,16 +75,17 @@ def graceful_shutdown(signum, frame, cleanup_func=None):
     4. Exit cleanly
     """
     logger.info("Received signal %d, initiating graceful shutdown...", signum)
+    shutdown_start = datetime.now(timezone.utc)
     set_shutting_down()
     
     # Phase 1: Deregister from load balancer (if applicable)
-    logger.info("Phase 1: Deregistering from load balancer...")
-    # In Kubernetes, this is handled by readiness probe failure
-    # We add a small delay to allow LB to notice
+    logger.info("Phase 1: Deregistering from load balancer (waiting %d seconds)...", 
+                min(LB_DEREGISTRATION_DELAY, GRACEFUL_SHUTDOWN_TIMEOUT // 4))
     time.sleep(min(LB_DEREGISTRATION_DELAY, GRACEFUL_SHUTDOWN_TIMEOUT // 4))
     
-    # Phase 2: Wait for in-flight requests
-    logger.info("Phase 2: Waiting for in-flight requests to complete...")
+    # Phase 2: Wait for in-flight requests with draining
+    logger.info("Phase 2: Waiting for in-flight requests to complete (timeout: %d seconds)...", 
+                GRACEFUL_SHUTDOWN_TIMEOUT * 3 // 4)
     wait_for_requests(timeout=GRACEFUL_SHUTDOWN_TIMEOUT * 3 // 4)
     
     # Phase 3: Cleanup resources
@@ -63,22 +96,38 @@ def graceful_shutdown(signum, frame, cleanup_func=None):
         except Exception as exc:
             logger.error("Error during resource cleanup: %s", exc)
     
-    logger.info("Graceful shutdown complete. Exiting...")
+    shutdown_duration = (datetime.now(timezone.utc) - shutdown_start).total_seconds()
+    logger.info("Graceful shutdown complete (duration: %.2fs). Exiting...", shutdown_duration)
     sys.exit(0)
 
 
 def wait_for_requests(timeout):
     """
-    Wait for in-flight requests to complete.
-    Implementation depends on the web server (Gunicorn, Flask dev server, etc.).
+    Wait for in-flight requests to complete with draining.
+    Monitors active request count and waits until all are complete or timeout.
     """
-    # For Gunicorn, we rely on its graceful timeout
-    # For development, we just sleep
     start_time = time.time()
+    last_count = get_active_requests()
+    
     while time.time() - start_time < timeout:
-        # In a real implementation, we'd check active request count
-        # For now, we just wait
-        time.sleep(0.5)
+        current_count = get_active_requests()
+        
+        if current_count == 0:
+            logger.info("All in-flight requests completed")
+            return
+        
+        if current_count != last_count:
+            logger.info("Waiting for %d in-flight requests to complete...", current_count)
+            last_count = current_count
+        
+        time.sleep(REQUEST_DRAIN_INTERVAL)
+    
+    # Timeout reached
+    remaining = get_active_requests()
+    if remaining > 0:
+        logger.warning("Shutdown timeout reached with %d requests still active. Forcing exit.", remaining)
+    else:
+        logger.info("Request draining completed within timeout")
 
 
 def setup_graceful_shutdown(app, cleanup_func=None):
@@ -162,3 +211,21 @@ def create_cleanup_function(db=None, redis_client=None, rabbitmq_connection=None
         run_shutdown_hooks()
     
     return cleanup
+
+
+def register_request_tracking_middleware(app):
+    """
+    Register middleware to track active requests for graceful shutdown.
+    
+    Args:
+        app: Flask application instance
+    """
+    @app.before_request
+    def before_request():
+        track_request_start()
+    
+    @app.teardown_request
+    def teardown_request(exception):
+        track_request_end()
+    
+    logger.info("Request tracking middleware registered")

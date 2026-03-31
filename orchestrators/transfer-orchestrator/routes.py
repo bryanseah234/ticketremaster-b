@@ -161,50 +161,146 @@ def _publish_transfer_timeout(transfer_id, listing_id, buyer_id, seller_id):
 def _execute_saga(transfer_id, buyer_id, seller_id, credit_amount, ticket_id, listing_id,
                   buyer_balance, seller_balance):
     completed = []
+    compensation_errors = []
     try:
         # 1. Deduct buyer
-        call_credit_service("PATCH", f"/credits/{buyer_id}",
+        _, err = call_credit_service("PATCH", f"/credits/{buyer_id}",
                             json={"creditBalance": buyer_balance - credit_amount})
+        if err:
+            raise RuntimeError(f"Credit deduction for buyer failed: {err}")
         completed.append("buyer_deducted")
 
         # 2. Credit seller
-        call_credit_service("PATCH", f"/credits/{seller_id}",
+        _, err = call_credit_service("PATCH", f"/credits/{seller_id}",
                             json={"creditBalance": seller_balance + credit_amount})
+        if err:
+            raise RuntimeError(f"Credit addition for seller failed: {err}")
         completed.append("seller_credited")
 
         # 3. Log buyer txn
-        call_service("POST", f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
+        _, err = call_service("POST", f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
             "userId": buyer_id, "delta": -credit_amount,
             "reason": "p2p_sent", "referenceId": transfer_id,
         })
+        if err:
+            raise RuntimeError(f"Buyer transaction log failed: {err}")
+        completed.append("buyer_txn_logged")
 
         # 4. Log seller txn
-        call_service("POST", f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
+        _, err = call_service("POST", f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
             "userId": seller_id, "delta": credit_amount,
             "reason": "p2p_received", "referenceId": transfer_id,
         })
+        if err:
+            raise RuntimeError(f"Seller transaction log failed: {err}")
+        completed.append("seller_txn_logged")
 
         # 5. Transfer ticket
-        call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={
-            "ownerId": buyer_id, "status": "active",
+        _, err = call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={
+            "ownerId": seller_id, "status": "active",
         })
+        if err:
+            raise RuntimeError(f"Ticket transfer failed: {err}")
+        completed.append("ticket_transferred")
 
         # 6. Complete listing
         call_service("PATCH", f"{MARKETPLACE_SERVICE}/listings/{listing_id}", json={"status": "completed"})
+        completed.append("listing_completed")
 
         # 7. Complete transfer
         call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
             "status": "completed",
             "completedAt": datetime.now(timezone.utc).isoformat(),
         })
+        completed.append("transfer_completed")
 
     except Exception as exc:
-        logger.error("Saga failed at step %s: %s", len(completed), exc)
-        if "seller_credited" in completed:
-            call_credit_service("PATCH", f"/credits/{seller_id}", json={"creditBalance": seller_balance})
-        if "buyer_deducted" in completed:
-            call_credit_service("PATCH", f"/credits/{buyer_id}", json={"creditBalance": buyer_balance})
+        logger.error("Saga failed at step %d (%s completed): %s", len(completed), ", ".join(completed), exc)
+        
+        # Reverse compensation in reverse order
+        try:
+            if "seller_credited" in completed:
+                _, err = call_credit_service("PATCH", f"/credits/{seller_id}",
+                                            json={"creditBalance": seller_balance})
+                if err:
+                    compensation_errors.append(f"Failed to restore seller balance: {err}")
+                    logger.error("Failed to restore seller %s balance: %s", seller_id, err)
+            
+            if "buyer_deducted" in completed:
+                _, err = call_credit_service("PATCH", f"/credits/{buyer_id}",
+                                            json={"creditBalance": buyer_balance})
+                if err:
+                    compensation_errors.append(f"Failed to restore buyer balance: {err}")
+                    logger.error("Failed to restore buyer %s balance: {err}", buyer_id, err)
+            
+            # Reverse transaction logs if they were created
+            if "seller_txn_logged" in completed:
+                # Mark seller transaction as reversed
+                _, err = call_service("PATCH", f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{transfer_id}",
+                                     json={"status": "reversed", "reason": "transfer_failed"})
+                if err:
+                    compensation_errors.append(f"Failed to reverse seller transaction log: {err}")
+                    logger.error("Failed to reverse seller transaction log: %s", err)
+            
+            if "buyer_txn_logged" in completed:
+                # Mark buyer transaction as reversed
+                _, err = call_service("PATCH", f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{transfer_id}",
+                                     json={"status": "reversed", "reason": "transfer_failed"})
+                if err:
+                    compensation_errors.append(f"Failed to reverse buyer transaction log: {err}")
+                    logger.error("Failed to reverse buyer transaction log: %s", err)
+        except Exception as comp_err:
+            compensation_errors.append(f"Compensation exception: {str(comp_err)}")
+            logger.error("Exception during compensation: %s", comp_err)
+        
+        # Mark transfer as failed
         call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
+        
+        # Log compensation failures to DLQ for manual intervention
+        if compensation_errors:
+            logger.error(
+                "Transfer saga compensation incomplete. Transfer: %s, Errors: %s",
+                transfer_id,
+                "; ".join(compensation_errors)
+            )
+            # Send to DLQ for manual reconciliation
+            try:
+                import pika
+                import json as json_module
+                from datetime import UTC
+                
+                message = json_module.dumps({
+                    "event": "transfer_compensation_failed",
+                    "transfer_id": transfer_id,
+                    "buyer_id": buyer_id,
+                    "seller_id": seller_id,
+                    "completed_steps": completed,
+                    "errors": compensation_errors,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                })
+                
+                conn = pika.BlockingConnection(pika.ConnectionParameters(
+                    host=os.environ.get("RABBITMQ_HOST", "rabbitmq"),
+                    port=int(os.environ.get("RABBITMQ_PORT", "5672")),
+                    credentials=pika.PlainCredentials(
+                        os.environ.get("RABBITMQ_USER", "guest"),
+                        os.environ.get("RABBITMQ_PASS", "guest"),
+                    ),
+                    connection_attempts=2,
+                    retry_delay=1,
+                ))
+                ch = conn.channel()
+                ch.basic_publish(
+                    exchange="",
+                    routing_key="transfer_compensation_dlq",
+                    body=message,
+                    properties=pika.BasicProperties(delivery_mode=2),
+                )
+                conn.close()
+                logger.info("Transfer compensation failure logged to DLQ for transfer %s", transfer_id)
+            except Exception as dlq_err:
+                logger.error("Failed to log compensation failure to DLQ: %s", dlq_err)
+        
         raise exc
 
 

@@ -34,6 +34,7 @@ VENUE_SERVICE          = os.environ.get("VENUE_SERVICE_URL",           "http://v
 SEAT_INV_SERVICE       = os.environ.get("SEAT_INVENTORY_SERVICE_URL",  "http://seat-inventory-service:5000")
 
 QR_TTL_SECONDS = int(os.environ.get("QR_TTL_SECONDS", "60"))
+CLOCK_SKEW_SECONDS = int(os.environ.get("CLOCK_SKEW_SECONDS", "300"))
 
 # Redis configuration for distributed locks
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
@@ -199,7 +200,7 @@ def scan():
                 if ts_dt.tzinfo is None:
                     ts_dt = ts_dt.replace(tzinfo=timezone.utc)
                 # Also check if timestamp is in the future (clock skew attack)
-                if ts_dt > datetime.now(timezone.utc) + timedelta(seconds=300):
+                if ts_dt > datetime.now(timezone.utc) + timedelta(seconds=CLOCK_SKEW_SECONDS):
                     _log(ticket_id, staff_id, "invalid")
                     return _error("QR_INVALID", "QR timestamp is in the future.", 400)
                 if datetime.now(timezone.utc) - ts_dt > timedelta(seconds=QR_TTL_SECONDS):

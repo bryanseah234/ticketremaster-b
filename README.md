@@ -6,6 +6,7 @@ The current repository contains:
 
 - 8 browser-facing orchestrators
 - 12 internal atomic services and wrappers
+- 1 notification service for real-time WebSocket updates
 - 10 isolated PostgreSQL databases
 - Redis-backed hold-cache reads for purchase confirmation
 - RabbitMQ queues for hold expiry and seller-notification workflows
@@ -47,6 +48,7 @@ flowchart LR
     Purchase --> Redis[(Redis)]
     Purchase --> Rabbit[(RabbitMQ)]
     Purchase --> CreditAPI
+    Purchase --> NotifSvc[notification-service]
 
     QR --> TicketSvc
     QR --> EventSvc
@@ -64,12 +66,18 @@ flowchart LR
     Transfer --> OTP[otp-wrapper]
     Transfer --> Rabbit
     Transfer --> CreditAPI
+    Transfer --> NotifSvc
 
     Verify --> TicketSvc
     Verify --> TicketLog[ticket-log-service]
     Verify --> EventSvc
     Verify --> VenueSvc
     Verify --> InvSvc
+    Verify --> NotifSvc
+
+    %% Real-time notification flow
+    NotifSvc --> Browser
+    NotifSvc --> Redis
 ```
 
 ## Architecture layers
@@ -149,6 +157,39 @@ RabbitMQ decouples time-based and notification-based work from synchronous reque
 **Monitoring**: Watch queue depth, consumer lag, and dead-letter queue activity via RabbitMQ management UI at `http://localhost:15672`.
 
 See [TESTING.md](TESTING.md) for RabbitMQ verification steps.
+
+## Real-time Notifications (WebSocket)
+
+The `notification-service` provides real-time updates to connected clients via WebSocket (Socket.IO). It complements RabbitMQ by pushing immediate updates to the frontend without polling.
+
+**Key Features:**
+- WebSocket connections via Socket.IO
+- Redis Pub/Sub for cross-service event broadcasting
+- HTTP API for services to broadcast events
+- Automatic reconnection and message queuing
+
+**Event Types:**
+- `seat_update` — Seat status changes (held, sold, released)
+- `ticket_update` — Ticket status changes (purchased, transferred, used)
+- `transfer_update` — Transfer state changes (initiated, accepted, declined)
+- `purchase_update` — Purchase completion or cancellation
+- `user_update` — User profile or flag status changes
+- `event_update` — Event creation, update, or cancellation
+
+**Service Integration:**
+Services broadcast events via HTTP POST to `/notifications/broadcast`:
+
+```python
+import requests
+
+requests.post('http://notification-service:8109/notifications/broadcast', json={
+    'type': 'seat_update',
+    'payload': {'eventId': 'evt_123', 'seatId': 'seat_456', 'status': 'sold'},
+    'traceId': 'trace_abc'
+})
+```
+
+See [services/notification-service/NOTIFICATIONS.md](services/notification-service/NOTIFICATIONS.md) for detailed documentation.
 
 ```mermaid
 flowchart TB

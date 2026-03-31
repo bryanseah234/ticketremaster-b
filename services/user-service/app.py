@@ -14,8 +14,14 @@ from werkzeug.exceptions import HTTPException
 
 load_dotenv()
 
-# Initialize Sentry for error tracking and performance monitoring
+# Add shared directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+
+# Validate secrets before any other initialization
+from secrets import init_secrets
+init_secrets(strict=True)
+
+# Initialize Sentry for error tracking and performance monitoring
 from sentry import init_sentry
 
 init_sentry(service_name="user-service")
@@ -119,13 +125,11 @@ def create_app(test_config=None):
         app.config.update(test_config)
 
     if "SQLALCHEMY_DATABASE_URI" not in app.config:
+        from secrets import validate_database_url
         database_url = os.getenv("USER_SERVICE_DATABASE_URL") or os.getenv(
             "DATABASE_URL"
         )
-        if not database_url:
-            raise RuntimeError(
-                "USER_SERVICE_DATABASE_URL (or DATABASE_URL) must be set for user-service."
-            )
+        database_url = validate_database_url(database_url, "user-service")
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 
     db.init_app(app)

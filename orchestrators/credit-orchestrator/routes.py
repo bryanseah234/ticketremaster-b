@@ -237,11 +237,19 @@ def stripe_webhook():
     user_id           = result["userId"]
     credits           = int(result["credits"])
     payment_intent_id = result["paymentIntentId"]
+    stripe_event_id   = result.get("eventId")  # Stripe event ID for idempotency
 
-    # Idempotency — guard against duplicate Stripe deliveries
-    existing, _ = call_service("GET", f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{payment_intent_id}")
-    if existing:
-        return jsonify({"received": True}), 200
+    # Idempotency — guard against duplicate Stripe deliveries using Stripe event ID
+    # This prevents replay attacks where the same event is delivered multiple times
+    if stripe_event_id:
+        existing, _ = call_service("GET", f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{stripe_event_id}")
+        if existing:
+            return jsonify({"received": True}), 200
+    else:
+        # Fallback to payment_intent_id if event ID not available
+        existing, _ = call_service("GET", f"{CREDIT_TXN_SERVICE}/credit-transactions/reference/{payment_intent_id}")
+        if existing:
+            return jsonify({"received": True}), 200
 
     # Fetch current balance from OutSystems
     credit_data, err = call_credit_service("GET", f"/credits/{user_id}")
@@ -256,12 +264,12 @@ def stripe_webhook():
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not update balance.", 503)
 
-    # Log to Credit Transaction Service
+    # Log to Credit Transaction Service with Stripe event ID for idempotency
     call_service("POST", f"{CREDIT_TXN_SERVICE}/credit-transactions", json={
         "userId":      user_id,
         "delta":       credits,
         "reason":      "topup",
-        "referenceId": payment_intent_id,
+        "referenceId": stripe_event_id or payment_intent_id,
     })
 
     return jsonify({"received": True}), 200

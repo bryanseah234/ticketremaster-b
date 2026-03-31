@@ -3,12 +3,15 @@ Shared Sentry initialization for Flask microservices.
 Provides centralized error tracking, performance monitoring, and logging.
 """
 import os
+import logging
 from typing import Optional
 
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
-from flask import Flask
+from flask import Flask, has_request_context, request
+
+logger = logging.getLogger(__name__)
 
 
 def init_sentry(
@@ -25,8 +28,18 @@ def init_sentry(
         traces_sample_rate: Sample rate for performance tracing (0.0-1.0)
     """
     dsn = os.getenv("SENTRY_DSN")
+    env = os.getenv("APP_ENV", "development")
+    
+    # Fail fast in production if Sentry not configured
+    if env == "production" and not dsn:
+        raise RuntimeError(
+            "SENTRY_DSN environment variable is required in production. "
+            "Set it to your Sentry project DSN or set APP_ENV=development to skip."
+        )
+    
     if not dsn:
         # Sentry not configured, skip initialization
+        logger.info("Sentry not configured (SENTRY_DSN not set)")
         return
 
     environment = os.getenv("SENTRY_ENVIRONMENT", "development")
@@ -67,7 +80,39 @@ def init_sentry(
         max_breadcrumbs=100,
         # Attach stacktrace to events
         attach_stacktrace=True,
+        # Debug mode in development
+        debug=env == "development",
     )
+    
+    # Capture service startup event
+    capture_startup_event(service_name, environment, release)
+
+
+def capture_startup_event(service_name: Optional[str], environment: str, release: Optional[str]) -> None:
+    """Capture service startup event for monitoring."""
+    try:
+        sentry_sdk.capture_message(
+            f"Service {service_name or 'unknown'} started",
+            level="info",
+            scopes={
+                "tags": {
+                    "service": service_name,
+                    "environment": environment,
+                    "event_type": "startup",
+                }
+            }
+        )
+    except Exception as e:
+        logger.debug(f"Failed to capture startup event: {e}")
+
+
+def shutdown_sentry() -> None:
+    """Gracefully shutdown Sentry, flushing any pending events."""
+    try:
+        sentry_sdk.flush(timeout=2.0)  # Wait up to 2 seconds
+        logger.info("Sentry flushed and shutdown complete")
+    except Exception as e:
+        logger.debug(f"Error during Sentry shutdown: {e}")
 
 
 def _traces_sampler(sampling_context):

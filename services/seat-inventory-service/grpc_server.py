@@ -129,7 +129,6 @@ def _delete_hold_cache(inventory_id: str) -> None:
                 logger.info("Cache key did not exist for inventory %s", inventory_id)
                 return
         except Exception as exc:
-            last_error = exc
             if attempt < CACHE_RETRY_ATTEMPTS - 1:
                 delay = (CACHE_RETRY_DELAY_MS / 1000) * (2 ** attempt)
                 logger.warning(
@@ -304,7 +303,6 @@ class SeatInventoryGrpcService(SeatInventoryServiceServicer):
                     
             except sqlalchemy.exc.OperationalError as exc:
                 if _is_deadlock_error(exc):
-                    last_error = exc
                     if attempt < MAX_DEADLOCK_RETRIES - 1:
                         delay = _calculate_deadlock_delay(attempt)
                         logger.warning(
