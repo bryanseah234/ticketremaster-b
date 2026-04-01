@@ -2,10 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY services/ticket-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY services/ticket-service/ .
+COPY shared/ /shared/
 
 EXPOSE 5000
 

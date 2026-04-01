@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "flask db upgrade && gunicorn -w 4 -b 0.0.0.0:5000 app:app"]
+CMD ["sh", "-c", "until flask db upgrade; do echo 'Migration failed, retrying...'; sleep 2; done && gunicorn -w 4 -b 0.0.0.0:5000 app:app"]

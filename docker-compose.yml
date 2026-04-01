@@ -33,7 +33,8 @@ services:
   user-service:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./services/user-service
+      context: .
+      dockerfile: services/user-service/Dockerfile
     ports:
       - "5000:5000"
     environment:
@@ -56,7 +57,8 @@ services:
   event-service:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./services/event-service
+      context: .
+      dockerfile: services/event-service/Dockerfile
     ports:
       - "5002:5000"
     environment:
@@ -79,7 +81,8 @@ services:
   seat-inventory-service:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./services/seat-inventory-service
+      context: .
+      dockerfile: services/seat-inventory-service/Dockerfile
     ports:
       - "5003:5000"
       - "50051:50051"
@@ -107,7 +110,8 @@ services:
   ticket-service:
     <<: [*service-defaults, *flask-healthcheck]
     build:
-      context: ./services/ticket-service
+      context: .
+      dockerfile: services/ticket-service/Dockerfile
     ports:
       - "5004:5000"
     environment:
