@@ -2,6 +2,12 @@
 
 This directory contains architecture diagrams for key system workflows.
 
+## Quick Start
+
+1. Use the exported SVG diagrams in this folder for docs and 16:9 slides.
+2. Update the paired `.mmd` source when architecture changes.
+3. Re-export SVG assets and keep links in this README in sync.
+
 ## Diagram Index
 
 | # | Diagram | Description |
@@ -22,6 +28,11 @@ This directory contains architecture diagrams for key system workflows.
 ## New: Real-time Notification Flow
 
 The notification service adds real-time capabilities to the system:
+
+![Notification real-time flow (exported)](notification_realtime_flow.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 sequenceDiagram
@@ -47,6 +58,8 @@ sequenceDiagram
     Note over Client,WebSocket: Real-time Updates
     Client->>Client: Update UI instantly
 ```
+
+</details>
 
 ### When Notifications Are Sent
 
@@ -76,20 +89,25 @@ requests.post('http://notification-service:8109/notifications/broadcast', json={
 
 The complete system architecture includes:
 
+![System architecture overview (exported)](system_architecture_overview_lr.svg)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
-flowchart TB
-    subgraph "Client Layer"
+flowchart LR
+    subgraph Client[Client Layer]
         FE[Frontend App]
         STAFF[Staff App]
     end
 
-    subgraph "Edge Layer"
+    subgraph Edge[Edge Layer]
         CF[Cloudflare Tunnel]
         KONG[Kong Gateway]
     end
 
-    subgraph "Core Layer"
-        subgraph "Orchestrators"
+    subgraph Core[Core Layer]
+        subgraph Orch[Orchestrators]
             AUTH[auth]
             EVENT[event]
             CREDIT[credit]
@@ -100,7 +118,7 @@ flowchart TB
             VERIFY[verification]
         end
 
-        subgraph "Services"
+        subgraph Services[Services]
             USER[user]
             VENUE[venue]
             SEAT[seat]
@@ -116,13 +134,13 @@ flowchart TB
         end
     end
 
-    subgraph "Data Layer"
+    subgraph Data[Data Layer]
         PG[(PostgreSQL x10)]
         REDIS[(Redis)]
         RABBIT[(RabbitMQ)]
     end
 
-    subgraph "External"
+    subgraph External[External]
         OUTSYS[OutSystems Credit API]
         STRIPE_EXT[Stripe]
     end
@@ -163,10 +181,11 @@ flowchart TB
     CREDIT --> OUTSYS
     CREDIT --> STRIPE_EXT
 
-    %% Real-time notification flow
     NOTIF -.-> FE
     NOTIF -.-> STAFF
 ```
+
+</details>
 
 ## Documentation
 

@@ -1,0 +1,24 @@
+flowchart LR
+    subgraph Edge[ticketremaster-edge]
+        Tunnel2[cloudflared]
+        Kong2[Kong]
+    end
+
+    subgraph Core[ticketremaster-core]
+        Orch[Orchestrators]
+        Atomic[Atomic Services and Wrappers]
+        Jobs[Seed Jobs]
+    end
+
+    subgraph Data[ticketremaster-data]
+        Redis2[(Redis)]
+        Rabbit2[(RabbitMQ)]
+        PG[(PostgreSQL StatefulSets)]
+    end
+
+    Tunnel2 --> Kong2
+    Kong2 --> Orch
+    Orch --> Atomic
+    Orch --> Redis2
+    Orch --> Rabbit2
+    Atomic --> PG
