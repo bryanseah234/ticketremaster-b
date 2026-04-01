@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -14,7 +15,7 @@ from werkzeug.exceptions import HTTPException
 load_dotenv()
 
 # Add shared directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 
 # Validate secrets before any other initialization
 from secrets import init_secrets
