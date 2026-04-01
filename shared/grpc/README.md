@@ -73,4 +73,4 @@ response = stub.GetSeatStatus(
 ## Related Documentation
 
 - Proto contract location: [../../proto/seat_inventory.proto](../../proto/seat_inventory.proto)
-- Orchestrator gRPC usage guidance: [../../.github/skills/grpc-service/SKILL.md](../../.github/skills/grpc-service/SKILL.md)
+- Orchestrator gRPC usage guidance: [../../AGENTS.md#available-skills](../../AGENTS.md#available-skills)
