@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -14,11 +15,16 @@ from werkzeug.exceptions import HTTPException
 load_dotenv()
 
 # Add shared directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 
 # Validate secrets before any other initialization
-from secrets import init_secrets
-init_secrets(strict=True)
+import importlib.util
+
+_shared_secrets_path = os.path.join(os.path.dirname(__file__), '..', '..', 'shared', 'secrets.py')
+_shared_secrets_spec = importlib.util.spec_from_file_location('shared_secrets', _shared_secrets_path)
+shared_secrets = importlib.util.module_from_spec(_shared_secrets_spec)
+_shared_secrets_spec.loader.exec_module(shared_secrets)
+shared_secrets.init_secrets(strict=os.getenv('APP_ENV') == 'production')
 
 # Initialize Sentry for error tracking and performance monitoring
 from sentry import init_sentry
@@ -124,7 +130,7 @@ def create_app(test_config=None):
         app.config.update(test_config)
 
     if "SQLALCHEMY_DATABASE_URI" not in app.config:
-        from secrets import validate_database_url
+        validate_database_url = shared_secrets.validate_database_url
         database_url = os.getenv("TICKET_SERVICE_DATABASE_URL") or os.getenv(
             "DATABASE_URL"
         )

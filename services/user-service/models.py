@@ -1,6 +1,8 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import JSON
+
 from app import db
 
 
@@ -39,7 +41,11 @@ class User(db.Model):
     role = db.Column(db.String(20), nullable=False, default='user')
     isFlagged = db.Column(db.Boolean, nullable=False, default=False)
     venueId = db.Column(db.String(36), nullable=True)
-    favoriteEvents = db.Column(db.ARRAY(db.String), nullable=False, default=list)
+    favoriteEvents = db.Column(
+        db.ARRAY(db.String).with_variant(JSON, "sqlite"),
+        nullable=False,
+        default=list,
+    )
     createdAt = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self, include_sensitive=False):

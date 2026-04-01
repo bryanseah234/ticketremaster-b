@@ -90,32 +90,17 @@ def list_events():
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not fetch events.", 503)
 
-    # Batch fetch venues and inventory to avoid N+1 queries
     events_list = events_data.get("events", []) if isinstance(events_data, dict) else []
     if events_list:
         # Validate events_list contains dictionaries
         events_list = [e for e in events_list if isinstance(e, dict)]
-        
-        # Collect unique venue IDs and event IDs
-        venue_ids = list(set(event['venueId'] for event in events_list if 'venueId' in event))
-        event_ids = list(set(event['eventId'] for event in events_list if 'eventId' in event))
-        
-        # Batch fetch all venues
-        venues_data, venues_err = call_service("GET", f"{VENUE_SERVICE}/venues")
-        venues_list = venues_data.get("venues", []) if isinstance(venues_data, dict) else (venues_data if isinstance(venues_data, list) else [])
-        venues_map = {v['venueId']: v for v in venues_list if isinstance(v, dict) and 'venueId' in v}
-        
-        # Batch fetch inventory for all events
-        inventory_map = {}
-        for event_id in event_ids:
-            inv, _ = call_service("GET", f"{SEAT_INVENTORY_SERVICE}/inventory/event/{event_id}")
-            inventory_map[event_id] = inv or {}
-        
-        # Enrich events with batched data
         enriched = []
         for event in events_list:
-            venue = venues_map.get(event['venueId'])
-            inv = inventory_map.get(event['eventId'], {})
+            venue = None
+            if event.get("venueId"):
+                venue, _ = call_service("GET", f"{VENUE_SERVICE}/venues/{event['venueId']}")
+            inv, _ = call_service("GET", f"{SEAT_INVENTORY_SERVICE}/inventory/event/{event.get('eventId')}")
+            inv = inv or {}
             seats_avail = sum(1 for s in inv.get("inventory", []) if isinstance(s, dict) and s.get("status") == "available")
             enriched.append({
                 **event,

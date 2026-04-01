@@ -11,6 +11,7 @@ The current repository contains:
 - Redis-backed hold-cache reads for purchase confirmation
 - RabbitMQ queues for hold expiry and seller-notification workflows
 - a committed Kubernetes base under `k8s/base`
+- maintained backend scenario sequence diagrams under `diagrams/`
 - an external OutSystems credit system of record at `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI`
 
 ## Quick Start

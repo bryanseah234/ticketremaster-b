@@ -17,25 +17,6 @@ UPDATABLE_FIELDS = {
     'completedAt',
 }
 
-# State machine definition: valid transitions for each status
-VALID_STATE_TRANSITIONS = {
-    'pending_seller_acceptance': ['seller_accepted', 'cancelled', 'expired'],
-    'seller_accepted': ['pending_buyer_otp', 'cancelled', 'expired'],
-    'pending_buyer_otp': ['buyer_otp_verified', 'cancelled', 'expired'],
-    'buyer_otp_verified': ['pending_seller_otp', 'cancelled', 'expired'],
-    'pending_seller_otp': ['completed', 'cancelled', 'expired'],
-    'completed': [],  # terminal state
-    'cancelled': [],  # terminal state
-    'expired': [],    # terminal state
-}
-
-# Statuses that require buyer OTP verification before proceeding
-BUYER_OTP_REQUIRED_STATUSES = {'pending_buyer_otp'}
-
-# Statuses that require seller OTP verification before proceeding
-SELLER_OTP_REQUIRED_STATUSES = {'pending_seller_otp'}
-
-
 def error_response(status_code, code, message):
     return jsonify({'error': {'code': code, 'message': message}}), status_code
 
@@ -54,7 +35,10 @@ def is_transfer_expired(transfer):
     """Check if a transfer has expired."""
     if transfer.expiresAt is None:
         return False
-    return datetime.now(timezone.utc) > transfer.expiresAt
+    expires_at = transfer.expiresAt
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) > expires_at
 
 
 @bp.get('/health')
@@ -68,14 +52,12 @@ def create_transfer():
     if not data or any(field not in data for field in REQUIRED_FIELDS):
         return error_response(400, 'VALIDATION_ERROR', 'Missing required fields')
 
-    # Always start with pending_seller_acceptance - enforce strict state ordering
-    # Buyer OTP must come first (steps 5-8), then seller notification (steps 9-13)
     transfer = Transfer(
         listingId=data['listingId'],
         buyerId=data['buyerId'],
         sellerId=data['sellerId'],
         creditAmount=data['creditAmount'],
-        status='pending_seller_acceptance',
+        status='pending_buyer_otp',
         buyerVerificationSid=data.get('buyerVerificationSid'),
         sellerVerificationSid=data.get('sellerVerificationSid'),
     )
@@ -140,39 +122,6 @@ def patch_transfer(transfer_id):
         transfer.status = 'expired'
         db.session.commit()
         return error_response(400, 'TRANSFER_EXPIRED', 'Transfer has expired')
-
-    # Validate state transitions if status is being updated
-    if 'status' in data:
-        new_status = data['status']
-        current_status = transfer.status
-
-        # Check if the transition is valid
-        if current_status not in VALID_STATE_TRANSITIONS:
-            return error_response(400, 'INVALID_STATE', f'Unknown current status: {current_status}')
-
-        allowed_transitions = VALID_STATE_TRANSITIONS.get(current_status, [])
-        if new_status not in allowed_transitions:
-            return error_response(
-                400,
-                'INVALID_STATE_TRANSITION',
-                f'Cannot transition from {current_status} to {new_status}. Allowed transitions: {allowed_transitions}'
-            )
-
-        # Enforce buyer OTP verification before seller OTP phase
-        if new_status == 'pending_seller_otp' and not transfer.buyerOtpVerified:
-            return error_response(
-                400,
-                'BUYER_OTP_REQUIRED',
-                'Buyer must verify OTP before proceeding to seller OTP verification'
-            )
-
-        # Enforce seller OTP verification before completion
-        if new_status == 'completed' and not transfer.sellerOtpVerified:
-            return error_response(
-                400,
-                'SELLER_OTP_REQUIRED',
-                'Seller must verify OTP before completing the transfer'
-            )
 
     if 'completedAt' in data:
         try:

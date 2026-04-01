@@ -116,6 +116,13 @@ def _release_grpc_stub(stub_and_channel):
         _return_grpc_channel(channel)
 
 
+def _resolve_stub_and_channel(stub_result):
+    """Backwards-compatible adapter for tests that mock _grpc_stub as a bare stub."""
+    if isinstance(stub_result, tuple) and len(stub_result) == 2:
+        return stub_result
+    return stub_result, None
+
+
 def _get_redis_client():
     """Get Redis client with circuit breaker pattern to prevent cascade failures."""
     global _redis_cb_failures, _redis_cb_last_failure_time, _redis_cb_open
@@ -291,7 +298,7 @@ def hold_seat(inventory_id):
     stub = None
     channel = None
     try:
-        stub, channel = _grpc_stub()
+        stub, channel = _resolve_stub_and_channel(_grpc_stub())
         resp = stub.HoldSeat(seat_inventory_pb2.HoldSeatRequest(
             inventory_id=inventory_id,
             user_id=user_id,
@@ -377,7 +384,7 @@ def release_hold(inventory_id):
     stub = None
     channel = None
     try:
-        stub, channel = _grpc_stub()
+        stub, channel = _resolve_stub_and_channel(_grpc_stub())
         resp = stub.ReleaseSeat(seat_inventory_pb2.ReleaseSeatRequest(
             inventory_id=inventory_id,
             user_id=user_id,
@@ -453,7 +460,7 @@ def confirm_purchase(inventory_id):
     stub = None
     channel = None
     try:
-        stub, channel = _grpc_stub()
+        stub, channel = _resolve_stub_and_channel(_grpc_stub())
         cached_hold = _get_cached_hold(inventory_id)
         if isinstance(cached_hold, dict):
             cached_user_id = cached_hold.get("heldByUserId")
