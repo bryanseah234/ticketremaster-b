@@ -13,7 +13,19 @@ The current repository contains:
 - a committed Kubernetes base under `k8s/base`
 - an external OutSystems credit system of record at `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI`
 
+## Quick Start
+
+1. Start the platform stack (Kong, services, orchestrators, data plane) from the repository root.
+2. Open Kong at `http://localhost:8000` and validate routes with the examples in [API.md](API.md).
+3. Run verification scenarios from [TESTING.md](TESTING.md) for purchase, transfer, QR verification, and notification flows.
+4. Use service-specific READMEs in `services/` and `orchestrators/` for endpoint-level behavior.
+
 ## System architecture
+
+![System architecture (exported)](diagram/readme_system_architecture.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart LR
@@ -75,10 +87,11 @@ flowchart LR
     Verify --> InvSvc
     Verify --> NotifSvc
 
-    %% Real-time notification flow
     NotifSvc --> Browser
     NotifSvc --> Redis
 ```
+
+</details>
 
 ## Architecture layers
 
@@ -191,8 +204,13 @@ requests.post('http://notification-service:8109/notifications/broadcast', json={
 
 See [services/notification-service/NOTIFICATIONS.md](services/notification-service/NOTIFICATIONS.md) for detailed documentation.
 
+![Layer architecture (exported)](diagram/readme_layer_architecture.svg)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph Edge[ticketremaster-edge]
         Tunnel2[cloudflared]
         Kong2[Kong]
@@ -217,6 +235,8 @@ flowchart TB
     Orch --> Rabbit2
     Atomic --> PG
 ```
+
+</details>
 
 ## Runtime surfaces
 

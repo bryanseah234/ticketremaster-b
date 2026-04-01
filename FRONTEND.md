@@ -8,6 +8,11 @@ Related references:
 - [API.md](API.md)
 - [PRD.md](PRD.md)
 
+![Frontend gateway flow (exported)](diagram/frontend_gateway_flow.svg)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 flowchart LR
     FE[Frontend App or Staff App] --> Kong[Kong Gateway]
@@ -20,6 +25,15 @@ flowchart LR
     Kong --> Transfer[transfer-orchestrator]
     Kong --> Verify[ticket-verification-orchestrator]
 ```
+
+</details>
+
+## Quick Start
+
+1. Set frontend API base URL to Kong (`http://localhost:8000` locally, production host in this file).
+2. Attach `Authorization` and `apikey` headers according to the matrix below.
+3. Send `Idempotency-Key` on top-up, purchase, and transfer state-changing requests.
+4. Validate route behavior against [API.md](API.md) before release.
 
 ## Base URLs
 
@@ -54,26 +68,26 @@ Treat this as a local or controlled-environment gateway detail. Do not hardcode 
 
 ## Authentication matrix
 
-|| Route or route group | JWT required | Kong `apikey` required | Idempotency Key | Notes |
-|| --- | --- | --- | --- | --- |
-|| `POST /auth/register` | no | no | no | public |
-|| `POST /auth/login` | no | no | no | public |
-|| `GET /auth/me` | yes | no | no | authenticated profile |
-|| `GET /venues` | no | no | no | public |
-|| `GET /events` | no | no | no | public |
-|| `GET /events/{eventId}` | no | no | no | public |
-|| `GET /events/{eventId}/seats` | no | no | no | public |
-|| `GET /events/{eventId}/seats/{inventoryId}` | no | no | no | public |
-|| `POST /admin/events` | admin JWT | no | no | event creation now requires an admin token in the orchestrator |
-|| `/credits/topup/*` | yes | yes | **yes** | webhook is backend-to-backend only; use idempotency keys |
-|| `/purchase/*` | yes | yes | **yes** | purchase operations; distributed locks on holds |
-|| `/tickets/*` | yes | yes | no | these routes are served by `qr-orchestrator` at the gateway |
-|| `GET /marketplace` | no | no | no | public browse route |
-|| `POST /marketplace/list` | yes | yes | no | listing creation |
-|| `DELETE /marketplace/{listingId}` | yes | yes | no | delist |
-|| `/transfer/*/verify` | yes | yes | no | **rate limited**: max 3 OTP attempts per 15 min |
-|| `/transfer/*` (other) | yes | yes | no | buyer and seller transfer flows; auto-cancel after 24h |
-|| `/verify/*` | staff JWT | yes | no | JWT must contain `role=staff`; `venueId` is also used if present |
+| Route or route group | JWT required | Kong `apikey` required | Idempotency Key | Notes |
+| --- | --- | --- | --- | --- |
+| `POST /auth/register` | no | no | no | public |
+| `POST /auth/login` | no | no | no | public |
+| `GET /auth/me` | yes | no | no | authenticated profile |
+| `GET /venues` | no | no | no | public |
+| `GET /events` | no | no | no | public |
+| `GET /events/{eventId}` | no | no | no | public |
+| `GET /events/{eventId}/seats` | no | no | no | public |
+| `GET /events/{eventId}/seats/{inventoryId}` | no | no | no | public |
+| `POST /admin/events` | admin JWT | no | no | event creation now requires an admin token in the orchestrator |
+| `/credits/topup/*` | yes | yes | **yes** | webhook is backend-to-backend only; use idempotency keys |
+| `/purchase/*` | yes | yes | **yes** | purchase operations; distributed locks on holds |
+| `/tickets/*` | yes | yes | no | these routes are served by `qr-orchestrator` at the gateway |
+| `GET /marketplace` | no | no | no | public browse route |
+| `POST /marketplace/list` | yes | yes | no | listing creation |
+| `DELETE /marketplace/{listingId}` | yes | yes | no | delist |
+| `/transfer/*/verify` | yes | yes | no | **rate limited**: max 3 OTP attempts per 15 min |
+| `/transfer/*` (other) | yes | yes | no | buyer and seller transfer flows; auto-cancel after 24h |
+| `/verify/*` | staff JWT | yes | no | JWT must contain `role=staff`; `venueId` is also used if present |
 
 ## Route map used by the frontend
 

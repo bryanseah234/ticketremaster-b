@@ -1,0 +1,10 @@
+flowchart LR
+    FE[Frontend App or Staff App] --> Kong[Kong Gateway]
+    Kong --> Auth[auth-orchestrator]
+    Kong --> Event[event-orchestrator]
+    Kong --> Credit[credit-orchestrator]
+    Kong --> Purchase[ticket-purchase-orchestrator]
+    Kong --> QR[qr-orchestrator]
+    Kong --> Market[marketplace-orchestrator]
+    Kong --> Transfer[transfer-orchestrator]
+    Kong --> Verify[ticket-verification-orchestrator]
