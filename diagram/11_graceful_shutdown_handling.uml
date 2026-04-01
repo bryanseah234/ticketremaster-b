@@ -1,0 +1,13 @@
+@startuml
+' Source counterpart for 11_graceful_shutdown_handling.png
+' Keep this UML in sync with diagram/11_graceful_shutdown_handling.png when diagrams are updated.
+' If you use Mermaid in docs, mirror those semantic changes here.
+
+title Graceful shutdown handling
+
+note as N1
+  TODO: Replace this placeholder with the actual PlantUML flow
+  that matches diagram/11_graceful_shutdown_handling.png.
+end note
+
+@enduml

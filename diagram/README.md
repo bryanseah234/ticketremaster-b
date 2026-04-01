@@ -89,7 +89,7 @@ requests.post('http://notification-service:8109/notifications/broadcast', json={
 
 The complete system architecture includes:
 
-![System architecture overview (exported)](system_architecture_overview_lr.svg)
+![System architecture overview (exported)](12_system_architecture_overview.png)
 
 <details>
 <summary>Mermaid source</summary>
