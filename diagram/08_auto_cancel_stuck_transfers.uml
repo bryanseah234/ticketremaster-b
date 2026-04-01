@@ -1,0 +1,13 @@
+@startuml
+' Source counterpart for 08_auto_cancel_stuck_transfers.png
+' Keep this UML in sync with diagram/08_auto_cancel_stuck_transfers.png when diagrams are updated.
+' If you use Mermaid in docs, mirror those semantic changes here.
+
+title Auto-cancel stuck transfers
+
+note as N1
+  TODO: Replace this placeholder with the actual PlantUML flow
+  that matches diagram/08_auto_cancel_stuck_transfers.png.
+end note
+
+@enduml

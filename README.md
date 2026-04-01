@@ -23,7 +23,7 @@ The current repository contains:
 
 ## System architecture
 
-![System architecture (exported)](diagram/readme_system_architecture.svg)
+![System architecture (exported)](diagram/12_system_architecture_overview.png)
 
 <details>
 <summary>Mermaid source</summary>

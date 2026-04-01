@@ -1,0 +1,13 @@
+@startuml
+' Source counterpart for 05_distributed_lock_concurrent_scan.png
+' Keep this UML in sync with diagram/05_distributed_lock_concurrent_scan.png when diagrams are updated.
+' If you use Mermaid in docs, mirror those semantic changes here.
+
+title Distributed lock concurrent scan
+
+note as N1
+  TODO: Replace this placeholder with the actual PlantUML flow
+  that matches diagram/05_distributed_lock_concurrent_scan.png.
+end note
+
+@enduml

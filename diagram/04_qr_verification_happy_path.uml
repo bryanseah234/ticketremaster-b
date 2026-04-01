@@ -1,0 +1,13 @@
+@startuml
+' Source counterpart for 04_qr_verification_happy_path.png
+' Keep this UML in sync with diagram/04_qr_verification_happy_path.png when diagrams are updated.
+' If you use Mermaid in docs, mirror those semantic changes here.
+
+title QR verification happy path
+
+note as N1
+  TODO: Replace this placeholder with the actual PlantUML flow
+  that matches diagram/04_qr_verification_happy_path.png.
+end note
+
+@enduml
