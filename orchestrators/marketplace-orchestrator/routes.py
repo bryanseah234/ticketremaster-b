@@ -56,8 +56,8 @@ def browse():
     if pagination_error:
         return pagination_error
 
-    event_id = request.args.get("eventId")
-    upstream_params = {"page": page, "limit": limit} if not event_id else None
+    requested_event_id = request.args.get("eventId")
+    upstream_params = {"page": page, "limit": limit} if not requested_event_id else None
     listings_data, err = call_service("GET", f"{MARKETPLACE_SERVICE}/listings", params=upstream_params)
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not retrieve listings.", 503)
@@ -67,46 +67,18 @@ def browse():
     if listings_list:
         # Validate listings_list contains dictionaries
         listings_list = [l for l in listings_list if isinstance(l, dict)]
-        
-        # Collect unique IDs for batch fetching
-        ticket_ids = list(set(listing['ticketId'] for listing in listings_list if 'ticketId' in listing))
-        seller_ids = list(set(listing['sellerId'] for listing in listings_list if 'sellerId' in listing))
-        
-        # Batch fetch all tickets
-        tickets_map = {}
-        for ticket_id in ticket_ids:
-            ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{ticket_id}")
-            if ticket and isinstance(ticket, dict):
-                tickets_map[ticket_id] = ticket
-        
-        # Collect unique event IDs from tickets
-        event_ids = list(set(ticket['eventId'] for ticket in tickets_map.values() if isinstance(ticket, dict) and 'eventId' in ticket))
-        
-        # Batch fetch all events
-        events_map = {}
-        for event_id in event_ids:
-            event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
-            if event and isinstance(event, dict):
-                events_map[event_id] = event
-        
-        # Batch fetch all sellers
-        sellers_map = {}
-        for seller_id in seller_ids:
-            seller, _ = call_service("GET", f"{USER_SERVICE}/users/{seller_id}")
-            if seller and isinstance(seller, dict):
-                sellers_map[seller_id] = seller
-        
-        # Enrich listings with batched data
         enriched = []
         for listing in listings_list:
-            ticket = tickets_map.get(listing['ticketId'])
-            event = events_map.get(ticket['eventId']) if ticket and isinstance(ticket, dict) and 'eventId' in ticket else None
-            seller = sellers_map.get(listing['sellerId'])
+            ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing.get('ticketId')}")
+            event = None
+            if isinstance(ticket, dict) and ticket.get("eventId"):
+                event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
+            seller, _ = call_service("GET", f"{USER_SERVICE}/users/{listing.get('sellerId')}")
             seller_email = seller.get("email") if seller else None
             seller_display = seller_email.split("@")[0] if seller_email else None
             
             # Apply eventId filter if specified
-            if event_id and (not event or str(event.get("eventId")) != str(event_id)):
+            if requested_event_id and (not event or str(event.get("eventId")) != str(requested_event_id)):
                 continue
             
             enriched.append({
@@ -126,7 +98,7 @@ def browse():
     else:
         enriched = []
 
-    if event_id:
+    if requested_event_id:
         total = len(enriched)
         start = (page - 1) * limit
         enriched = enriched[start:start + limit]

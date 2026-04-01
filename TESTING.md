@@ -58,6 +58,8 @@ docker compose run --rm seat-inventory-service python seed_seat_inventory.py
 pytest
 ```
 
+> `tests/test_rabbitmq_integration.py` is an infrastructure integration suite. It requires RabbitMQ DNS/service reachability (for example `rabbitmq:5672` from Docker Compose network or Kubernetes service networking).
+
 ### Run Tests for Specific Service
 
 ```bash
@@ -94,6 +96,19 @@ Each orchestrator has a local Swagger UI:
 2. Import `postman/TicketRemaster.local.postman_environment.json`
 3. Select the "TicketRemaster.local" environment
 4. Run requests in order
+
+#### CLI Collection Runs
+
+```bash
+# Install one of these first:
+postman --version
+# or
+newman --version
+
+# Example with Newman
+newman run postman/TicketRemaster.postman_collection.json \
+  -e postman/TicketRemaster.local.postman_environment.json
+```
 
 ### Using curl
 
@@ -219,10 +234,10 @@ docker compose exec user-service-db psql -U ticketremaster -d user_service -c "S
 
 ```bash
 # Validate manifests
-kubectl kustomize .\k8s\base
+kubectl kustomize k8s/base
 
 # Apply to cluster
-kubectl apply -k .\k8s\base
+kubectl apply -k k8s/base
 ```
 
 ### Check Deployment

@@ -7,11 +7,15 @@ import logging
 from typing import Optional
 
 import sentry_sdk
+from sentry_sdk import VERSION as SENTRY_VERSION
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from flask import Flask, has_request_context, request
 
 logger = logging.getLogger(__name__)
+_SENTRY_SUPPORTS_PROFILE_LIFECYCLE = tuple(
+    int(part) for part in SENTRY_VERSION.split(".")[:2]
+) >= (2, 35)
 
 
 def init_sentry(
@@ -58,7 +62,7 @@ def init_sentry(
         event_level=None,  # No automatic log-to-event conversion
     )
 
-    sentry_sdk.init(
+    init_kwargs = dict(
         dsn=dsn,
         environment=environment,
         release=release,
@@ -71,11 +75,8 @@ def init_sentry(
         traces_sampler=_traces_sampler,
         # Profiling (optional, for performance analysis)
         profiles_sample_rate=0.1,
-        profile_lifecycle="trace",
         # Error monitoring
         send_default_pii=True,
-        # Logs
-        enable_logs=True,
         # Breadcrumbs
         max_breadcrumbs=100,
         # Attach stacktrace to events
@@ -83,6 +84,10 @@ def init_sentry(
         # Debug mode in development
         debug=env == "development",
     )
+    if _SENTRY_SUPPORTS_PROFILE_LIFECYCLE:
+        init_kwargs["profile_lifecycle"] = "trace"
+
+    sentry_sdk.init(**init_kwargs)
     
     # Capture service startup event
     capture_startup_event(service_name, environment, release)
