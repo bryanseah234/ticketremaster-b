@@ -382,7 +382,7 @@ For a fuller validation and troubleshooting flow, use [TESTING.md](TESTING.md).
 
 - [OUTSYSTEMS.md](OUTSYSTEMS.md) — OutSystems Credit Service integration contract and setup
 - [INSTRUCTION.md](INSTRUCTION.md) — implementation notes, build order reasoning, and deployment guidance
-- [ticketremaster-k8s-architecture.md](ticketremaster-k8s-architecture.md) — Kubernetes architecture specification
+- [TICKETREMASTER_K8S_ARCHITECTURE.md](TICKETREMASTER_K8S_ARCHITECTURE.md) — Kubernetes architecture specification
 
 ### Collections and environments
 

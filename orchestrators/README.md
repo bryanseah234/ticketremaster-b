@@ -25,10 +25,8 @@ Current repository status:
 - [../shared/grpc/README.md](../shared/grpc/README.md)
 
 ### Internal implementation playbooks
-- [../.github/skills/orchestrator-flow/SKILL.md](../.github/skills/orchestrator-flow/SKILL.md)
-- [../.github/skills/flask-service/SKILL.md](../.github/skills/flask-service/SKILL.md)
-- [../.github/skills/error-handling/SKILL.md](../.github/skills/error-handling/SKILL.md)
-- [../.github/skills/qr-encryption/SKILL.md](../.github/skills/qr-encryption/SKILL.md)
+- Workspace skill index and agent workflow guidance: [../AGENTS.md#available-skills](../AGENTS.md#available-skills)
+- Recommended relevant skills for this folder: `orchestrator-flow`, `flask-service`, `error-handling`, `qr-encryption`
 
 ## Standard Build Expectations
 
@@ -54,4 +52,3 @@ For orchestrators using queue expiry/compensation:
 - Frontend-facing orchestrator API contract: [../FRONTEND.md](../FRONTEND.md)
 - End-to-end testing flow: [../TESTING.md](../TESTING.md)
 - Root documentation hub: [../README.md](../README.md)
-
