@@ -74,11 +74,17 @@ def declare_queues(channel=None):
         durable=True,
     )
 
+    # Timeout queue for auto-cancellation of stuck transfers
+    channel.queue_declare(
+        queue='transfer_timeout_queue',
+        durable=True,
+    )
+
     print(
         f'Queue setup complete. '
         f'TTL={hold_ttl_ms}ms, '
         f'DLX=seat_hold_dlx, '
-        f'Queues: seat_hold_ttl_queue, seat_hold_expired_queue, seller_notification_queue'
+        f'Queues: seat_hold_ttl_queue, seat_hold_expired_queue, seller_notification_queue, transfer_timeout_queue'
     )
 
     if close_after:

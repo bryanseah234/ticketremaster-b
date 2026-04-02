@@ -57,7 +57,7 @@ def create_transfer():
         buyerId=data['buyerId'],
         sellerId=data['sellerId'],
         creditAmount=data['creditAmount'],
-        status='pending_buyer_otp',
+        status='pending_seller_acceptance',
         buyerVerificationSid=data.get('buyerVerificationSid'),
         sellerVerificationSid=data.get('sellerVerificationSid'),
     )

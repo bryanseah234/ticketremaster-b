@@ -17,6 +17,8 @@ from service_client import call_service
 logger = logging.getLogger(__name__)
 
 TRANSFER_TIMEOUT_HOURS = int(os.environ.get("TRANSFER_TIMEOUT_HOURS", "24"))
+TRANSFER_SERVICE = os.environ.get("TRANSFER_SERVICE_URL", "http://transfer-service:5000")
+MARKETPLACE_SERVICE = os.environ.get("MARKETPLACE_SERVICE_URL", "http://marketplace-service:5000")
 
 
 def _get_connection():
@@ -38,14 +40,14 @@ def _cancel_transfer(transfer_id, listing_id):
     """
     try:
         # Update transfer status to cancelled
-        call_service("PATCH", f"/transfers/{transfer_id}", json={
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
             "status": "cancelled",
             "cancelledAt": datetime.now(timezone.utc).isoformat(),
             "cancelReason": "timeout",
         })
-        
+
         # Return listing to active status
-        call_service("PATCH", f"/listings/{listing_id}", json={
+        call_service("PATCH", f"{MARKETPLACE_SERVICE}/listings/{listing_id}", json={
             "status": "active",
         })
         
@@ -74,12 +76,12 @@ def start_transfer_timeout_consumer():
                     logger.info("Processing transfer timeout: transfer=%s", transfer_id)
                     
                     # Check if transfer is still in pending state
-                    transfer, err = call_service("GET", f"/transfers/{transfer_id}")
+                    transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
                     if err:
                         logger.warning("Transfer %s not found, skipping cancellation", transfer_id)
                         ch.basic_ack(delivery_tag=method.delivery_tag)
                         return
-                    
+
                     # Only cancel if still pending (not completed or already cancelled)
                     if transfer.get("status") not in ["pending_seller_acceptance", "pending_buyer_otp", "pending_seller_otp"]:
                         logger.info("Transfer %s already in status %s, skipping cancellation", transfer_id, transfer.get("status"))
@@ -87,21 +89,7 @@ def start_transfer_timeout_consumer():
                         return
                     
                     # Cancel the transfer
-                    if _cancel_transfer(transfer_id, listing_id):
-                        # Notify buyer and seller
-                        call_service("POST", "/notifications", json={
-                            "userId": buyer_id,
-                            "type": "transfer_expired",
-                            "message": f"Transfer for listing {listing_id} has expired.",
-                            "transferId": transfer_id,
-                        })
-                        
-                        call_service("POST", "/notifications", json={
-                            "userId": seller_id,
-                            "type": "transfer_expired",
-                            "message": f"Transfer for listing {listing_id} has expired.",
-                            "transferId": transfer_id,
-                        })
+                    _cancel_transfer(transfer_id, listing_id)
                     
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                 except Exception as exc:

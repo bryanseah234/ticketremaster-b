@@ -2,9 +2,9 @@
 Transfer Orchestrator routes.
 
 P2P transfer flow:
-  POST /transfer/initiate            buyer initiates, buyer OTP sent
+  POST /transfer/initiate            buyer initiates
+  POST /transfer/<id>/seller-accept  seller accepts → buyer OTP sent
   POST /transfer/<id>/buyer-verify   buyer submits OTP → seller notified via queue
-  POST /transfer/<id>/seller-accept  seller accepts → seller OTP sent
   POST /transfer/<id>/seller-verify  seller submits OTP → saga executes
   GET  /transfer/<id>                poll status (buyer or seller)
   POST /transfer/<id>/cancel         cancel in-progress transfer
@@ -197,7 +197,7 @@ def _execute_saga(transfer_id, buyer_id, seller_id, credit_amount, ticket_id, li
 
         # 5. Transfer ticket
         _, err = call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={
-            "ownerId": seller_id, "status": "active",
+            "ownerId": buyer_id, "status": "active",
         })
         if err:
             raise RuntimeError(f"Ticket transfer failed: {err}")
