@@ -105,6 +105,14 @@ data:
     _format_version: "3.0"
     _transform: true
     plugins:
+      - name: pre-function
+        config:
+          access:
+            - |
+              local path = kong.request.get_path()
+              if path:sub(1, 4) == "/api" then
+                kong.service.request.set_path(path:sub(5))
+              end
       - name: rate-limiting
         config:
           minute: 50
@@ -241,7 +249,7 @@ data:
           - name: api-events-route
             paths:
               - /api/events
-            strip_path: true
+            strip_path: false
           - name: admin-event-route
             paths:
               - /admin/events
