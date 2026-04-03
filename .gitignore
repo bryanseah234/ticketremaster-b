@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 *.env
+k8s/base/secrets.local.yaml
 
 # ── Python ───────────────────────────────────────────────────────
 # Byte-compiled / optimized / DLL files

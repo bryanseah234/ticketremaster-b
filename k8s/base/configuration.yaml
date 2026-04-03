@@ -33,69 +33,6 @@ data:
   REDIS_URL: redis://redis.ticketremaster-data.svc.cluster.local:6379/0
 ---
 apiVersion: v1
-kind: Secret
-metadata:
-  name: core-secrets
-  namespace: ticketremaster-core
-type: Opaque
-stringData:
-  JWT_SECRET: change_me
-  QR_SECRET: change_me
-  OUTSYSTEMS_API_KEY: change_me
-  STRIPE_SECRET_KEY: sk_test_change_me
-  STRIPE_WEBHOOK_SECRET: whsec_change_me
-  SMU_API_KEY: change_me
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: core-data-secrets
-  namespace: ticketremaster-core
-type: Opaque
-stringData:
-  RABBITMQ_USER: guest
-  RABBITMQ_PASS: guest
-  USER_SERVICE_DB_PASSWORD: change_me
-  VENUE_SERVICE_DB_PASSWORD: change_me
-  SEAT_SERVICE_DB_PASSWORD: change_me
-  EVENT_SERVICE_DB_PASSWORD: change_me
-  SEAT_INVENTORY_SERVICE_DB_PASSWORD: change_me
-  CREDIT_TRANSACTION_SERVICE_DB_PASSWORD: change_me
-  TICKET_SERVICE_DB_PASSWORD: change_me
-  TICKET_LOG_SERVICE_DB_PASSWORD: change_me
-  MARKETPLACE_SERVICE_DB_PASSWORD: change_me
-  TRANSFER_SERVICE_DB_PASSWORD: change_me
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: data-secrets
-  namespace: ticketremaster-data
-type: Opaque
-stringData:
-  RABBITMQ_USER: guest
-  RABBITMQ_PASS: guest
-  USER_SERVICE_DB_PASSWORD: change_me
-  VENUE_SERVICE_DB_PASSWORD: change_me
-  SEAT_SERVICE_DB_PASSWORD: change_me
-  EVENT_SERVICE_DB_PASSWORD: change_me
-  SEAT_INVENTORY_SERVICE_DB_PASSWORD: change_me
-  CREDIT_TRANSACTION_SERVICE_DB_PASSWORD: change_me
-  TICKET_SERVICE_DB_PASSWORD: change_me
-  TICKET_LOG_SERVICE_DB_PASSWORD: change_me
-  MARKETPLACE_SERVICE_DB_PASSWORD: change_me
-  TRANSFER_SERVICE_DB_PASSWORD: change_me
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: edge-secrets
-  namespace: ticketremaster-edge
-type: Opaque
-stringData:
-  CLOUDFLARE_TUNNEL_TOKEN: change_me
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: kong-declarative-config
@@ -274,18 +211,21 @@ data:
               - /marketplace
             methods:
               - GET
+              - OPTIONS
             strip_path: false
           - name: api-marketplace-browse-route
             paths:
               - /api/marketplace
             methods:
               - GET
+              - OPTIONS
             strip_path: false
           - name: marketplace-list-route
             paths:
               - /marketplace/list
             methods:
               - POST
+              - OPTIONS
             strip_path: false
             plugins:
               - name: key-auth
@@ -299,6 +239,7 @@ data:
               - /api/marketplace/list
             methods:
               - POST
+              - OPTIONS
             strip_path: false
             plugins:
               - name: key-auth
@@ -312,6 +253,7 @@ data:
               - ~/marketplace/[^/]+$
             methods:
               - DELETE
+              - OPTIONS
             strip_path: false
             plugins:
               - name: key-auth
@@ -325,6 +267,7 @@ data:
               - ~/api/marketplace/[^/]+$
             methods:
               - DELETE
+              - OPTIONS
             strip_path: false
             plugins:
               - name: key-auth

@@ -45,6 +45,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: USER_SERVICE_DB_HOST
               value: user-service-db.ticketremaster-data.svc.cluster.local
@@ -120,6 +122,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: VENUE_SERVICE_DB_HOST
               value: venue-service-db.ticketremaster-data.svc.cluster.local
@@ -195,6 +199,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: SEAT_SERVICE_DB_HOST
               value: seat-service-db.ticketremaster-data.svc.cluster.local
@@ -270,6 +276,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: EVENT_SERVICE_DB_HOST
               value: event-service-db.ticketremaster-data.svc.cluster.local
@@ -350,6 +358,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: SEAT_INVENTORY_SERVICE_DB_HOST
               value: seat-inventory-service-db.ticketremaster-data.svc.cluster.local
@@ -425,6 +435,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: TICKET_SERVICE_DB_HOST
               value: ticket-service-db.ticketremaster-data.svc.cluster.local
@@ -500,6 +512,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: TICKET_LOG_SERVICE_DB_HOST
               value: ticket-log-service-db.ticketremaster-data.svc.cluster.local
@@ -575,6 +589,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: MARKETPLACE_SERVICE_DB_HOST
               value: marketplace-service-db.ticketremaster-data.svc.cluster.local
@@ -650,6 +666,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: TRANSFER_SERVICE_DB_HOST
               value: transfer-service-db.ticketremaster-data.svc.cluster.local
@@ -725,6 +743,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: CREDIT_TRANSACTION_SERVICE_DB_HOST
               value: credit-transaction-service-db.ticketremaster-data.svc.cluster.local
@@ -793,6 +813,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: STRIPE_SECRET_KEY
               valueFrom:
@@ -856,6 +878,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: SMU_API_KEY
               valueFrom:
@@ -914,6 +938,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -971,6 +997,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -1023,6 +1051,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -1080,6 +1110,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -1147,6 +1179,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -1204,6 +1238,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -1256,6 +1292,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -1323,6 +1361,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: core-runtime
+            - secretRef:
+                name: core-secrets
           env:
             - name: JWT_SECRET
               valueFrom:

@@ -15,6 +15,8 @@ EVENT_SERVICE          = os.environ.get("EVENT_SERVICE_URL",           "http://e
 VENUE_SERVICE          = os.environ.get("VENUE_SERVICE_URL",           "http://venue-service:5000")
 SEAT_SERVICE           = os.environ.get("SEAT_SERVICE_URL",            "http://seat-service:5000")
 SEAT_INVENTORY_SERVICE = os.environ.get("SEAT_INVENTORY_SERVICE_URL",  "http://seat-inventory-service:5000")
+TICKET_SERVICE         = os.environ.get("TICKET_SERVICE_URL",          "http://ticket-service:5000")
+USER_SERVICE           = os.environ.get("USER_SERVICE_URL",            "http://user-service:5000")
 
 
 def _error(code, message, status):
@@ -264,6 +266,80 @@ def get_seat_detail(event_id, inventory_id):
             "name": venue["name"],
             "address": venue.get("address"),
         } if venue else None,
+    }}), 200
+
+
+# ── GET /admin/events/<event_id>/dashboard ───────────────────────────────────
+
+@bp.get("/admin/events/<event_id>/dashboard")
+@require_admin
+def get_event_dashboard(event_id):
+    """
+    Admin: aggregate inventory, revenue, and attendee list for an event
+    ---
+    tags:
+      - Admin
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+    responses:
+      200:
+        description: Dashboard stats and attendee list
+      401:
+        description: Unauthorized
+      403:
+        description: Admin role required
+      404:
+        description: Event not found
+    """
+    event, err = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
+    if err:
+        return _error("EVENT_NOT_FOUND", "Event not found.", 404)
+
+    inv_data, err = call_service("GET", f"{SEAT_INVENTORY_SERVICE}/inventory/event/{event_id}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not fetch inventory data.", 503)
+
+    inventory = inv_data.get("inventory", [])
+    total_seats = len(inventory)
+    sold_inventory = [s for s in inventory if s.get("status") == "sold"]
+
+    tickets_data, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/event/{event_id}")
+    tickets = tickets_data.get("tickets", []) if tickets_data else []
+
+    revenue = sum(t.get("price", 0) for t in tickets)
+    inv_to_ticket = {t["inventoryId"]: t for t in tickets if t.get("inventoryId")}
+
+    seat_list, _ = call_service("GET", f"{SEAT_SERVICE}/seats/venue/{event.get('venueId', '')}")
+    seat_map = {s["seatId"]: s for s in (seat_list or {}).get("seats", [])}
+
+    attendees = []
+    for inv_item in sold_inventory:
+        seat_id = inv_item.get("seatId", "")
+        seat_info = seat_map.get(seat_id, {})
+        ticket = inv_to_ticket.get(inv_item.get("inventoryId", ""))
+        email = ""
+        if ticket:
+            user, _ = call_service("GET", f"{USER_SERVICE}/users/{ticket['ownerId']}")
+            email = user.get("email", "") if user else ""
+        attendees.append({
+            "seatId": seat_id,
+            "rowNumber": seat_info.get("rowNumber"),
+            "seatNumber": seat_info.get("seatNumber"),
+            "email": email,
+        })
+
+    return jsonify({"data": {
+        "stats": {
+            "seatsSold": len(sold_inventory),
+            "totalSeats": total_seats,
+            "revenue": revenue,
+        },
+        "attendees": attendees,
     }}), 200
 
 

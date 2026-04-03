@@ -69,6 +69,12 @@ def get_tickets_by_owner(owner_id):
     return jsonify({'tickets': [ticket.to_dict() for ticket in tickets]}), 200
 
 
+@bp.get('/tickets/event/<event_id>')
+def get_tickets_by_event(event_id):
+    tickets = Ticket.query.filter_by(eventId=event_id).order_by(Ticket.createdAt.desc()).all()
+    return jsonify({'tickets': [ticket.to_dict() for ticket in tickets]}), 200
+
+
 @bp.get('/tickets/qr/<qr_hash>')
 def get_ticket_by_qr_hash(qr_hash):
     ticket = Ticket.query.filter_by(qrHash=qr_hash).first()

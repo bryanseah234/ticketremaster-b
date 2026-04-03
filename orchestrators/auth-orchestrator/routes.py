@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
+import redis as redis_lib
 from flask import Blueprint, jsonify, request
 
 from middleware import require_auth, revoke_token
@@ -12,7 +13,14 @@ from service_client import call_credit_service, call_service
 bp = Blueprint("auth", __name__)
 
 USER_SERVICE = os.environ.get("USER_SERVICE_URL", "http://user-service:5000")
+OTP_WRAPPER  = os.environ.get("OTP_WRAPPER_URL",  "http://otp-wrapper:5000")
+REDIS_URL    = os.environ.get("REDIS_URL",         "redis://redis:6379/0")
 JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "24"))
+_OTP_SID_TTL = 600  # 10 minutes
+
+
+def _get_redis():
+    return redis_lib.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=2)
 
 
 def _error(code, message, status):
@@ -112,12 +120,108 @@ def register():
         call_service("DELETE", f"{USER_SERVICE}/users/{user_data['userId']}")
         return _error("INTERNAL_ERROR", "Could not initialise account. Please try again.", 500)
 
+    # Send OTP for phone verification
+    otp_data, otp_err = call_service("POST", f"{OTP_WRAPPER}/otp/send", json={
+        "phoneNumber": data["phoneNumber"],
+    })
+    if otp_err or not otp_data or not otp_data.get("sid"):
+        # Non-fatal: account is created, user can re-request OTP later via verify page
+        pass
+    else:
+        try:
+            r = _get_redis()
+            r.setex(f"pending_otp:{user_data['userId']}", _OTP_SID_TTL, otp_data["sid"])
+        except Exception:
+            pass
+
     return jsonify({"data": {
         "userId": user_data["userId"],
         "email": user_data["email"],
         "role": user_data["role"],
         "createdAt": user_data["createdAt"],
     }}), 201
+
+
+# ── POST /auth/verify-registration ──────────────────────────────────────────
+
+@bp.post("/auth/verify-registration")
+def verify_registration():
+    """
+    Verify phone number with OTP after registration
+    ---
+    tags:
+      - Auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [userId, otpCode]
+          properties:
+            userId:
+              type: string
+            otpCode:
+              type: string
+              example: "123456"
+    responses:
+      200:
+        description: Verification successful — returns JWT token
+      400:
+        description: Missing fields or no pending verification
+      401:
+        description: Invalid OTP code
+      404:
+        description: User not found
+    """
+    data = request.get_json(silent=True) or {}
+    user_id = data.get("userId")
+    otp_code = data.get("otpCode")
+
+    if not user_id or not otp_code:
+        return _error("VALIDATION_ERROR", "userId and otpCode are required.", 400)
+
+    try:
+        r = _get_redis()
+        sid = r.get(f"pending_otp:{user_id}")
+    except Exception:
+        return _error("SERVICE_UNAVAILABLE", "Verification service unavailable.", 503)
+
+    if not sid:
+        return _error("NO_PENDING_VERIFICATION", "No pending verification found. Please register again.", 400)
+
+    user_data, err = call_service("GET", f"{USER_SERVICE}/users/{user_id}")
+    if err:
+        return _error("USER_NOT_FOUND", "User not found.", 404)
+
+    verify_data, verify_err = call_service("POST", f"{OTP_WRAPPER}/otp/verify", json={
+        "sid": sid,
+        "otp": otp_code,
+        "phoneNumber": user_data.get("phoneNumber", ""),
+    })
+    if verify_err:
+        return _error("OTP_VERIFY_FAILED", "Could not verify OTP.", 502)
+
+    if not verify_data.get("verified"):
+        return _error("OTP_INVALID", "Invalid OTP code.", 401)
+
+    try:
+        r.delete(f"pending_otp:{user_id}")
+    except Exception:
+        pass
+
+    token = _generate_token(user_data)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS)).isoformat()
+
+    return jsonify({"data": {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": {
+            "userId": user_data["userId"],
+            "email": user_data["email"],
+            "role": user_data["role"],
+        },
+    }}), 200
 
 
 # ── POST /auth/login ─────────────────────────────────────────────────────────
