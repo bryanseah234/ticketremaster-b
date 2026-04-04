@@ -10,6 +10,7 @@ spec:
   policyTypes:
     - Egress
   egress:
+    # Allow DNS to kube-dns pods in kube-system
     - ports:
         - port: 53
           protocol: UDP
@@ -19,3 +20,12 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
+    # Allow DNS to kube-dns service IP (10.96.0.10)
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 10.96.0.10/32
