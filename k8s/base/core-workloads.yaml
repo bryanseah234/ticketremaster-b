@@ -37,11 +37,18 @@ spec:
             - until nc -z user-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: user-service
-          image: ticketremaster/user-service:latest
+          image: ticketremaster/user-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -114,11 +121,18 @@ spec:
             - until nc -z venue-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: venue-service
-          image: ticketremaster/venue-service:latest
+          image: ticketremaster/venue-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -191,11 +205,18 @@ spec:
             - until nc -z seat-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: seat-service
-          image: ticketremaster/seat-service:latest
+          image: ticketremaster/seat-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -268,11 +289,18 @@ spec:
             - until nc -z event-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: event-service
-          image: ticketremaster/event-service:latest
+          image: ticketremaster/event-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -348,13 +376,20 @@ spec:
             - until nc -z seat-inventory-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: seat-inventory-service
-          image: ticketremaster/seat-inventory-service:latest
+          image: ticketremaster/seat-inventory-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
             - name: grpc
               containerPort: 50051
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "384Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -427,11 +462,18 @@ spec:
             - until nc -z ticket-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: ticket-service
-          image: ticketremaster/ticket-service:latest
+          image: ticketremaster/ticket-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -504,11 +546,18 @@ spec:
             - until nc -z ticket-log-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: ticket-log-service
-          image: ticketremaster/ticket-log-service:latest
+          image: ticketremaster/ticket-log-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -581,11 +630,18 @@ spec:
             - until nc -z marketplace-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: marketplace-service
-          image: ticketremaster/marketplace-service:latest
+          image: ticketremaster/marketplace-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -658,11 +714,18 @@ spec:
             - until nc -z transfer-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: transfer-service
-          image: ticketremaster/transfer-service:latest
+          image: ticketremaster/transfer-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -735,11 +798,18 @@ spec:
             - until nc -z credit-transaction-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
       containers:
         - name: credit-transaction-service
-          image: ticketremaster/credit-transaction-service:latest
+          image: ticketremaster/credit-transaction-service:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -805,11 +875,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: stripe-wrapper
-          image: ticketremaster/stripe-wrapper:latest
+          image: ticketremaster/stripe-wrapper:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -870,11 +947,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: otp-wrapper
-          image: ticketremaster/otp-wrapper:latest
+          image: ticketremaster/otp-wrapper:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -930,11 +1014,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: auth-orchestrator
-          image: ticketremaster/auth-orchestrator:latest
+          image: ticketremaster/auth-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -989,11 +1080,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: event-orchestrator
-          image: ticketremaster/event-orchestrator:latest
+          image: ticketremaster/event-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -1043,11 +1141,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: credit-orchestrator
-          image: ticketremaster/credit-orchestrator:latest
+          image: ticketremaster/credit-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -1102,11 +1207,18 @@ spec:
       priorityClassName: ticketremaster-critical
       containers:
         - name: ticket-purchase-orchestrator
-          image: ticketremaster/ticket-purchase-orchestrator:latest
+          image: ticketremaster/ticket-purchase-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "384Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -1171,11 +1283,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: qr-orchestrator
-          image: ticketremaster/qr-orchestrator:latest
+          image: ticketremaster/qr-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -1230,11 +1349,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: marketplace-orchestrator
-          image: ticketremaster/marketplace-orchestrator:latest
+          image: ticketremaster/marketplace-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -1284,11 +1410,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: transfer-orchestrator
-          image: ticketremaster/transfer-orchestrator:latest
+          image: ticketremaster/transfer-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -1353,11 +1486,18 @@ spec:
       priorityClassName: ticketremaster-standard
       containers:
         - name: ticket-verification-orchestrator
-          image: ticketremaster/ticket-verification-orchestrator:latest
+          image: ticketremaster/ticket-verification-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 5000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           envFrom:
             - configMapRef:
                 name: core-runtime
