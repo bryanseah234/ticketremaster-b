@@ -35,10 +35,21 @@ spec:
           ports:
             - containerPort: 6379
               name: redis
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
           args:
             - redis-server
             - --appendonly
             - "yes"
+            - --maxmemory
+            - "100mb"
+            - --maxmemory-policy
+            - "allkeys-lru"
           readinessProbe:
             tcpSocket:
               port: 6379
@@ -104,6 +115,13 @@ spec:
               name: amqp
             - containerPort: 15672
               name: management
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
           env:
             - name: RABBITMQ_DEFAULT_USER
               valueFrom:
@@ -115,6 +133,9 @@ spec:
                 secretKeyRef:
                   name: data-secrets
                   key: RABBITMQ_PASS
+            # Tell RabbitMQ to use at most 80% of its container memory limit (409Mi)
+            - name: RABBITMQ_VM_MEMORY_HIGH_WATERMARK
+              value: "0.8"
           readinessProbe:
             exec:
               command:
@@ -181,6 +202,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -244,6 +272,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -307,6 +342,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -370,6 +412,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -433,6 +482,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -496,6 +552,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -559,6 +622,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -622,6 +692,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -685,6 +762,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
@@ -748,6 +832,13 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
           ports:
             - containerPort: 5432
               name: postgres
