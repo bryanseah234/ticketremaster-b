@@ -143,29 +143,29 @@ Use these to log in without registering:
 
 ## API Routes Reference
 
-All frontend requests go to `VITE_API_BASE_URL` with the `/api` prefix. Kong routes them internally.
+All frontend requests go to `VITE_API_BASE_URL` directly — **no `/api` prefix**. Kong routes them internally.
 
 | Feature | Method | Path |
 |---|---|---|
-| Register | POST | `/api/auth/register` |
-| Verify phone (OTP) | POST | `/api/auth/verify-registration` |
-| Login | POST | `/api/auth/login` |
-| Get current user | GET | `/api/auth/me` |
-| List events | GET | `/api/events` |
-| Event detail | GET | `/api/events/:id` |
-| Seat map | GET | `/api/events/:id/seats` |
-| Hold seat | POST | `/api/purchase/hold/:inventoryId` |
-| Release hold | DELETE | `/api/purchase/hold/:inventoryId` |
-| Confirm purchase | POST | `/api/purchase/confirm/:inventoryId` |
-| My tickets | GET | `/api/tickets` |
-| Ticket QR | GET | `/api/tickets/:id/qr` |
-| Credit balance | GET | `/api/credits/balance` |
-| Marketplace | GET | `/api/marketplace` |
-| List ticket | POST | `/api/marketplace/list` |
-| Transfer | POST | `/api/transfer/initiate` |
-| Verify ticket (staff) | POST | `/api/verify/scan` |
-| Admin: create event | POST | `/api/admin/events` |
-| Admin: event dashboard | GET | `/api/admin/events/:id/dashboard` |
+| Register | POST | `/auth/register` |
+| Verify phone (OTP) | POST | `/auth/verify-registration` |
+| Login | POST | `/auth/login` |
+| Get current user | GET | `/auth/me` |
+| List events | GET | `/events` |
+| Event detail | GET | `/events/:id` |
+| Seat map | GET | `/events/:id/seats` |
+| Hold seat | POST | `/purchase/hold/:inventoryId` |
+| Release hold | DELETE | `/purchase/hold/:inventoryId` |
+| Confirm purchase | POST | `/purchase/confirm/:inventoryId` |
+| My tickets | GET | `/tickets` |
+| Ticket QR | GET | `/tickets/:id/qr` |
+| Credit balance | GET | `/credits/balance` |
+| Marketplace | GET | `/marketplace` |
+| List ticket | POST | `/marketplace/list` |
+| Transfer | POST | `/transfer/initiate` |
+| Verify ticket (staff) | POST | `/verify/scan` |
+| Admin: create event | POST | `/admin/events` |
+| Admin: event dashboard | GET | `/admin/events/:id/dashboard` |
 
 ---
 
@@ -196,6 +196,41 @@ kubectl logs <pod-name> -n ticketremaster-core
 
 **Secrets missing / services logging "Missing required secret"**
 - You are missing `k8s/base/secrets.local.yaml`. Ask the backend maintainer for this file.
+
+---
+
+## Replica Scaling (Minikube only)
+
+The default manifests set all deployments to `replicas: 1`. On a single Minikube node, scaling everything to 2 simultaneously causes a DNS storm that crashes CoreDNS (all init containers query DNS at once, overloading it).
+
+**Recommended approach for HA on Minikube:**
+
+Scale only the stateless orchestrators to 2 — they have no init containers and start instantly. Keep DB-backed services at 1.
+
+```bash
+# Scale orchestrators to 2 (safe — no init containers)
+kubectl scale deployment \
+  auth-orchestrator credit-orchestrator event-orchestrator \
+  marketplace-orchestrator qr-orchestrator \
+  ticket-purchase-orchestrator ticket-verification-orchestrator \
+  transfer-orchestrator \
+  -n ticketremaster-core --replicas=2
+
+# Also scale Kong and cloudflared
+kubectl scale deployment kong cloudflared -n ticketremaster-edge --replicas=2
+```
+
+Wait 60 seconds between each group if you want to be safe. Do **not** scale all 20 services at once.
+
+**If CoreDNS crashes** (symptom: all pods show `Temporary failure in name resolution`):
+
+```bash
+# Restart CoreDNS
+kubectl delete pod -n kube-system -l k8s-app=kube-dns
+
+# Scale everything back to 1 first, let it stabilize, then scale up gradually
+kubectl scale deployment --all -n ticketremaster-core --replicas=1
+```
 
 ---
 
