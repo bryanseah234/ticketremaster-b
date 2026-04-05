@@ -58,15 +58,15 @@ def list_events():
       - in: query
         name: type
         type: string
-        description: Filter by event type (e.g. concert, orchestra, sports)
+        description: "Filter by event type (e.g. concert, orchestra, sports)"
       - in: query
         name: page
         type: integer
-        description: Page number (default: 1)
+        description: "Page number (default: 1)"
       - in: query
         name: limit
         type: integer
-        description: Items per page (default: 20, max: 100)
+        description: "Items per page (default: 20, max: 100)"
     responses:
       200:
         description: List of events with venue and seatsAvailable

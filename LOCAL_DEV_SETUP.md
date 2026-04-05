@@ -6,6 +6,10 @@
 
 ### I'm the backend maintainer (running Minikube + Cloudflare tunnel)
 
+Double-click `start-backend.bat` in the repo root — it handles everything automatically (Docker check, Minikube start, manifest apply, port-forward, tests).
+
+Or manually:
+
 ```powershell
 minikube start
 kubectl apply -k k8s/base
@@ -40,9 +44,9 @@ Then `npm run dev`. Done. The backend maintainer needs to have their Minikube ru
 
 ### I want to run the full backend myself (no Cloudflare, fully offline)
 
-Run your own Minikube and use port-forward. No Cloudflare account needed — everything stays on `localhost`.
+Double-click `start-backend.bat` — same script, works for both cases.
 
-If already set up:
+Or manually:
 
 ```powershell
 minikube start

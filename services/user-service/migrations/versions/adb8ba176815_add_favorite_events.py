@@ -30,7 +30,12 @@ def upgrade():
     sa.UniqueConstraint('token')
     )
     with op.batch_alter_table('users', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('favoriteEvents', sa.ARRAY(sa.String()).with_variant(sa.JSON(), 'sqlite'), nullable=False))
+        batch_op.add_column(sa.Column('favoriteEvents', sa.ARRAY(sa.String()).with_variant(sa.JSON(), 'sqlite'), nullable=True, server_default='{}'))
+
+    # Backfill nulls then tighten to NOT NULL
+    op.execute("UPDATE users SET \"favoriteEvents\" = '{}' WHERE \"favoriteEvents\" IS NULL")
+    with op.batch_alter_table('users', schema=None) as batch_op:
+        batch_op.alter_column('favoriteEvents', nullable=False)
 
     # ### end Alembic commands ###
 
