@@ -60,6 +60,7 @@ echo.
 
 :: ── Start port-forward in new window ─────────────────────────────
 echo [5/5] Starting Kong port-forward on localhost:8000...
+echo (Skip this if you only need the public Cloudflare URL)
 start "Kong Port-Forward" cmd /k "kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80"
 timeout /t 3 /nobreak >nul
 echo.
