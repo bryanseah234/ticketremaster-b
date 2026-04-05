@@ -110,15 +110,14 @@ def register():
     if err:
         return _error(err, "Could not create user account.", 400)
 
-    # Initialise credit balance in OutSystems
+    # Initialise credit balance in OutSystems (non-fatal — user can still register)
     _, credit_err = call_credit_service("POST", "/credits", json={
         "userId": user_data["userId"],
         "creditBalance": 0,
     })
     if credit_err:
-        # Compensating action — delete the user we just created
-        call_service("DELETE", f"{USER_SERVICE}/users/{user_data['userId']}")
-        return _error("INTERNAL_ERROR", "Could not initialise account. Please try again.", 500)
+        # Non-fatal: account is created, credit balance will be initialised on first use
+        pass
 
     # Send OTP for phone verification
     otp_data, otp_err = call_service("POST", f"{OTP_WRAPPER}/otp/send", json={

@@ -46,6 +46,8 @@ Then `npm run dev`. Done. The backend maintainer needs to have their Minikube ru
 
 Double-click `start-backend.bat` — same script, works for both cases.
 
+> If your `secrets.local.yaml` doesn't have a Cloudflare tunnel token, the script detects this and skips the public URL. You'll use `localhost:8000` only — which is perfectly fine for local development.
+
 Or manually:
 
 ```powershell
@@ -118,6 +120,8 @@ Then run `wsl --shutdown` and restart Docker Desktop.
 **Step 2 — Get secrets file**
 
 `k8s/base/secrets.local.yaml` is gitignored. Ask the backend maintainer for this file and place it at `k8s/base/secrets.local.yaml` before continuing.
+
+> This file contains the Cloudflare tunnel token AND the OutSystems API key. If you use an old or wrong `OUTSYSTEMS_API_KEY`, credit balance initialisation will silently fail on registration — but registration itself will still succeed. Credits just won't be initialised until the correct key is used.
 
 **Step 3 — Start Minikube**
 
