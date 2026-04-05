@@ -12,7 +12,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 6, 15, 19, 30),
         'description': 'Experience the magic of Taylor Swift live in Singapore.',
         'type': 'concert',
-        'image': 'https://example.com/eras-tour.jpg',
+        'image': 'https://picsum.photos/seed/eras-tour/800/450',
         'price': 248.00,
     },
     {
@@ -22,7 +22,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 7, 20, 20, 0),
         'description': 'The Singapore Symphony Orchestra performs Beethoven\'s masterpiece.',
         'type': 'orchestra',
-        'image': 'https://example.com/sso-gala.jpg',
+        'image': 'https://picsum.photos/seed/sso-beethoven/800/450',
         'price': 85.00,
     },
     {
@@ -32,7 +32,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 8, 18, 18, 0),
         'description': 'K-pop rock band DAY6 celebrates their 10th anniversary with an electrifying performance.',
         'type': 'concert',
-        'image': 'https://example.com/day6-decade.jpg',
+        'image': 'https://picsum.photos/seed/day6-decade/800/450',
         'price': 158.00,
     },
     {
@@ -42,7 +42,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 8, 26, 20, 0),
         'description': 'International superstar Harry Styles returns as part of his Together, Together world tour.',
         'type': 'concert',
-        'image': 'https://example.com/harry-styles.jpg',
+        'image': 'https://picsum.photos/seed/harry-styles/800/450',
         'price': 150.00,
     },
     {
@@ -52,7 +52,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 9, 5, 20, 0),
         'description': 'Coldplay brings their spectacular Music of the Spheres World Tour to Singapore.',
         'type': 'concert',
-        'image': 'https://example.com/coldplay.jpg',
+        'image': 'https://picsum.photos/seed/coldplay-spheres/800/450',
         'price': 188.00,
     },
     {
@@ -62,7 +62,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 5, 10, 18, 0),
         'description': 'Three nights of world-class jazz featuring international and local artists.',
         'type': 'jazz',
-        'image': 'https://example.com/sg-jazz-fest.jpg',
+        'image': 'https://picsum.photos/seed/sg-jazz-2026/800/450',
         'price': 75.00,
     },
     {
@@ -72,7 +72,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 10, 25, 19, 0),
         'description': 'Legendary composer A.R. Rahman performs his greatest hits live.',
         'type': 'concert',
-        'image': 'https://example.com/ar-rahman.jpg',
+        'image': 'https://picsum.photos/seed/ar-rahman/800/450',
         'price': 95.00,
     },
     {
@@ -82,7 +82,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 11, 21, 20, 0),
         'description': 'Experience the epic film scores of Hans Zimmer performed live by a full orchestra.',
         'type': 'orchestra',
-        'image': 'https://example.com/hans-zimmer.jpg',
+        'image': 'https://picsum.photos/seed/hans-zimmer/800/450',
         'price': 88.00,
     },
     {
@@ -92,7 +92,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 7, 1, 20, 0),
         'description': 'The legendary rock band Guns N\' Roses brings their explosive World Tour to Singapore.',
         'type': 'concert',
-        'image': 'https://example.com/gnr.jpg',
+        'image': 'https://picsum.photos/seed/gnr-2026/800/450',
         'price': 125.00,
     },
     {
@@ -102,7 +102,7 @@ SEED_EVENTS = [
         'date': datetime(2026, 9, 30, 19, 30),
         'description': 'The Massed Bands showcase their incredible musicianship and military pageantry.',
         'type': 'classical',
-        'image': 'https://example.com/mountbatten.jpg',
+        'image': 'https://picsum.photos/seed/mountbatten-2026/800/450',
         'price': 65.00,
     },
 ]

@@ -340,6 +340,6 @@ Before deploying to production:
 |----------|---------|
 | [README.md](README.md) | System overview |
 | [API.md](API.md) | API reference |
-| [COMPLETE_SYSTEM_DOCUMENTATION.md](COMPLETE_SYSTEM_DOCUMENTATION.md) | Full architecture |
+| [FRONTEND.md](FRONTEND.md) | Frontend integration contract |
+| [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) | Minikube setup and known issues |
 | [AGENTS.md](AGENTS.md) | AI agent guidelines |
-| [OBSERVABILITY_VERIFICATION.md](OBSERVABILITY_VERIFICATION.md) | Sentry/PostHog debugging |

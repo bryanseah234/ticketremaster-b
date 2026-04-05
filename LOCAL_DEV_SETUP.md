@@ -2,9 +2,9 @@
 
 ---
 
-## Already set up? Just starting Minikube again?
+## Already set up? Quick start
 
-If you've done the first-time setup before, this is all you need:
+### I'm the backend maintainer (running Minikube + Cloudflare tunnel)
 
 ```powershell
 minikube start
@@ -12,16 +12,54 @@ kubectl apply -k k8s/base
 kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
 ```
 
-Wait ~2 minutes for pods to be ready, then your frontend works at `http://localhost:8000`.
+Wait ~2 minutes for pods to be ready. Both `http://localhost:8000` and `https://ticketremasterapi.hong-yi.me` will work once cloudflared reconnects.
 
-To verify everything is healthy:
+To verify:
 
 ```powershell
 kubectl get pods --all-namespaces
 newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
 ```
 
-> The public URL (`https://ticketremasterapi.hong-yi.me`) works automatically once cloudflared reconnects — no port-forward needed for that.
+---
+
+### I'm a teammate (frontend dev, no Minikube)
+
+Just point your frontend at the shared public URL — no Minikube, no port-forward needed.
+
+In `ticketremaster-f/.env.local`:
+
+```env
+VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
+VITE_KONG_API_KEY=tk_front_123456789
+```
+
+Then `npm run dev`. Done. The backend maintainer needs to have their Minikube running for this to work.
+
+---
+
+### I want to run the full backend myself (no Cloudflare, fully offline)
+
+Run your own Minikube and use port-forward. No Cloudflare account needed — everything stays on `localhost`.
+
+If already set up:
+
+```powershell
+minikube start
+kubectl apply -k k8s/base
+kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
+```
+
+In `ticketremaster-f/.env.local`:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+VITE_KONG_API_KEY=tk_front_123456789
+```
+
+Then `npm run dev`. Keep the port-forward terminal open while developing.
+
+> First time doing this? See [Option B — First-time setup](#option-b--run-minikube-yourself) below.
 
 ---
 
