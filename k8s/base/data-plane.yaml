@@ -133,9 +133,9 @@ spec:
                 secretKeyRef:
                   name: data-secrets
                   key: RABBITMQ_PASS
-            # Tell RabbitMQ to use at most 80% of its container memory limit (409Mi)
-            - name: RABBITMQ_VM_MEMORY_HIGH_WATERMARK
-              value: "0.8"
+            # Use config file for memory watermark (env var deprecated in RabbitMQ 3.x)
+            - name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS
+              value: "-rabbit vm_memory_high_watermark 0.8"
           readinessProbe:
             exec:
               command:

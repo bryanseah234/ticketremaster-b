@@ -8,7 +8,7 @@ Related references:
 - [API.md](API.md)
 - [PRD.md](PRD.md)
 
-![Frontend gateway flow (exported)](diagram/frontend_gateway_flow.svg)
+![Frontend gateway flow](diagrams/frontend_gateway_flow.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -620,13 +620,13 @@ Seat hold operations now use distributed locking to prevent double-booking:
 ### Swagger UIs
 
 - `http://localhost:8100/apidocs` - auth-orchestrator
-- `http://localhost:8101/apidocs` - credit-orchestrator
-- `http://localhost:8102/apidocs` - ticket-purchase-orchestrator
-- `http://localhost:8103/apidocs` - qr-orchestrator
-- `http://localhost:8104/apidocs` - marketplace-orchestrator
-- `http://localhost:8105/apidocs` - transfer-orchestrator
-- `http://localhost:8107/apidocs` - event-orchestrator
-- `http://localhost:8108/apidocs` - ticket-verification-orchestrator
+- `http://localhost:8101/apidocs` - event-orchestrator
+- `http://localhost:8102/apidocs` - credit-orchestrator
+- `http://localhost:8103/apidocs` - ticket-purchase-orchestrator
+- `http://localhost:8104/apidocs` - qr-orchestrator
+- `http://localhost:8105/apidocs` - marketplace-orchestrator
+- `http://localhost:8106/apidocs` - transfer-orchestrator
+- `http://localhost:8107/apidocs` - ticket-verification-orchestrator
 
 ### Testing reliability features
 

@@ -16,14 +16,19 @@ The current repository contains:
 
 ## Quick Start
 
-1. Start the platform stack (Kong, services, orchestrators, data plane) from the repository root.
-2. Open Kong at `http://localhost:8000` and validate routes with the examples in [API.md](API.md).
-3. Run verification scenarios from [TESTING.md](TESTING.md) for purchase, transfer, QR verification, and notification flows.
-4. Use service-specific READMEs in `services/` and `orchestrators/` for endpoint-level behavior.
+**Option A — Public URL (no Minikube needed):**
+The backend is live at `https://ticketremasterapi.hong-yi.me`. Set `VITE_API_BASE_URL` to that URL and start the frontend.
+
+**Option B — Run locally with Minikube:**
+See [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) for the full setup guide. After `minikube start`, run:
+```powershell
+.\scripts\start_k8s.ps1
+```
+This applies manifests, waits for pods, runs migrations, starts port-forward, and runs gateway tests.
 
 ## System architecture
 
-![System architecture (exported)](diagram/12_system_architecture_overview.png)
+![System architecture](diagrams/readme_system_architecture.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -205,7 +210,7 @@ requests.post('http://notification-service:8109/notifications/broadcast', json={
 
 See [services/notification-service/NOTIFICATIONS.md](services/notification-service/NOTIFICATIONS.md) for detailed documentation.
 
-![Layer architecture (exported)](diagram/readme_layer_architecture.svg)
+![Layer architecture](diagrams/readme_layer_architecture.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -250,150 +255,122 @@ flowchart LR
 
 ### Local development surfaces
 
-- Kong gateway: `http://localhost:8000`
-- Kong admin: `http://localhost:8001`
-- RabbitMQ management: `http://localhost:15672`
-- Redis: `redis://localhost:6379/0`
-- Orchestrator Swagger UIs: `http://localhost:8100` through `http://localhost:8108`
+- Kong gateway: `http://localhost:8000` (requires port-forward: `kubectl port-forward -n ticketremaster-edge svc/kong-proxy 8000:80`)
+- RabbitMQ management: `http://localhost:15672` (requires port-forward: `kubectl port-forward -n ticketremaster-data svc/rabbitmq 15672:15672`)
 - OutSystems Credit API docs: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI/`
 
 ## Current browser-facing routes
 
-These are the route groups actually exposed through Kong today.
+All routes go through Kong at `http://localhost:8000` (local) or `https://ticketremasterapi.hong-yi.me` (public). No `/api` prefix needed.
 
-| Public route group | Backing service | Current auth requirements |
-| --- | --- | --- |
-| `/auth/*` | `auth-orchestrator` | public for register/login, JWT for `/auth/me` |
-| `/events/*`, `/venues/*` | `event-orchestrator` | public |
-| `/admin/events` | `event-orchestrator` | admin JWT required in the orchestrator |
-| `/credits/*` | `credit-orchestrator` | Kong `apikey` plus JWT, except webhook which is server-to-server |
-| `/purchase/*` | `ticket-purchase-orchestrator` | Kong `apikey` plus JWT |
-| `/tickets/*` | `qr-orchestrator` | Kong `apikey` plus JWT |
-| `GET /marketplace` | `marketplace-orchestrator` | public |
-| `POST /marketplace/list` | `marketplace-orchestrator` | Kong `apikey` plus JWT |
-| `DELETE /marketplace/{listingId}` | `marketplace-orchestrator` | Kong `apikey` plus JWT |
-| `/transfer/*` | `transfer-orchestrator` | Kong `apikey` plus JWT |
-| `/verify/*` | `ticket-verification-orchestrator` | Kong `apikey` plus staff JWT |
-
-Important route note:
-
-- `ticket-purchase-orchestrator` defines `GET /tickets` on its direct service port, but Kong does not expose that path from the purchase route group
-- the frontend should use `GET /tickets` from `qr-orchestrator`, because `/tickets/*` at the gateway points there
+| Route | Method(s) | Backing orchestrator | Auth |
+| --- | --- | --- | --- |
+| `/auth/register` | POST | auth-orchestrator | public (rate limited: 5/min) |
+| `/auth/login` | POST | auth-orchestrator | public (rate limited: 10/min) |
+| `/auth/verify-registration` | POST | auth-orchestrator | public |
+| `/auth/me` | GET | auth-orchestrator | JWT |
+| `/auth/logout` | POST | auth-orchestrator | JWT |
+| `/events` | GET | event-orchestrator | public |
+| `/events/{eventId}` | GET | event-orchestrator | public |
+| `/events/{eventId}/seats` | GET | event-orchestrator | public |
+| `/events/{eventId}/seats/{inventoryId}` | GET | event-orchestrator | public |
+| `/venues` | GET | event-orchestrator | public |
+| `/admin/events` | POST | event-orchestrator | admin JWT |
+| `/admin/events/{eventId}/dashboard` | GET | event-orchestrator | admin JWT |
+| `/credits/balance` | GET | credit-orchestrator | JWT + apikey |
+| `/credits/topup/initiate` | POST | credit-orchestrator | JWT + apikey |
+| `/credits/topup/confirm` | POST | credit-orchestrator | JWT + apikey |
+| `/credits/transactions` | GET | credit-orchestrator | JWT + apikey |
+| `/purchase/hold/{inventoryId}` | POST | ticket-purchase-orchestrator | JWT + apikey |
+| `/purchase/hold/{inventoryId}` | DELETE | ticket-purchase-orchestrator | JWT + apikey |
+| `/purchase/confirm/{inventoryId}` | POST | ticket-purchase-orchestrator | JWT + apikey |
+| `/tickets` | GET | qr-orchestrator | JWT + apikey |
+| `/tickets/{ticketId}/qr` | GET | qr-orchestrator | JWT + apikey |
+| `/marketplace` | GET | marketplace-orchestrator | public |
+| `/marketplace/list` | POST | marketplace-orchestrator | JWT + apikey |
+| `/marketplace/{listingId}` | DELETE | marketplace-orchestrator | JWT + apikey |
+| `/transfer/initiate` | POST | transfer-orchestrator | JWT + apikey |
+| `/transfer/pending` | GET | transfer-orchestrator | JWT + apikey |
+| `/transfer/{transferId}` | GET | transfer-orchestrator | JWT + apikey |
+| `/transfer/{transferId}/seller-accept` | POST | transfer-orchestrator | JWT + apikey |
+| `/transfer/{transferId}/seller-reject` | POST | transfer-orchestrator | JWT + apikey |
+| `/transfer/{transferId}/buyer-verify` | POST | transfer-orchestrator | JWT + apikey (rate limited: 3/15min) |
+| `/transfer/{transferId}/seller-verify` | POST | transfer-orchestrator | JWT + apikey (rate limited: 3/15min) |
+| `/transfer/{transferId}/resend-otp` | POST | transfer-orchestrator | JWT + apikey |
+| `/transfer/{transferId}/cancel` | POST | transfer-orchestrator | JWT + apikey |
+| `/verify/scan` | POST | ticket-verification-orchestrator | staff JWT + apikey |
+| `/verify/manual` | POST | ticket-verification-orchestrator | staff JWT + apikey |
+| `/webhooks/stripe` | POST | user-service (via Kong) | Stripe signature |
 
 ## Local setup
 
-1. Copy environment values.
+See [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) for the complete guide including Minikube setup, image loading, known issues, and Cloudflare tunnel configuration.
 
+**TL;DR for Minikube:**
 ```powershell
-Copy-Item .env.example .env
-```
-
-2. Start the stack.
-
-```powershell
-docker compose up -d --build
-```
-
-3. Run migrations.
-
-```powershell
-docker compose run --rm user-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm venue-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm seat-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm event-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm seat-inventory-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm ticket-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm ticket-log-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm marketplace-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm transfer-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm credit-transaction-service python -m flask --app app.py db upgrade -d migrations
-```
-
-4. Seed the baseline data used by local Postman flows.
-
-```powershell
-docker compose run --rm user-service python user_seed.py
-docker compose run --rm venue-service python seed_venues.py
-docker compose run --rm seat-service python seed_seats.py
-docker compose run --rm event-service python seed_events.py
-docker compose run --rm seat-inventory-service python seed_seat_inventory.py
+minikube config set memory 12288
+minikube config set cpus 4
+minikube start
+# Load images on first run (see LOCAL_DEV_SETUP.md)
+.\scripts\start_k8s.ps1
 ```
 
 ## API documentation
 
-Use the following assets together:
+- [API.md](API.md) — offline unified API reference
+- `openapi.unified.json` — combined OpenAPI document
+- OutSystems Swagger: `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI/swagger.json`
 
-- [API.md](API.md) for the offline unified API reference
-- `openapi.unified.json` for the combined OpenAPI document
-- orchestrator-local Flasgger UIs for live inspection during development
-- the published OutSystems Swagger at `https://personal-sdxnmlx3.outsystemscloud.com/CreditService/rest/CreditAPI/swagger.json`
+Run the gateway test suite to validate all routes:
+```powershell
+# Public URL
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
 
-Local Swagger UI entry points:
-
-- `http://localhost:8100/apidocs` — auth-orchestrator
-- `http://localhost:8101/apidocs` — event-orchestrator
-- `http://localhost:8102/apidocs` — credit-orchestrator
-- `http://localhost:8103/apidocs` — ticket-purchase-orchestrator
-- `http://localhost:8104/apidocs` — qr-orchestrator
-- `http://localhost:8105/apidocs` — marketplace-orchestrator
-- `http://localhost:8107/apidocs` — transfer-orchestrator
-- `http://localhost:8108/apidocs` — ticket-verification-orchestrator
+# Localhost (requires port-forward)
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-localhost.postman_environment.json --reporters cli
+```
 
 ## Quick operational checks
 
-### Docker Compose
-
 ```powershell
-docker compose ps
-docker compose logs --tail=200 ticket-purchase-orchestrator
-docker compose logs --tail=200 transfer-orchestrator
-docker compose exec rabbitmq rabbitmq-diagnostics -q ping
-docker compose exec redis redis-cli ping
-```
-
-### Kubernetes
-
-```powershell
-kubectl kustomize .\k8s\base
-kubectl apply -k .\k8s\base
 kubectl get pods -n ticketremaster-edge
 kubectl get pods -n ticketremaster-core
 kubectl get pods -n ticketremaster-data
-kubectl logs deployment/kong -n ticketremaster-edge --tail=200
-kubectl logs deployment/ticket-purchase-orchestrator -n ticketremaster-core --tail=200
+kubectl logs deployment/kong -n ticketremaster-edge --tail=50
+kubectl logs deployment/auth-orchestrator -n ticketremaster-core --tail=50
 kubectl port-forward -n ticketremaster-edge svc/kong-proxy 8000:80
 kubectl port-forward -n ticketremaster-data svc/rabbitmq 15672:15672
 ```
 
-For a fuller validation and troubleshooting flow, use [TESTING.md](TESTING.md).
+Run gateway tests:
+```powershell
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
+```
 
 ## Documentation hub
 
 ### Core documentation
 
 - [README.md](README.md) — this file, system overview and quickstart
-- [COMPLETE_SYSTEM_DOCUMENTATION.md](COMPLETE_SYSTEM_DOCUMENTATION.md) — **complete architecture reference with full system diagrams**
-- [API.md](API.md) — unified API reference, auth model, examples, and OpenAPI links
-- [FRONTEND.md](FRONTEND.md) — exact frontend integration contract, reliability features, and gateway route guidance
-- [TESTING.md](TESTING.md) — Docker, Postman, OutSystems, and Kubernetes testing guide
-- [PRD.md](PRD.md) — product and architecture summary aligned to the current implementation
+- [API.md](API.md) — unified API reference, auth model, and examples
+- [FRONTEND.md](FRONTEND.md) — frontend integration contract, all routes, request rules
+- [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) — Minikube setup, known issues, Cloudflare tunnel guide
+- [TESTING.md](TESTING.md) — Postman, OutSystems, and Kubernetes testing guide
+- [PRD.md](PRD.md) — product and architecture summary
 
 ### Integration guides
 
-- [OUTSYSTEMS.md](OUTSYSTEMS.md) — OutSystems Credit Service integration contract and setup
-- [INSTRUCTION.md](INSTRUCTION.md) — implementation notes, build order reasoning, and deployment guidance
-- [TICKETREMASTER_K8S_ARCHITECTURE.md](TICKETREMASTER_K8S_ARCHITECTURE.md) — Kubernetes architecture specification
+- [OUTSYSTEMS.md](OUTSYSTEMS.md) — OutSystems Credit Service integration contract
+- [INSTRUCTION.md](INSTRUCTION.md) — implementation notes and deployment guidance
 
 ### Collections and environments
 
 - [postman/README.md](postman/README.md)
-- [postman/TicketRemaster.postman_collection.json](postman/TicketRemaster.postman_collection.json)
-- [postman/TicketRemaster.local.postman_environment.json](postman/TicketRemaster.local.postman_environment.json)
+- [postman/TicketRemaster.gateway.postman_collection.json](postman/TicketRemaster.gateway.postman_collection.json) — **current** gateway collection (Kong + OutSystems)
+- [postman/TicketRemaster.gateway-localhost.postman_environment.json](postman/TicketRemaster.gateway-localhost.postman_environment.json)
+- [postman/TicketRemaster.gateway-public.postman_environment.json](postman/TicketRemaster.gateway-public.postman_environment.json)
 
 ### Supporting docs
 
 - [services/README.md](services/README.md)
 - [orchestrators/README.md](orchestrators/README.md)
-- [shared/README.md](shared/README.md)
-- [shared/grpc/README.md](shared/grpc/README.md)
-- [templates/README.md](templates/README.md)

@@ -1016,16 +1016,18 @@ spec:
         - name: auth-orchestrator
           image: ticketremaster/auth-orchestrator:local-k8s-20260329
           imagePullPolicy: IfNotPresent
+          # Override CMD to use 2 workers — bcrypt is CPU-bound, 4 workers OOM at 256Mi
+          command: ["gunicorn", "-w", "2", "--timeout", "120", "-b", "0.0.0.0:5000", "app:app"]
           ports:
             - name: http
               containerPort: 5000
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
               memory: "256Mi"
-              cpu: "500m"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
           envFrom:
             - configMapRef:
                 name: core-runtime
@@ -1048,6 +1050,12 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
 ---
 apiVersion: v1
 kind: Service
@@ -1068,7 +1076,7 @@ metadata:
   name: event-orchestrator
   namespace: ticketremaster-core
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: event-orchestrator
@@ -1129,7 +1137,7 @@ metadata:
   name: credit-orchestrator
   namespace: ticketremaster-core
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: credit-orchestrator
@@ -1195,7 +1203,7 @@ metadata:
   name: ticket-purchase-orchestrator
   namespace: ticketremaster-core
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: ticket-purchase-orchestrator
@@ -1271,7 +1279,7 @@ metadata:
   name: qr-orchestrator
   namespace: ticketremaster-core
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: qr-orchestrator
@@ -1337,7 +1345,7 @@ metadata:
   name: marketplace-orchestrator
   namespace: ticketremaster-core
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: marketplace-orchestrator
@@ -1398,7 +1406,7 @@ metadata:
   name: transfer-orchestrator
   namespace: ticketremaster-core
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: transfer-orchestrator
@@ -1474,7 +1482,7 @@ metadata:
   name: ticket-verification-orchestrator
   namespace: ticketremaster-core
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: ticket-verification-orchestrator
