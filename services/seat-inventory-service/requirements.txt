@@ -9,5 +9,5 @@ pytest==8.3.5
 grpcio==1.78.0
 grpcio-tools==1.78.0
 protobuf==6.33.5
-requests==2.32.4
+requests==2.33.0
 redis==6.4.0
