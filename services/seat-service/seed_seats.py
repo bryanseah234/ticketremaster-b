@@ -1,5 +1,3 @@
-import math
-
 from app import create_app, db
 from models import Seat
 
@@ -18,7 +16,7 @@ VENUE_CAPACITIES = {
 
 
 def seed_venue(venue_id, capacity):
-    seats_per_row = math.ceil(capacity / 26)
+    seats_per_row = 10
     existing_seat_numbers = {
         seat_number
         for (seat_number,) in db.session.query(Seat.seatNumber)
