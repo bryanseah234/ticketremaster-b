@@ -13,7 +13,13 @@ DB ports (mapped in docker-compose.yml):
 Or run inside the containers:
     docker cp scripts/populate_all_events.py ticketremaster-event-service-1:/app/
     docker exec ticketremaster-event-service-1 python populate_all_events.py
+
+Required environment variables:
+    EVENT_SERVICE_DB_PASSWORD
+    SEAT_SERVICE_DB_PASSWORD
+    SEAT_INVENTORY_SERVICE_DB_PASSWORD
 """
+import os
 import uuid
 from datetime import datetime
 
@@ -22,6 +28,13 @@ import psycopg2
 ROWS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
 SEATS_PER_ROW = 10
 NOW = datetime.utcnow()
+
+
+def get_required_env(name):
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
 
 # ── Event definitions ─────────────────────────────────────────────────────────
 EVENTS = [
@@ -129,11 +142,11 @@ EVENTS = [
 
 # ── DB connections (uses host-mapped ports from docker-compose.yml) ───────────
 event_conn = psycopg2.connect(host="event-service-db", port=5432, dbname="event_service",
-                               user="ticketremaster", password="event_dev_pass")
+                               user="ticketremaster", password=get_required_env("EVENT_SERVICE_DB_PASSWORD"))
 seat_conn  = psycopg2.connect(host="seat-service-db", port=5432, dbname="seat_service",
-                               user="ticketremaster", password="change_me")
+                               user="ticketremaster", password=get_required_env("SEAT_SERVICE_DB_PASSWORD"))
 inv_conn   = psycopg2.connect(host="seat-inventory-service-db", port=5432, dbname="seat_inventory_service",
-                               user="ticketremaster", password="inventory_dev_pass")
+                               user="ticketremaster", password=get_required_env("SEAT_INVENTORY_SERVICE_DB_PASSWORD"))
 
 event_cur = event_conn.cursor()
 seat_cur  = seat_conn.cursor()
