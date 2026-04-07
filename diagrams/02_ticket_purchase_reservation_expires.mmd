@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Purchase as Purchase Orchestrator
+    participant SeatInv as Seat Inventory (gRPC)
+    participant TTL as seat_hold_ttl_queue
+    participant DLX as seat_hold_expired_queue
+    participant Consumer as DLX Consumer
+
+    User->>Purchase: Hold seat
+    Purchase->>SeatInv: HoldSeat(...)
+    SeatInv-->>Purchase: holdToken + heldUntil
+    Purchase->>TTL: publish expiry message
+    Note over TTL: message waits for hold TTL
+    TTL-->>DLX: message expires into DLX
+    DLX-->>Consumer: expired hold message
+    Consumer->>SeatInv: ReleaseSeat(inventoryId, userId, holdToken)
+    SeatInv-->>Consumer: seat becomes available
+    Note over User,Consumer: The seat returns to the pool without the user doing anything

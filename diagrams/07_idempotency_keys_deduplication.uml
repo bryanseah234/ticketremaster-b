@@ -1,13 +1,9 @@
 @startuml
-' Source counterpart for 07_idempotency_keys_deduplication.png
-' Keep this UML in sync with diagram/07_idempotency_keys_deduplication.png when diagrams are updated.
-' If you use Mermaid in docs, mirror those semantic changes here.
-
-title Idempotency keys deduplication
+title Idempotency keys deduplication (legacy breadcrumb)
 
 note as N1
-  TODO: Replace this placeholder with the actual PlantUML flow
-  that matches diagram/07_idempotency_keys_deduplication.png.
+  Canonical source: diagrams/07_idempotency_keys_deduplication.mmd
+  Rendered artifact: diagrams/07_idempotency_keys_deduplication.png
 end note
 
 @enduml

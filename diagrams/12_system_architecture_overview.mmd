@@ -46,6 +46,7 @@ flowchart LR
 
     subgraph External[External]
         OUTSYS[OutSystems Credit API]
+        SMU[SMU Notification API]
         STRIPE_EXT[Stripe]
     end
 
@@ -62,30 +63,51 @@ flowchart LR
     KONG --> VERIFY
 
     AUTH --> USER
+    AUTH --> OUTSYS
+    EVENT --> VENUE
+    EVENT --> SEAT
     EVENT --> EVENT_SVC
+    EVENT --> INVENTORY
+    CREDIT --> STRIPE
+    CREDIT --> CREDIT_TXN
+    CREDIT --> OUTSYS
     PURCHASE --> INVENTORY
+    PURCHASE --> TICKET
+    PURCHASE --> CREDIT_TXN
+    PURCHASE --> OUTSYS
+    PURCHASE --> REDIS
+    PURCHASE --> RABBIT
     QR --> TICKET
+    QR --> EVENT_SVC
+    QR --> VENUE
     MARKET --> MARKET_SVC
+    MARKET --> TICKET
+    MARKET --> EVENT_SVC
+    MARKET --> USER
     TRANSFER --> TRANSFER_SVC
+    TRANSFER --> MARKET_SVC
+    TRANSFER --> TICKET
+    TRANSFER --> CREDIT_TXN
     TRANSFER --> OTP
+    TRANSFER --> OUTSYS
+    TRANSFER --> RABBIT
     VERIFY --> TICKET
     VERIFY --> TICKET_LOG
-
+    VERIFY --> EVENT_SVC
+    VERIFY --> VENUE
+    VERIFY --> INVENTORY
+    VERIFY --> REDIS
+    OTP --> SMU
+    STRIPE --> STRIPE_EXT
+    NOTIF --> REDIS
+    NOTIF -. realtime push .-> FE
+    NOTIF -. realtime push .-> STAFF
     USER --> PG
+    VENUE --> PG
+    SEAT --> PG
     EVENT_SVC --> PG
     INVENTORY --> PG
     TICKET --> PG
     TICKET_LOG --> PG
     MARKET_SVC --> PG
     TRANSFER_SVC --> PG
-
-    PURCHASE --> REDIS
-    NOTIF --> REDIS
-    PURCHASE --> RABBIT
-    TRANSFER --> RABBIT
-
-    CREDIT --> OUTSYS
-    CREDIT --> STRIPE_EXT
-
-    NOTIF -.-> FE
-    NOTIF -.-> STAFF

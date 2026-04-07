@@ -1,22 +1,23 @@
 sequenceDiagram
     participant Client
-    participant Kong
     participant Service
-    participant NotifSvc
+    participant NotifSvc as notification-service
     participant Redis
-    participant WebSocket
+    participant Socket as Socket.IO connection
 
-    Note over Client,WebSocket: WebSocket Connection
-    Client->>WebSocket: Connect via Socket.IO
-    WebSocket->>NotifSvc: Establish connection
-    Client->>WebSocket: Subscribe to channel
-    WebSocket->>Redis: SUBSCRIBE notifications:seat_update
+    Note over Client,Socket: WebSocket Connection
+    Client->>Socket: Connect via Socket.IO
+    Socket->>NotifSvc: Establish connection
+    Client->>Socket: subscribe seat_update
+    Socket->>NotifSvc: join room seat_update
+    NotifSvc->>Redis: PSUBSCRIBE notifications:*
 
-    Note over Client,WebSocket: Service Broadcast
-    Service->>NotifSvc: POST /notifications/broadcast
+    Note over Client,Socket: Service Broadcast
+    Service->>NotifSvc: POST /broadcast
     NotifSvc->>Redis: PUBLISH notifications:seat_update
-    Redis->>WebSocket: Message received
-    WebSocket->>Client: Push notification
+    Redis->>NotifSvc: Pub/Sub message arrives
+    NotifSvc->>Socket: emit seat_update
+    Socket->>Client: push notification
 
-    Note over Client,WebSocket: Real-time Updates
+    Note over Client,Socket: Real-time Updates
     Client->>Client: Update UI instantly

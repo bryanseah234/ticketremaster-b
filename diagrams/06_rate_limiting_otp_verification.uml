@@ -1,13 +1,9 @@
 @startuml
-' Source counterpart for 06_rate_limiting_otp_verification.png
-' Keep this UML in sync with diagram/06_rate_limiting_otp_verification.png when diagrams are updated.
-' If you use Mermaid in docs, mirror those semantic changes here.
-
-title Rate limiting OTP verification
+title Rate limiting OTP verification (legacy breadcrumb)
 
 note as N1
-  TODO: Replace this placeholder with the actual PlantUML flow
-  that matches diagram/06_rate_limiting_otp_verification.png.
+  Canonical source: diagrams/06_rate_limiting_otp_verification.mmd
+  Rendered artifact: diagrams/06_rate_limiting_otp_verification.png
 end note
 
 @enduml

@@ -19,6 +19,7 @@ flowchart LR
     Tunnel2 --> Kong2
     Kong2 --> Orch
     Orch --> Atomic
+    Atomic --> Redis2
     Orch --> Redis2
     Orch --> Rabbit2
     Atomic --> PG

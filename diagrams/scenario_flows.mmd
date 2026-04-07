@@ -1,53 +1,14 @@
-%%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#000000','lineColor':'#000000','textColor':'#000000','actorTextColor':'#000000','actorLineColor':'#000000','signalColor':'#000000','signalTextColor':'#000000','labelBoxBkgColor':'#ffffff','labelBoxBorderColor':'#000000'}}}%%
-
-sequenceDiagram
-    title Ticket Purchase Hold and Confirm (Happy Path)
-    autonumber
-    participant Client as API Client
-    participant Gateway as API Gateway
-    participant Purchase as Ticket Purchase Orchestrator
-    participant SeatInv as Seat Inventory Service (gRPC)
-    participant Credit as Credit Service
-    participant Ticket as Ticket Service
-
-    Client->>Gateway: POST /purchase/hold/{inventoryId}
-    Gateway->>Purchase: Forward authenticated request
-    Purchase->>SeatInv: HoldSeat(inventory_id, user_id, ttl)
-    SeatInv-->>Purchase: success + hold_token + held_until
-    Purchase-->>Gateway: 200 held
-    Gateway-->>Client: holdToken + heldUntil
-
-    Client->>Gateway: POST /purchase/confirm/{inventoryId}
-    Gateway->>Purchase: Forward authenticated request
-    Purchase->>SeatInv: GetSeatStatus(inventory_id)
-    SeatInv-->>Purchase: held by user + token valid
-    Purchase->>Credit: Verify credits
-    Credit-->>Purchase: sufficient balance
-    Purchase->>SeatInv: SellSeat(inventory_id, hold_token)
-    SeatInv-->>Purchase: sold
-    Purchase->>Ticket: Create ticket record
-    Ticket-->>Purchase: ticketId
-    Purchase->>Credit: Deduct credits
-    Credit-->>Purchase: success
-    Purchase-->>Gateway: 201 purchase confirmed
-    Gateway-->>Client: ticket + transaction details
-
-sequenceDiagram
-    title Transfer OTP Verification (Seller Path)
-    autonumber
-    participant Buyer as Buyer
-    participant Gateway as API Gateway
-    participant TransferOrch as Transfer Orchestrator
-    participant TransferSvc as Transfer Service
-    participant OTP as OTP Wrapper
-
-    Buyer->>Gateway: POST /transfer/{id}/buyer-verify
-    Gateway->>TransferOrch: Forward JWT-authenticated request
-    TransferOrch->>TransferSvc: PATCH status + buyerOtpVerified=true
-    TransferSvc-->>TransferOrch: pending_seller_otp
-    TransferOrch->>OTP: Send seller OTP
-    OTP-->>TransferOrch: sellerVerificationSid
-    TransferOrch->>TransferSvc: PATCH sellerVerificationSid
-    TransferSvc-->>TransferOrch: updated transfer
-    TransferOrch-->>Gateway: 200 buyer verified
-    Gateway-->>Buyer: seller OTP initiated
+flowchart TB
+    A["scenario_flows.mmd is now a legacy index file"] --> B["Use the numbered Mermaid sources instead"]
+    B --> C["01_ticket_purchase_happy_path.mmd"]
+    B --> D["02_ticket_purchase_reservation_expires.mmd"]
+    B --> E["03_p2p_transfer_happy_path.mmd"]
+    B --> F["04_qr_verification_happy_path.mmd"]
+    B --> G["05_distributed_lock_concurrent_scan.mmd"]
+    B --> H["06_rate_limiting_otp_verification.mmd"]
+    B --> I["07_idempotency_keys_deduplication.mmd"]
+    B --> J["08_auto_cancel_stuck_transfers.mmd"]
+    B --> K["09_deadlock_retry_logic.mmd"]
+    B --> L["10_cache_invalidation_retry.mmd"]
+    B --> M["11_graceful_shutdown_handling.mmd"]
+    B --> N["12_system_architecture_overview.mmd"]

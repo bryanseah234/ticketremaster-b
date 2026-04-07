@@ -1,5 +1,5 @@
 flowchart LR
-    Browser[Customer or Staff Frontend] --> CF[Cloudflare]
+    Browser[Customer or Staff Frontend] --> CF[Cloudflare Tunnel]
     CF --> Tunnel[cloudflared]
     Tunnel --> Kong[Kong Gateway]
 

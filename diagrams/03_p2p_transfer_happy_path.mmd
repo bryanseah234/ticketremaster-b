@@ -1,0 +1,44 @@
+sequenceDiagram
+    autonumber
+    actor Buyer
+    actor Seller
+    participant Kong as Kong Gateway
+    participant Transfer as Transfer Orchestrator
+    participant TransferSvc as Transfer Service
+    participant OTP as OTP Wrapper
+    participant OutSys as OutSystems Credit API
+    participant Ledger as Credit Transaction Service
+    participant Ticket as Ticket Service
+    participant Market as Marketplace Service
+
+    Buyer->>Kong: POST /transfer/initiate
+    Kong->>Transfer: listingId
+    Transfer->>TransferSvc: create transfer
+    TransferSvc-->>Transfer: pending_seller_acceptance
+    Transfer-->>Seller: async notify request exists
+
+    Seller->>Kong: POST /transfer/{id}/seller-accept
+    Kong->>Transfer: seller accepts
+    Transfer->>OTP: send buyer OTP
+    OTP-->>Transfer: buyerVerificationSid
+    Transfer->>TransferSvc: set pending_buyer_otp
+
+    Buyer->>Kong: POST /transfer/{id}/buyer-verify
+    Kong->>Transfer: buyer OTP
+    Transfer->>OTP: verify buyer OTP
+    OTP-->>Transfer: verified
+    Transfer->>OTP: send seller OTP
+    OTP-->>Transfer: sellerVerificationSid
+    Transfer->>TransferSvc: set pending_seller_otp
+
+    Seller->>Kong: POST /transfer/{id}/seller-verify
+    Kong->>Transfer: seller OTP
+    Transfer->>OTP: verify seller OTP
+    OTP-->>Transfer: verified
+    Transfer->>OutSys: deduct buyer and credit seller
+    Transfer->>Ledger: log buyer and seller credit records
+    Transfer->>Ticket: transfer ticket ownership
+    Transfer->>Market: mark listing completed
+    Transfer->>TransferSvc: mark transfer completed
+    Transfer-->>Buyer: success
+    Transfer-->>Seller: success

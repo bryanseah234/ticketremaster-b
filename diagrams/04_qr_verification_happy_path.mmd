@@ -1,0 +1,27 @@
+sequenceDiagram
+    autonumber
+    actor Staff
+    participant Kong as Kong Gateway
+    participant Verify as Verification Orchestrator
+    participant Redis as Redis Lock
+    participant Ticket as Ticket Service
+    participant Event as Event Service
+    participant SeatInv as Seat Inventory Service
+    participant Log as Ticket Log Service
+
+    Staff->>Kong: POST /verify/scan
+    Kong->>Verify: qrHash
+    Verify->>Ticket: lookup ticket by QR hash
+    Ticket-->>Verify: ticket record
+    Verify->>Redis: acquire scan_lock:{ticketId}
+    Redis-->>Verify: lock granted
+    Verify->>Event: load event
+    Event-->>Verify: event details
+    Verify->>SeatInv: check inventory for sold seat
+    SeatInv-->>Verify: seat is sold
+    Verify->>Log: fetch prior scan logs
+    Log-->>Verify: not yet checked in
+    Verify->>Ticket: PATCH status=used
+    Verify->>Log: POST checked_in audit log
+    Verify->>Redis: release scan lock
+    Verify-->>Staff: 200 valid ticket

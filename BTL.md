@@ -1,202 +1,357 @@
-# TicketRemaster Beyond-The-Labs (BTL) Features Report
+# TicketRemaster Beyond-The-Labs (BTL) Report
+
+## What This File Means
+
+This file explains which parts of the backend are genuinely "beyond the labs".
+
+I treated the following as **already covered in class**, so they are **not counted as standalone BTL claims**:
+
+- Python + Flask REST services
+- Flask-SQLAlchemy and database CRUD
+- Postman testing
+- basic synchronous HTTP between services
+- basic RabbitMQ usage
+- OutSystems as a low-code platform
+- Docker and Docker Compose
+- Kong as a basic API gateway
+- Prometheus and Grafana
+
+That means this BTL report focuses on the things the current backend uses that go past the lab baseline, either because they are new technologies or because they use a much deeper production-style pattern than what was taught.
 
 ## Executive Summary
 
-This architectural scan identified **six (6) BTL-qualifying features** in the TicketRemaster codebase. These features demonstrate advanced engineering patterns including gRPC for high-performance communication, Kong API Gateway for edge management, RabbitMQ with advanced messaging patterns, WebSocket real-time notifications with Redis Pub/Sub, external OutSystems integration, and Kubernetes deployment orchestration.
+The current backend contains **eight BTL-worthy items**:
+
+1. gRPC and Protocol Buffers for seat-inventory RPC
+2. Redis for distributed workflow state, locks, TTL data, and token revocation
+3. Socket.IO WebSockets with Redis Pub/Sub for realtime fan-out
+4. Advanced RabbitMQ patterns such as TTL queues, dead-letter exchanges, and timeout workers
+5. Kubernetes deployment design using namespaces, StatefulSets, NetworkPolicies, and Kustomize
+6. Cloudflare Tunnel for zero-trust public exposure of the local cluster
+7. Advanced Kong usage through DB-less declarative config, route-level plugins, and edge policy composition
+8. Saga-style compensation and idempotency patterns for distributed workflows
+
+## Quick Table
+
+| BTL item | Why it is beyond the labs | Main repo locations |
+| --- | --- | --- |
+| gRPC + Protocol Buffers | We did not learn internal RPC contracts in class | `proto/`, `services/seat-inventory-service/`, `orchestrators/ticket-purchase-orchestrator/` |
+| Redis workflow state | We did not learn Redis locks, TTL caches, or token blacklists in class | `shared/token_blacklist.py`, `services/otp-wrapper/routes.py`, `orchestrators/ticket-verification-orchestrator/routes.py`, `services/seat-inventory-service/grpc_server.py` |
+| Socket.IO + Redis Pub/Sub | We did not learn realtime WebSocket push in class | `services/notification-service/` |
+| Advanced RabbitMQ patterns | Class covered messaging, but not TTL queues, DLX, timeout consumers, and compensation logging | `shared/queue_setup.py`, `orchestrators/ticket-purchase-orchestrator/`, `orchestrators/transfer-orchestrator/` |
+| Kubernetes architecture | Class covered Docker and Compose, not Kubernetes runtime design | `k8s/base/` |
+| Cloudflare Tunnel | Not covered in class | `k8s/base/edge-workloads.yaml`, `k8s/base/network-policies.yaml` |
+| Advanced Kong policy | Class covered gateway basics, but this repo goes further with declarative route policy | `k8s/base/configuration.yaml`, `api-gateway/kong.yml.template` |
+| Saga + idempotency | Not taught as a distributed workflow pattern in the labs | `orchestrators/ticket-purchase-orchestrator/routes.py`, `orchestrators/transfer-orchestrator/routes.py`, `orchestrators/credit-orchestrator/routes.py`, `services/seat-inventory-service/grpc_server.py` |
 
 ---
 
-## BTL Feature #1: gRPC for High-Performance Seat Inventory
+## BTL #1: gRPC and Protocol Buffers
 
-**Identified BTL Feature:** gRPC (Google Remote Procedure Call) with Protocol Buffers
+**Simple explanation:**
+If normal REST is like sending a letter with a lot of words, gRPC is like using a very short, fixed form over a direct hotline. It is faster and stricter.
 
-**Code Location:**
-- Proto contract: `ticketremaster-b/proto/seat_inventory.proto`
-- Generated stubs: `ticketremaster-b/shared/grpc/seat_inventory_pb2.py`, `seat_inventory_pb2_grpc.py`
-- Server implementation: `ticketremaster-b/services/seat-inventory-service/`
-- Client usage: `ticketremaster-b/orchestrators/ticket-purchase-orchestrator/routes.py` (lines 19-23, 58-120)
+**Why this is beyond the labs:**
+The lab path used REST APIs everywhere. This repo adds an internal RPC contract for the most timing-sensitive part of the system: seat state changes during checkout.
 
-**BTL Category:** Advanced Protocols
+**Where it exists in this repo:**
 
-**Scenario Justification:**
-The TicketRemaster platform uses gRPC exclusively for seat inventory operations (`HoldSeat`, `ReleaseSeat`, `SellSeat`, `GetSeatStatus`) to achieve sub-millisecond latency during high-concurrency checkout flows. This is critical because seat reservation requires pessimistic row-level database locks that must execute instantly to prevent double-booking. HTTP REST would introduce unacceptable overhead for these time-sensitive operations. The implementation includes:
+- contract: `proto/seat_inventory.proto`
+- generated shared stubs: `shared/grpc/seat_inventory_pb2.py`, `shared/grpc/seat_inventory_pb2_grpc.py`
+- gRPC server: `services/seat-inventory-service/server.py`
+- gRPC business logic: `services/seat-inventory-service/grpc_server.py`
+- gRPC client usage: `orchestrators/ticket-purchase-orchestrator/routes.py`
+- expiry consumer using the same RPC contract: `orchestrators/ticket-purchase-orchestrator/dlx_consumer.py`
 
-- Protocol Buffer contract defining four RPC methods for seat state management
-- gRPC channel pooling with configurable pool size (`GRPC_CHANNEL_POOL_SIZE`)
-- Host detection and channel lifecycle management
-- Integration with the purchase orchestrator's saga pattern for distributed transactions
+**Role in the codebase:**
 
-This demonstrates independent research into high-performance inter-service communication patterns beyond standard REST APIs.
+- `ticket-purchase-orchestrator` uses gRPC to call `HoldSeat`, `ReleaseSeat`, `SellSeat`, and `GetSeatStatus`
+- the purchase flow uses this because seat availability is the part most likely to break under concurrency
+- the orchestrator also keeps a small gRPC channel pool so it does not create a fresh connection every time
 
----
+**Why the design makes sense:**
+Seat reservation is where double-booking risk lives. gRPC gives the repo a strict contract and lower overhead for that hot path, while the rest of the platform can stay on ordinary HTTP.
 
-## BTL Feature #2: Kong API Gateway
+**Read more:**
 
-**Identified BTL Feature:** Kong Gateway with declarative configuration
-
-**Code Location:**
-- Gateway configuration: `ticketremaster-b/api-gateway/kong.yml`
-- Kubernetes deployment: `ticketremaster-b/k8s/base/edge-workloads.yaml`
-- Documentation: `ticketremaster-b/README.md` (lines 93-102)
-
-**BTL Category:** API Management
-
-**Scenario Justification:**
-Kong serves as the sole public entry point for all browser traffic, providing:
-
-- **Declarative routing** with regex path matching for flexible URL patterns
-- **Rate limiting** at both global (50 req/min) and route-specific levels (e.g., 3 req/15min for OTP verification endpoints)
-- **Key-based authentication** (`key-auth` plugin) for API access control
-- **CORS policy management** for multi-origin frontend support
-- **Consumer management** with separate credentials for frontend and partner applications
-
-The gateway isolates internal microservices from direct public access, enforcing security policies at the edge. The configuration demonstrates advanced API management patterns including route-level plugin composition and consumer credential management.
+- [gRPC overview](https://grpc.io/docs/what-is-grpc/)
+- [Protocol Buffers overview](https://protobuf.dev/overview/)
 
 ---
 
-## BTL Feature #3: RabbitMQ Advanced Messaging
+## BTL #2: Redis for Workflow State, Locks, TTLs, and Token Revocation
 
-**Identified BTL Feature:** RabbitMQ with TTL-based delayed messaging and dead-letter exchanges
+**Simple explanation:**
+Redis is like a very fast sticky-note board. We use it for things that should be remembered briefly, not forever.
 
-**Code Location:**
-- Queue configuration: `ticketremaster-b/k8s/base/data-plane.yaml`
-- Message publishing: `ticketremaster-b/orchestrators/ticket-purchase-orchestrator/routes.py` (lines 200-280)
-- Message publishing: `ticketremaster-b/orchestrators/transfer-orchestrator/routes.py` (lines 62-99, 102-158)
-- Documentation: `ticketremaster-b/README.md` (lines 133-159)
+**Why this is beyond the labs:**
+The lab material did not cover Redis, distributed locks, token blacklists, or TTL-backed workflow helpers.
 
-**BTL Category:** Advanced Messaging
+**Where it exists in this repo:**
 
-**Scenario Justification:**
-The platform implements three sophisticated message queue patterns:
+- JWT revocation blacklist: `shared/token_blacklist.py`
+- OTP rate limiting: `services/otp-wrapper/routes.py`
+- distributed scan lock: `orchestrators/ticket-verification-orchestrator/routes.py`
+- seat hold cache and idempotency cache: `services/seat-inventory-service/grpc_server.py`
+- purchase confirmation cache read and Redis circuit breaker: `orchestrators/ticket-purchase-orchestrator/routes.py`
 
-1. **Seat Hold TTL Queue** (`seat_hold_ttl_queue`): Messages have a 5-minute TTL; when a purchase starts, a hold message is published. If the purchase completes, the message is acknowledged and removed. If the TTL expires, the message routes to a dead-letter exchange (`seat_hold_expired_queue`) for automatic seat release.
+**Role in the codebase:**
 
-2. **Seller Notification Queue** (`seller_notification_queue`): Decouples P2P transfer notifications from the buyer's request, enabling asynchronous email/SMS/push delivery with retry logic.
+- stores revoked JWTs until they expire naturally
+- stores OTP attempt counters and temporary account lockouts
+- prevents two staff devices from checking in the same ticket at the same moment
+- caches short-lived seat hold state so purchase confirmation does not always need to re-fetch from the database
+- stores idempotency results for release operations
 
-3. **Transfer Timeout Queue** (`transfer_timeout_queue`): Messages with 24-hour TTL for auto-cancelling stuck transfers.
+**Why the design makes sense:**
+This repo does **not** use Redis as the main database. It uses Redis only for "fast temporary memory" jobs:
 
-This demonstrates advanced message broker usage including TTL configuration, dead-letter exchanges, and idempotent consumer patterns—far beyond basic queue-based task distribution.
+- short timers
+- retry protection
+- lock ownership
+- quick state checks
 
----
+That is exactly the kind of problem Redis is good at.
 
-## BTL Feature #4: WebSocket Real-Time Notifications with Redis Pub/Sub
+**Read more:**
 
-**Identified BTL Feature:** Socket.IO WebSocket server with Redis Pub/Sub for cross-service event broadcasting
-
-**Code Location:**
-- Service implementation: `ticketremaster-b/services/notification-service/app.py`
-- Documentation: `ticketremaster-b/services/notification-service/NOTIFICATIONS.md`
-- Frontend integration: `ticketremaster-f/src/composables/useWebSocket.ts`
-- Kubernetes deployment: `ticketremaster-b/k8s/base/core-workloads.yaml`
-
-**BTL Category:** Distributed Communication
-
-**Scenario Justification:**
-The notification service provides real-time updates to connected clients via WebSocket (Socket.IO), complementing RabbitMQ's async workflows with immediate push notifications. Key features include:
-
-- **Redis Pub/Sub** for cross-service event broadcasting—any service can publish events that are immediately pushed to all connected WebSocket clients
-- **Six event types** (`seat_update`, `ticket_update`, `transfer_update`, `purchase_update`, `user_update`, `event_update`) with structured payloads and trace IDs
-- **HTTP broadcast API** (`POST /notifications/broadcast`) allowing services to trigger real-time updates without maintaining WebSocket connections
-- **Automatic reconnection** and message queuing for resilient client connections
-
-This architecture enables real-time seat availability updates, instant transfer status changes, and live purchase confirmations—critical for a responsive ticketing platform.
+- [Redis docs](https://redis.io/docs/latest/)
+- [Redis Pub/Sub](https://redis.io/docs/latest/develop/pubsub/)
 
 ---
 
-## BTL Feature #5: OutSystems External Service Integration
+## BTL #3: Socket.IO WebSockets with Redis Pub/Sub
 
-**Identified BTL Feature:** Integration with external OutSystems Credit Service as system of record
+**Simple explanation:**
+A REST API is like asking, "Any news yet?" again and again.
+A WebSocket is like leaving the phone call open so the server can say, "News just happened."
 
-**Code Location:**
-- Integration guide: `ticketremaster-b/OUTSYSTEMS.md`
-- Service client: `ticketremaster-b/orchestrators/shared/service_client.py`
-- Orchestrator usage: `ticketremaster-b/orchestrators/auth-orchestrator/`, `credit-orchestrator/`, `ticket-purchase-orchestrator/`, `transfer-orchestrator/`
+**Why this is beyond the labs:**
+The labs did not cover realtime browser push, WebSockets, or cross-instance event broadcasting.
 
-**BTL Category:** External Service Integration
+**Where it exists in this repo:**
 
-**Scenario Justification:**
-The platform integrates with an external OutSystems application as the authoritative system of record for user credit balances. This demonstrates:
+- implementation: `services/notification-service/app.py`
+- usage notes: `services/notification-service/NOTIFICATIONS.md`
+- service README: `services/notification-service/README.md`
 
-- **Cross-platform integration** with API key authentication (`X-API-KEY` header)
-- **Saga pattern** for distributed transactions spanning Flask microservices and OutSystems
-- **Idempotency handling** via reference IDs for duplicate detection
-- **Compensation logic** for rollback on downstream failures
-- **Configurable timeout** (`OUTSYSTEMS_TIMEOUT_SECONDS`) for external service calls
+**Role in the codebase:**
 
-The integration follows enterprise patterns for external system communication, including error normalization, retry logic, and circuit breaker patterns.
+- clients connect through Socket.IO
+- clients subscribe to event channels such as `seat_update`, `ticket_update`, and `transfer_update`
+- services can push an internal HTTP request to the notification service
+- the notification service republishes the event to Redis Pub/Sub
+- connected clients get the update immediately
 
----
+**Why the design makes sense:**
+RabbitMQ is good for background work between backend components.
+WebSockets are good for telling the frontend "something changed right now".
+This repo uses both, because they solve different problems.
 
-## BTL Feature #6: Kubernetes Multi-Namespace Deployment
+**Read more:**
 
-**Identified BTL Feature:** Kubernetes deployment with three isolated namespaces (edge, core, data)
-
-**Code Location:**
-- Kustomize manifests: `ticketremaster-b/k8s/base/`
-- Namespace definitions: `ticketremaster-b/k8s/base/namespaces.yaml`
-- Network policies: `ticketremaster-b/k8s/base/network-policies.yaml`
-- Core workloads: `ticketremaster-b/k8s/base/core-workloads.yaml`
-- Data plane: `ticketremaster-b/k8s/base/data-plane.yaml`
-
-**BTL Category:** Independent Research
-
-**Scenario Justification:**
-The platform implements a production-grade Kubernetes deployment architecture with:
-
-- **Three isolated namespaces** (`ticketremaster-edge`, `ticketremaster-core`, `ticketremaster-data`) enforcing architectural layering
-- **Network policies** restricting inter-namespace communication to authorized paths only
-- **Kustomize** for environment-specific configuration management
-- **StatefulSets** for PostgreSQL databases with persistent volume claims
-- **ConfigMaps and Secrets** for environment variable management
-- **Deployment strategies** with readiness and liveness probes
-
-This demonstrates significant independent research into container orchestration, network security, and production deployment patterns.
+- [Socket.IO docs](https://socket.io/docs/v4/)
+- [Redis Pub/Sub](https://redis.io/docs/latest/develop/pubsub/)
 
 ---
 
-## BTL Feature #7: Cloudflare Tunnel Zero-Trust Networking
+## BTL #4: Advanced RabbitMQ Patterns
 
-**Identified BTL Feature:** Cloudflare Tunnel (cloudflared) for secure, zero-trust edge exposure
+**Simple explanation:**
+Basic queues are like "do this job later".
+This repo goes further and says things like:
 
-**Code Location:**
-- Kubernetes deployment: `ticketremaster-b/k8s/base/edge-workloads.yaml` (lines 87-137)
-- Network policies: `ticketremaster-b/k8s/base/network-policies.yaml` (lines 48-104)
-- Kustomization: `ticketremaster-b/k8s/base/kustomization.yaml`
-- Documentation: `ticketremaster-b/README.md` (line 101)
+- "do this if the timer expires"
+- "send this somewhere else if it expires"
+- "cancel this workflow automatically after 24 hours"
 
-**BTL Category:** Independent Research
+**Why this is beyond the labs:**
+RabbitMQ itself was learned in class, but this repo uses more advanced broker behavior than a normal producer-consumer example.
 
-**Scenario Justification:**
-The platform uses Cloudflare Tunnel (`cloudflared`) to expose the Kong API Gateway to the internet through a zero-trust architecture. This approach provides:
+**Where it exists in this repo:**
 
-- **No public IP required** - The cluster remains completely private; `cloudflared` initiates outbound-only connections to Cloudflare's edge
-- **Built-in DDoS protection** - All traffic is routed through Cloudflare's global edge network, absorbing volumetric attacks
-- **Zero-trust security model** - Eliminates traditional perimeter security in favor of identity-aware access controls
-- **Global edge performance** - API requests are routed to the nearest Cloudflare edge location, reducing latency
-- **Simplified infrastructure** - No need for load balancers, firewall rules, or VPN infrastructure
+- queue topology: `shared/queue_setup.py`
+- hold expiry publisher: `orchestrators/ticket-purchase-orchestrator/routes.py`
+- hold expiry consumer: `orchestrators/ticket-purchase-orchestrator/dlx_consumer.py`
+- seller notification publisher: `orchestrators/transfer-orchestrator/routes.py`
+- transfer timeout publisher: `orchestrators/transfer-orchestrator/routes.py`
+- seller notification consumer: `orchestrators/transfer-orchestrator/seller_consumer.py`
+- transfer timeout consumer: `orchestrators/transfer-orchestrator/timeout_consumer.py`
 
-The deployment includes:
-- **High availability** with 2 replicas
-- **Metrics exposure** on port 2000 for monitoring
-- **Restricted network policies** limiting `cloudflared` to only necessary communication paths
-- **Secret-based authentication** using Cloudflare tunnel tokens
+**Role in the codebase:**
 
-This demonstrates independent research into modern zero-trust networking patterns and edge computing architectures.
+- `seat_hold_ttl_queue` holds seat-expiry messages for the purchase flow
+- when the message expires, it is routed into `seat_hold_expired_queue` through a dead-letter exchange
+- a consumer then releases the seat automatically
+- `seller_notification_queue` decouples seller notification work from the live buyer request
+- `transfer_timeout_queue` auto-cancels incomplete transfers after the configured timeout
 
----
+**Why the design makes sense:**
+It stops long-running workflows from depending on a single user keeping a browser tab open. The queue system remembers what must happen later even if the original request is already over.
 
-## Summary Table
+**Read more:**
 
-| BTL Feature | Category | Primary Location | Complexity Level |
-|-------------|----------|------------------|------------------|
-| gRPC Seat Inventory | Advanced Protocols | `proto/`, `shared/grpc/` | High |
-| Kong API Gateway | API Management | `api-gateway/kong.yml` | High |
-| RabbitMQ Advanced Messaging | Advanced Messaging | `orchestrators/*/routes.py` | High |
-| WebSocket + Redis Pub/Sub | Distributed Communication | `services/notification-service/` | High |
-| OutSystems Integration | External Service Integration | `OUTSYSTEMS.md` | Medium |
-| Kubernetes Multi-Namespace | Independent Research | `k8s/base/` | High |
-| Cloudflare Tunnel Zero-Trust | Independent Research | `k8s/base/edge-workloads.yaml` | High |
+- [RabbitMQ TTL](https://www.rabbitmq.com/docs/ttl)
+- [RabbitMQ Dead Letter Exchanges](https://www.rabbitmq.com/docs/dlx)
 
 ---
 
-*Report generated from architectural scan of TicketRemaster codebase. All code locations verified against current repository state.*
+## BTL #5: Kubernetes Runtime Design
+
+**Simple explanation:**
+If Docker containers are like packed lunchboxes, Kubernetes is the school system that decides where every lunchbox goes, restarts it if it falls, and keeps teams separate.
+
+**Why this is beyond the labs:**
+The labs covered Docker and Docker Compose. This repo is maintained primarily as a Kubernetes system.
+
+**Where it exists in this repo:**
+
+- entrypoint manifests: `k8s/base/`
+- namespaces: `k8s/base/namespaces.yaml`
+- network isolation: `k8s/base/network-policies.yaml`
+- data workloads: `k8s/base/data-plane.yaml`
+- core workloads: `k8s/base/core-workloads.yaml`
+- edge workloads: `k8s/base/edge-workloads.yaml`
+- kustomization: `k8s/base/kustomization.yaml`
+
+**Role in the codebase:**
+
+- separates the system into `ticketremaster-edge`, `ticketremaster-core`, and `ticketremaster-data`
+- runs PostgreSQL as StatefulSets because database pods need stable identity and storage
+- uses NetworkPolicies so not every pod can talk to every other pod
+- mounts Kong's declarative config through a ConfigMap
+- uses readiness/liveness probes so unhealthy workloads can be detected
+- includes seed jobs as part of normal environment bring-up
+
+**Why the design makes sense:**
+This layout turns the repo from "a bunch of containers" into a structured platform:
+
+- edge handles ingress
+- core handles business logic
+- data handles stateful infrastructure
+
+That layering is a real architecture decision, not just a deployment detail.
+
+**Read more:**
+
+- [Kubernetes overview](https://kubernetes.io/docs/concepts/overview/)
+- [Namespaces](https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/)
+- [Network Policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
+- [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
+- [Kustomize](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/)
+
+---
+
+## BTL #6: Cloudflare Tunnel
+
+**Simple explanation:**
+Instead of opening your house to the whole street, Cloudflare Tunnel is like having the house call Cloudflare first and say, "If anyone needs me, send them through you."
+
+**Why this is beyond the labs:**
+Cloudflare Tunnel and zero-trust exposure were not part of the lab stack.
+
+**Where it exists in this repo:**
+
+- deployment: `k8s/base/edge-workloads.yaml`
+- edge restrictions: `k8s/base/network-policies.yaml`
+- startup support: `start-backend.bat`, `scripts/start_k8s.ps1`
+
+**Role in the codebase:**
+
+- exposes the local Kubernetes-backed gateway through `https://ticketremasterapi.hong-yi.me`
+- avoids needing a public IP on Minikube
+- keeps the cluster on an outbound-only connection model
+- lets the backend maintainer share a live environment for smoke testing
+
+**Why the design makes sense:**
+This is a very practical team-maintenance choice. It gives the repo a public URL without turning the local machine into a traditionally exposed server.
+
+**Read more:**
+
+- [Cloudflare Tunnel docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+
+---
+
+## BTL #7: Advanced Kong Usage
+
+**Simple explanation:**
+Kong is the front desk of the system. But in this repo it is not just forwarding calls. It is also checking keys, limiting traffic, handling CORS, and keeping route behavior consistent.
+
+**Why this is only partly beyond the labs:**
+Kong itself was taught in class. What makes it BTL here is the **deeper production-style usage**, not the fact that Kong exists.
+
+**Where it exists in this repo:**
+
+- local template: `api-gateway/kong.yml.template`
+- Kubernetes source of truth: `k8s/base/configuration.yaml`
+
+**Role in the codebase:**
+
+- runs in DB-less declarative mode
+- applies global plugins like CORS and rate limiting
+- adds route-level `key-auth` only where needed
+- supports both current no-prefix routes and `/api/...` compatibility routes
+- protects browser-facing microservices from being called directly
+
+**Why the design makes sense:**
+It keeps authentication and edge policy consistent in one place. That way each orchestrator can focus on business logic instead of repeating gateway concerns.
+
+**Read more:**
+
+- [Kong Gateway docs](https://developer.konghq.com/gateway/)
+- [Kong key-auth plugin](https://developer.konghq.com/plugins/key-auth/)
+
+---
+
+## BTL #8: Saga Compensation and Idempotency
+
+**Simple explanation:**
+If a workflow has many steps and step 4 fails, we need a plan for how to undo steps 1 to 3 safely.
+That plan is a **saga**.
+If the same request arrives twice, we should not charge twice.
+That protection is **idempotency**.
+
+**Why this is beyond the labs:**
+The lab summary did not cover saga orchestration, compensation, replay protection, or idempotent distributed workflow design.
+
+**Where it exists in this repo:**
+
+- purchase compensation: `orchestrators/ticket-purchase-orchestrator/routes.py`
+- transfer saga: `orchestrators/transfer-orchestrator/routes.py`
+- Stripe webhook idempotency: `orchestrators/credit-orchestrator/routes.py`
+- seat release idempotency: `services/seat-inventory-service/grpc_server.py`
+
+**Role in the codebase:**
+
+- purchase confirmation can compensate when seat sale succeeds but ticketing or credit deduction fails
+- transfer completion uses a multi-step saga across OutSystems, credit ledger, ticket ownership, and listing state
+- Stripe webhook processing checks existing references before applying balance changes again
+- seat release caches a previous result to prevent duplicate release side effects
+
+**Why the design makes sense:**
+In a distributed system, failures happen halfway through. The codebase already assumes this and includes recovery logic, instead of pretending every multi-step workflow is one perfectly atomic action.
+
+**Read more:**
+
+- [Idempotency (Stripe docs)](https://docs.stripe.com/api/idempotent_requests)
+- [Saga pattern overview](https://microservices.io/patterns/data/saga.html)
+
+---
+
+## Final Conclusion
+
+The strongest BTL items in this backend are:
+
+- gRPC for seat inventory
+- Redis for locks, TTL state, and token revocation
+- realtime WebSocket push
+- Kubernetes runtime design
+- Cloudflare Tunnel
+
+The repo also shows important beyond-lab **engineering patterns**:
+
+- advanced RabbitMQ usage
+- advanced Kong policy design
+- saga and idempotency handling
+
+So the backend is not just "more Flask services". It is a more production-like distributed system than the lab baseline, with extra infrastructure, stronger workflow control, and more careful failure handling.

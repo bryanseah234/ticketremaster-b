@@ -21,7 +21,7 @@ flowchart LR
         Verify[ticket-verification-orchestrator\n/verify/*]
     end
 
-    FE -->|"https://ticketremasterapi.hong-yi.me\nor http://localhost:8000"| CF
+    FE -->|"https://ticketremasterapi.hong-yi.me\nor local Kong port-forward"| CF
     CF --> Tunnel
     Tunnel --> Kong
     Kong --> Auth

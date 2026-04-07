@@ -1,13 +1,9 @@
 @startuml
-' Source counterpart for 12_system_architecture_overview.png
-' Keep this UML in sync with diagram/12_system_architecture_overview.png when diagrams are updated.
-' If you use Mermaid in docs, mirror those semantic changes here.
-
-title System architecture overview
+title System architecture overview (legacy breadcrumb)
 
 note as N1
-  TODO: Replace this placeholder with the actual PlantUML flow
-  that matches diagram/12_system_architecture_overview.png.
+  Canonical source: diagrams/12_system_architecture_overview.mmd
+  Rendered artifact: diagrams/12_system_architecture_overview.png
 end note
 
 @enduml

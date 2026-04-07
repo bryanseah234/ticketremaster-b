@@ -1,33 +1,31 @@
-# TicketRemaster Architecture Diagrams
+# TicketRemaster Diagram Gallery
 
-This directory contains architecture diagrams for key system workflows.
+This directory contains maintained diagrams for backend workflows and architecture.
 
-## Quick Start
+## Source of truth
 
-1. Use the exported SVG diagrams in this folder for docs and 16:9 slides.
-2. Update the paired `.mmd` source when architecture changes.
-3. Re-export SVG assets and keep links in this README in sync.
+- numbered gallery diagrams use Mermaid `.mmd` files
+- README-facing architecture diagrams also use Mermaid `.mmd` files
+- legacy `.uml` files are only breadcrumbs for old references and are not the maintained source format
 
 ## Diagram Index
 
-| # | Diagram | Description |
-|---|---------|-------------|
-| 01 | [Ticket Purchase - Happy Path](01_ticket_purchase_happy_path.png) | Complete purchase flow from seat selection to confirmation |
-| 02 | [Purchase Reservation Expires](02_ticket_purchase_reservation_expires.png) | What happens when a seat hold times out |
-| 03 | [P2P Transfer - Happy Path](03_p2p_transfer_happy_path.png) | Ticket transfer between users with OTP verification |
-| 04 | [QR Verification - Happy Path](04_qr_verification_happy_path.png) | Staff scanning tickets at event entry |
-| 05 | [Distributed Lock - Concurrent Scan](05_distributed_lock_concurrent_scan.png) | Handling concurrent ticket verification attempts |
-| 06 | [Rate Limiting - OTP Verification](06_rate_limiting_otp_verification.png) | Preventing OTP brute force attacks |
-| 07 | [Idempotency Keys - Deduplication](07_idempotency_keys_deduplication.png) | Preventing duplicate purchases |
-| 08 | [Auto Cancel - Stuck Transfers](08_auto_cancel_stuck_transfers.png) | Cleaning up expired transfer requests |
-| 09 | [Deadlock Retry Logic](09_deadlock_retry_logic.png) | Handling database deadlocks gracefully |
-| 10 | [Cache Invalidation - Retry](10_cache_invalidation_retry.png) | Redis cache management with retries |
-| 11 | [Graceful Shutdown](11_graceful_shutdown_handling.png) | Service shutdown with connection draining |
-| 12 | [System Architecture Overview](12_system_architecture_overview.png) | High-level system architecture |
+| # | Diagram | Mermaid source | Description |
+|---|---------|----------------|-------------|
+| 01 | [Ticket Purchase - Happy Path](01_ticket_purchase_happy_path.png) | [01_ticket_purchase_happy_path.mmd](01_ticket_purchase_happy_path.mmd) | Hold and confirm purchase through gRPC, RabbitMQ, OutSystems, and ticket issuance |
+| 02 | [Purchase Reservation Expires](02_ticket_purchase_reservation_expires.png) | [02_ticket_purchase_reservation_expires.mmd](02_ticket_purchase_reservation_expires.mmd) | Seat hold expiry using TTL queue plus dead-letter routing |
+| 03 | [P2P Transfer - Happy Path](03_p2p_transfer_happy_path.png) | [03_p2p_transfer_happy_path.mmd](03_p2p_transfer_happy_path.mmd) | Transfer flow with OTP, saga completion, and listing closeout |
+| 04 | [QR Verification - Happy Path](04_qr_verification_happy_path.png) | [04_qr_verification_happy_path.mmd](04_qr_verification_happy_path.mmd) | Staff scan flow with lock, validation checks, and audit log |
+| 05 | [Distributed Lock - Concurrent Scan](05_distributed_lock_concurrent_scan.png) | [05_distributed_lock_concurrent_scan.mmd](05_distributed_lock_concurrent_scan.mmd) | Redis lock preventing duplicate concurrent scans |
+| 06 | [Rate Limiting - OTP Verification](06_rate_limiting_otp_verification.png) | [06_rate_limiting_otp_verification.mmd](06_rate_limiting_otp_verification.mmd) | OTP throttling and temporary lockout |
+| 07 | [Idempotency Keys - Deduplication](07_idempotency_keys_deduplication.png) | [07_idempotency_keys_deduplication.mmd](07_idempotency_keys_deduplication.mmd) | Duplicate webhook protection using reference IDs |
+| 08 | [Auto Cancel - Stuck Transfers](08_auto_cancel_stuck_transfers.png) | [08_auto_cancel_stuck_transfers.mmd](08_auto_cancel_stuck_transfers.mmd) | 24-hour transfer timeout cleanup |
+| 09 | [Deadlock Retry Logic](09_deadlock_retry_logic.png) | [09_deadlock_retry_logic.mmd](09_deadlock_retry_logic.mmd) | Retry-with-backoff around seat-row deadlocks |
+| 10 | [Cache Invalidation - Retry](10_cache_invalidation_retry.png) | [10_cache_invalidation_retry.mmd](10_cache_invalidation_retry.mmd) | Redis cache delete retries and DLQ logging |
+| 11 | [Graceful Shutdown](11_graceful_shutdown_handling.png) | [11_graceful_shutdown_handling.mmd](11_graceful_shutdown_handling.mmd) | SIGTERM handling, draining, and cleanup |
+| 12 | [System Architecture Overview](12_system_architecture_overview.png) | [12_system_architecture_overview.mmd](12_system_architecture_overview.mmd) | Updated high-level system architecture |
 
 ## New: Real-time Notification Flow
-
-The notification service adds real-time capabilities to the system:
 
 ![Notification real-time flow (exported)](notification_realtime_flow.svg)
 
@@ -37,25 +35,26 @@ The notification service adds real-time capabilities to the system:
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Kong
     participant Service
-    participant NotifSvc
+    participant NotifSvc as notification-service
     participant Redis
-    participant WebSocket
+    participant Socket as Socket.IO connection
 
-    Note over Client,WebSocket: WebSocket Connection
-    Client->>WebSocket: Connect via Socket.IO
-    WebSocket->>NotifSvc: Establish connection
-    Client->>WebSocket: Subscribe to channel
-    WebSocket->>Redis: SUBSCRIBE notifications:seat_update
+    Note over Client,Socket: WebSocket Connection
+    Client->>Socket: Connect via Socket.IO
+    Socket->>NotifSvc: Establish connection
+    Client->>Socket: subscribe seat_update
+    Socket->>NotifSvc: join room seat_update
+    NotifSvc->>Redis: PSUBSCRIBE notifications:*
 
-    Note over Client,WebSocket: Service Broadcast
-    Service->>NotifSvc: POST /notifications/broadcast
+    Note over Client,Socket: Service Broadcast
+    Service->>NotifSvc: POST /broadcast
     NotifSvc->>Redis: PUBLISH notifications:seat_update
-    Redis->>WebSocket: Message received
-    WebSocket->>Client: Push notification
+    Redis->>NotifSvc: Pub/Sub message arrives
+    NotifSvc->>Socket: emit seat_update
+    Socket->>Client: push notification
 
-    Note over Client,WebSocket: Real-time Updates
+    Note over Client,Socket: Real-time Updates
     Client->>Client: Update UI instantly
 ```
 
@@ -65,23 +64,22 @@ sequenceDiagram
 
 | Event | Trigger | Recipients |
 |-------|---------|------------|
-| `seat_update` | Seat held/sold/released | All users viewing event |
-| `ticket_update` | Ticket purchased/transferred | Ticket owner |
-| `transfer_update` | Transfer initiated/accepted/declined | Transfer participants |
-| `purchase_update` | Purchase confirmed/cancelled | Purchaser |
-| `user_update` | Profile updated/flagged | User |
-| `event_update` | Event created/updated/cancelled | Interested users |
+| `seat_update` | Seat held, sold, or released | Users watching event availability |
+| `ticket_update` | Ticket purchased or transferred | Ticket owner |
+| `transfer_update` | Transfer status changes | Transfer participants |
+| `purchase_update` | Purchase completion or failure | Purchaser |
+| `user_update` | User-side state changes | Relevant user |
+| `event_update` | Event lifecycle changes | Interested users |
 
 ### Integration Points
 
 Services broadcast events after state changes:
 
 ```python
-# In any service after a state change
-requests.post('http://notification-service:8109/notifications/broadcast', json={
-    'type': 'seat_update',
-    'payload': {'eventId': event_id, 'seatId': seat_id, 'status': 'sold'},
-    'traceId': trace_id
+requests.post("http://notification-service:8109/broadcast", json={
+    "type": "seat_update",
+    "payload": {"eventId": event_id, "seatId": seat_id, "status": "sold"},
+    "traceId": trace_id,
 })
 ```
 
@@ -125,6 +123,7 @@ flowchart LR
             EVENT_SVC[event]
             INVENTORY[inventory]
             TICKET[ticket]
+            TICKET_LOG[ticket-log]
             MARKET_SVC[marketplace]
             TRANSFER_SVC[transfer]
             CREDIT_TXN[credit-transaction]
@@ -142,6 +141,7 @@ flowchart LR
 
     subgraph External[External]
         OUTSYS[OutSystems Credit API]
+        SMU[SMU Notification API]
         STRIPE_EXT[Stripe]
     end
 
@@ -158,31 +158,54 @@ flowchart LR
     KONG --> VERIFY
 
     AUTH --> USER
+    AUTH --> OUTSYS
+    EVENT --> VENUE
+    EVENT --> SEAT
     EVENT --> EVENT_SVC
+    EVENT --> INVENTORY
+    CREDIT --> STRIPE
+    CREDIT --> CREDIT_TXN
+    CREDIT --> OUTSYS
     PURCHASE --> INVENTORY
+    PURCHASE --> TICKET
+    PURCHASE --> CREDIT_TXN
+    PURCHASE --> OUTSYS
+    PURCHASE --> REDIS
+    PURCHASE --> RABBIT
     QR --> TICKET
+    QR --> EVENT_SVC
+    QR --> VENUE
     MARKET --> MARKET_SVC
+    MARKET --> TICKET
+    MARKET --> EVENT_SVC
+    MARKET --> USER
     TRANSFER --> TRANSFER_SVC
+    TRANSFER --> MARKET_SVC
+    TRANSFER --> TICKET
+    TRANSFER --> CREDIT_TXN
     TRANSFER --> OTP
+    TRANSFER --> OUTSYS
+    TRANSFER --> RABBIT
     VERIFY --> TICKET
-
+    VERIFY --> TICKET_LOG
+    VERIFY --> EVENT_SVC
+    VERIFY --> VENUE
+    VERIFY --> INVENTORY
+    VERIFY --> REDIS
+    OTP --> SMU
+    STRIPE --> STRIPE_EXT
+    NOTIF --> REDIS
+    NOTIF -. realtime push .-> FE
+    NOTIF -. realtime push .-> STAFF
     USER --> PG
+    VENUE --> PG
+    SEAT --> PG
     EVENT_SVC --> PG
     INVENTORY --> PG
     TICKET --> PG
+    TICKET_LOG --> PG
     MARKET_SVC --> PG
     TRANSFER_SVC --> PG
-
-    PURCHASE --> REDIS
-    NOTIF --> REDIS
-    PURCHASE --> RABBIT
-    TRANSFER --> RABBIT
-
-    CREDIT --> OUTSYS
-    CREDIT --> STRIPE_EXT
-
-    NOTIF -.-> FE
-    NOTIF -.-> STAFF
 ```
 
 </details>
@@ -190,7 +213,8 @@ flowchart LR
 ## Documentation
 
 For detailed information about each workflow, see:
-- [README.md](../README.md) - System overview
+
+- [README.md](../README.md) - system overview
 - [API.md](../API.md) - API reference
-- [COMPLETE_SYSTEM_DOCUMENTATION.md](../COMPLETE_SYSTEM_DOCUMENTATION.md) - Full architecture
+- [INSTRUCTION.md](../INSTRUCTION.md) - backend design logic
 - [services/notification-service/NOTIFICATIONS.md](../services/notification-service/NOTIFICATIONS.md) - WebSocket events

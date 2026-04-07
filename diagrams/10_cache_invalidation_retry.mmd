@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    participant SeatInv as Seat Inventory Service
+    participant Redis as Redis Hold Cache
+    participant Rabbit as RabbitMQ DLQ
+
+    SeatInv->>Redis: delete hold:{inventoryId}
+    alt delete succeeds
+        Redis-->>SeatInv: key removed or already missing
+        SeatInv-->>SeatInv: continue normally
+    else delete fails
+        loop CACHE_RETRY_ATTEMPTS
+            SeatInv->>Redis: retry delete with backoff
+        end
+        alt still failing
+            SeatInv->>Rabbit: publish cache_invalidation_failed event
+            SeatInv-->>SeatInv: warn operators for manual follow-up
+        end
+    end
