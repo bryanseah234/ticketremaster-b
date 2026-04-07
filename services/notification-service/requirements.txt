@@ -6,3 +6,4 @@ redis==5.2.1
 sentry-sdk[flask]==2.20.0
 eventlet==0.40.3
 gunicorn==22.0.0
+flasgger==0.9.7.1

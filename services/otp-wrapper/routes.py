@@ -107,11 +107,59 @@ def _reset_attempts(phone_number):
 
 @bp.get('/health')
 def health_check():
+    """
+    Health check
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+    """
     return jsonify({'status': 'ok'}), 200
 
 
 @bp.post('/otp/send')
 def send_otp():
+    """
+    Send OTP to a phone number
+    ---
+    tags:
+      - OTP
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [phoneNumber]
+          properties:
+            phoneNumber:
+              type: string
+              description: Phone number in E.164 format
+              example: "+6591234567"
+    responses:
+      200:
+        description: OTP sent
+        schema:
+          type: object
+          properties:
+            sid:
+              type: string
+              description: Verification session ID — pass to /otp/verify
+      400:
+        description: Missing phoneNumber
+      429:
+        description: Rate limit exceeded (5 attempts per 15 minutes)
+      502:
+        description: Upstream SMU API error
+    """
     data = request.get_json(silent=True)
     if not data or 'phoneNumber' not in data:
         return error_response(400, 'VALIDATION_ERROR', 'Missing required field: phoneNumber')
@@ -145,6 +193,44 @@ def send_otp():
 
 @bp.post('/otp/verify')
 def verify_otp():
+    """
+    Verify an OTP code
+    ---
+    tags:
+      - OTP
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [sid, otp]
+          properties:
+            sid:
+              type: string
+              description: Verification session ID from /otp/send
+            otp:
+              type: string
+              description: OTP code entered by the user
+              example: "123456"
+            phoneNumber:
+              type: string
+              description: Phone number (used for rate limiting)
+    responses:
+      200:
+        description: Verification result
+        schema:
+          type: object
+          properties:
+            verified:
+              type: boolean
+      400:
+        description: Missing required fields
+      429:
+        description: Rate limit exceeded
+      502:
+        description: Upstream SMU API error
+    """
     data = request.get_json(silent=True)
     if not data or 'sid' not in data or 'otp' not in data:
         return error_response(400, 'VALIDATION_ERROR', 'Missing required fields: sid, otp')

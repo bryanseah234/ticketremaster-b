@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 
 from dotenv import load_dotenv
+from flasgger import Swagger
 from flask import Flask, jsonify, request
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
@@ -149,6 +150,11 @@ def create_app(test_config=None):
     @app.get("/health")
     def health_check():
         return jsonify({"status": "ok"}), 200
+
+    Swagger(app, template={
+        "info": {"title": "Seat Inventory Service", "version": "1.0.0"},
+        "tags": [{"name": "Health"}, {"name": "Inventory"}],
+    })
 
     return app
 

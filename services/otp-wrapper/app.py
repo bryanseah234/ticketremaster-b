@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 
 from dotenv import load_dotenv
+from flasgger import Swagger
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
@@ -126,6 +127,11 @@ def create_app(test_config=None):
     @app.get("/health")
     def health_check():
         return jsonify({"status": "ok"}), 200
+
+    Swagger(app, template={
+        "info": {"title": "OTP Wrapper Service", "version": "1.0.0"},
+        "tags": [{"name": "Health"}, {"name": "OTP"}],
+    })
 
     return app
 

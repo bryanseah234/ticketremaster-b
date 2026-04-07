@@ -20,19 +20,129 @@ UPDATABLE_FIELDS = {'email', 'password', 'salt', 'phoneNumber', 'role', 'isFlagg
 
 @bp.get('/health')
 def health():
+    """
+    Health check
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+    """
     return jsonify({'status': 'ok'}), 200
 
 
-# List all users for internal service and admin-facing lookups.
 @bp.get('/users')
 def list_users():
+    """
+    List all users
+    ---
+    tags:
+      - Users
+    responses:
+      200:
+        description: Array of users
+        schema:
+          type: array
+          items:
+            $ref: '#/definitions/User'
+    definitions:
+      User:
+        type: object
+        properties:
+          userId:
+            type: string
+            format: uuid
+          email:
+            type: string
+            format: email
+          phoneNumber:
+            type: string
+          role:
+            type: string
+            enum: [user, admin]
+          isFlagged:
+            type: boolean
+          venueId:
+            type: string
+            format: uuid
+          favoriteEvents:
+            type: array
+            items:
+              type: string
+              format: uuid
+          createdAt:
+            type: string
+            format: date-time
+          updatedAt:
+            type: string
+            format: date-time
+      Pagination:
+        type: object
+        properties:
+          page:
+            type: integer
+          limit:
+            type: integer
+          total:
+            type: integer
+    """
     users = User.query.order_by(User.createdAt.asc()).all()
     return jsonify([user.to_dict() for user in users]), 200
 
 
-# Create a user record from pre-hashed credentials supplied by the auth layer.
 @bp.post('/users')
 def create_user():
+    """
+    Create a user
+    ---
+    tags:
+      - Users
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [email, password, salt, phoneNumber]
+          properties:
+            email:
+              type: string
+              format: email
+            password:
+              type: string
+              description: Pre-hashed password
+            salt:
+              type: string
+            phoneNumber:
+              type: string
+              description: E.164 format
+            role:
+              type: string
+              enum: [user, admin]
+              default: user
+            isFlagged:
+              type: boolean
+              default: false
+            venueId:
+              type: string
+              format: uuid
+    responses:
+      201:
+        description: User created
+        schema:
+          $ref: '#/definitions/User'
+      400:
+        description: Missing required fields
+      409:
+        description: Email already registered
+    """
     data = request.get_json(silent=True)
     if not data or any(field not in data for field in REQUIRED_FIELDS):
         return error_response(400, 'VALIDATION_ERROR', 'Missing required fields')
@@ -54,18 +164,79 @@ def create_user():
     return jsonify(user.to_dict()), 201
 
 
-# Fetch a single user by internal UUID with the full stored record.
 @bp.get('/users/<user_id>')
 def get_user(user_id):
+    """
+    Get user by ID (includes sensitive fields)
+    ---
+    tags:
+      - Users
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: User with password and salt (internal use)
+        schema:
+          $ref: '#/definitions/User'
+      404:
+        description: User not found
+    """
     user = db.session.get(User, user_id)
     if not user:
         return error_response(404, 'USER_NOT_FOUND', 'User not found')
     return jsonify(user.to_dict(include_sensitive=True)), 200
 
 
-# Apply a partial update to allowed user fields.
 @bp.patch('/users/<user_id>')
 def update_user(user_id):
+    """
+    Update user
+    ---
+    tags:
+      - Users
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              format: email
+            password:
+              type: string
+            salt:
+              type: string
+            phoneNumber:
+              type: string
+            role:
+              type: string
+              enum: [user, admin]
+            isFlagged:
+              type: boolean
+            venueId:
+              type: string
+              format: uuid
+    responses:
+      200:
+        description: Updated user (includes sensitive fields)
+        schema:
+          $ref: '#/definitions/User'
+      400:
+        description: Unsupported fields
+      404:
+        description: User not found
+      409:
+        description: Email already registered
+    """
     data = request.get_json(silent=True)
     if not data:
         return error_response(400, 'VALIDATION_ERROR', 'Request body is required')
@@ -95,27 +266,110 @@ def update_user(user_id):
     return jsonify(user.to_dict(include_sensitive=True)), 200
 
 
-# Fetch a user by email, including stored password and salt for auth verification.
 @bp.get('/users/by-email/<path:email>')
 def get_user_by_email(email):
+    """
+    Get user by email (includes sensitive fields)
+    ---
+    tags:
+      - Users
+    parameters:
+      - in: path
+        name: email
+        type: string
+        required: true
+    responses:
+      200:
+        description: User with password and salt (internal use)
+        schema:
+          $ref: '#/definitions/User'
+      404:
+        description: User not found
+    """
     user = User.query.filter_by(email=email).first()
     if not user:
         return error_response(404, 'USER_NOT_FOUND', 'User not found')
     return jsonify(user.to_dict(include_sensitive=True)), 200
 
 
-# Get user's favorite events list
 @bp.get('/users/<user_id>/favorites')
 def get_user_favorites(user_id):
+    """
+    Get favorite events for a user
+    ---
+    tags:
+      - Favorites
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: List of favorite event IDs
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                eventIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      404:
+        description: User not found
+    """
     user = db.session.get(User, user_id)
     if not user:
         return error_response(404, 'USER_NOT_FOUND', 'User not found')
     return jsonify({'data': {'eventIds': user.favoriteEvents or []}}), 200
 
 
-# Update user's favorite events list (replaces entire list)
 @bp.put('/users/<user_id>/favorites')
 def update_user_favorites(user_id):
+    """
+    Replace favorite events for a user
+    ---
+    tags:
+      - Favorites
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [eventIds]
+          properties:
+            eventIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+    responses:
+      200:
+        description: Updated favorites
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                eventIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      400:
+        description: Missing or invalid eventIds
+      404:
+        description: User not found
+    """
     data = request.get_json(silent=True)
     if not data or 'eventIds' not in data:
         return error_response(400, 'VALIDATION_ERROR', 'eventIds field is required')
@@ -132,10 +386,39 @@ def update_user_favorites(user_id):
     return jsonify({'data': {'eventIds': user.favoriteEvents}}), 200
 
 
-# Admin endpoint: Flag a user
 @bp.patch('/admin/users/<user_id>/flag')
 def admin_flag_user(user_id):
-    """Admin-only endpoint to flag/unflag a user."""
+    """
+    Flag or unflag a user (admin)
+    ---
+    tags:
+      - Admin Users
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [isFlagged]
+          properties:
+            isFlagged:
+              type: boolean
+            reason:
+              type: string
+    responses:
+      200:
+        description: Updated user
+        schema:
+          $ref: '#/definitions/User'
+      400:
+        description: Missing isFlagged
+      404:
+        description: User not found
+    """
     data = request.get_json(silent=True)
     if not data or 'isFlagged' not in data:
         return error_response(400, 'VALIDATION_ERROR', 'isFlagged field is required')
@@ -153,10 +436,27 @@ def admin_flag_user(user_id):
     return jsonify(user.to_dict()), 200
 
 
-# Admin endpoint: List flagged users
 @bp.get('/admin/users')
 def admin_list_users():
-    """Admin-only endpoint to list users with optional filtering."""
+    """
+    List users with optional flag filter (admin)
+    ---
+    tags:
+      - Admin Users
+    parameters:
+      - in: query
+        name: flagged
+        type: string
+        enum: ['true', 'false']
+        description: Filter to flagged or non-flagged users
+    responses:
+      200:
+        description: Array of users
+        schema:
+          type: array
+          items:
+            $ref: '#/definitions/User'
+    """
     flagged = request.args.get('flagged')
 
     query = User.query
@@ -176,8 +476,36 @@ RESET_TOKEN_TTL_HOURS = 24
 @bp.post('/auth/forgot-password')
 def forgot_password():
     """
-    Initiate password reset flow.
-    Generates a reset token and returns it (in production, this would be sent via email/SMS).
+    Initiate password reset
+    ---
+    tags:
+      - Auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [email]
+          properties:
+            email:
+              type: string
+              format: email
+    responses:
+      200:
+        description: Reset token generated (dev — token returned in response; use email in production)
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            resetToken:
+              type: string
+            expiresAt:
+              type: string
+              format: date-time
+      400:
+        description: Missing email
     """
     data = request.get_json(silent=True)
     if not data or 'email' not in data:
@@ -215,7 +543,37 @@ def forgot_password():
 @bp.post('/auth/reset-password')
 def reset_password():
     """
-    Reset password using a valid reset token.
+    Reset password using a reset token
+    ---
+    tags:
+      - Auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [token, newPassword, salt]
+          properties:
+            token:
+              type: string
+            newPassword:
+              type: string
+              description: New hashed password
+            salt:
+              type: string
+    responses:
+      200:
+        description: Password reset successful
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+      400:
+        description: Invalid/expired token or missing fields
+      404:
+        description: User not found
     """
     data = request.get_json(silent=True)
     if not data:
@@ -261,8 +619,33 @@ def reset_password():
 @bp.post('/auth/verify-reset-token')
 def verify_reset_token():
     """
-    Verify if a reset token is valid (without using it).
-    Useful for validating token before showing password reset form.
+    Verify whether a reset token is valid
+    ---
+    tags:
+      - Auth
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+    responses:
+      200:
+        description: Token validity result
+        schema:
+          type: object
+          properties:
+            valid:
+              type: boolean
+            reason:
+              type: string
+              description: Reason if invalid (e.g. expired)
+      400:
+        description: Missing token
     """
     data = request.get_json(silent=True)
     if not data or 'token' not in data:
@@ -280,7 +663,33 @@ def verify_reset_token():
 
 @bp.get('/admin/users/flagged')
 def list_flagged_users():
-    """Admin endpoint to list all flagged users."""
+    """
+    List flagged users (admin, paginated)
+    ---
+    tags:
+      - Admin Users
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: limit
+        type: integer
+        default: 20
+    responses:
+      200:
+        description: Paginated list of flagged users
+        schema:
+          type: object
+          properties:
+            users:
+              type: array
+              items:
+                $ref: '#/definitions/User'
+            pagination:
+              $ref: '#/definitions/Pagination'
+    """
     page = request.args.get('page', default=1, type=int)
     limit = request.args.get('limit', default=20, type=int)
 
@@ -311,7 +720,31 @@ def list_flagged_users():
 
 @bp.patch('/admin/users/<user_id>/unflag')
 def admin_unflag_user(user_id: str):
-    """Admin endpoint to unflag a user."""
+    """
+    Unflag a user (admin)
+    ---
+    tags:
+      - Admin Users
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: User unflagged
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            user:
+              $ref: '#/definitions/User'
+      400:
+        description: User is not flagged
+      404:
+        description: User not found
+    """
     user = db.session.get(User, user_id)
     if not user:
         return error_response(404, 'USER_NOT_FOUND', 'User not found')
@@ -330,7 +763,24 @@ def admin_unflag_user(user_id: str):
 
 @bp.get('/admin/users/<user_id>')
 def admin_get_user(user_id: str):
-    """Admin endpoint to get full user details."""
+    """
+    Get full user details (admin)
+    ---
+    tags:
+      - Admin Users
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: User details including sensitive fields
+        schema:
+          $ref: '#/definitions/User'
+      404:
+        description: User not found
+    """
     user = db.session.get(User, user_id)
     if not user:
         return error_response(404, 'USER_NOT_FOUND', 'User not found')
@@ -340,7 +790,40 @@ def admin_get_user(user_id: str):
 
 @bp.get('/admin/users/search')
 def admin_search_users():
-    """Admin endpoint to search users by email or phone."""
+    """
+    Search users by email or phone (admin)
+    ---
+    tags:
+      - Admin Users
+    parameters:
+      - in: query
+        name: q
+        type: string
+        required: true
+        description: Search by email or phone number
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: limit
+        type: integer
+        default: 20
+    responses:
+      200:
+        description: Matching users
+        schema:
+          type: object
+          properties:
+            users:
+              type: array
+              items:
+                $ref: '#/definitions/User'
+            pagination:
+              $ref: '#/definitions/Pagination'
+      400:
+        description: Missing search query
+    """
     query_param = request.args.get('q', default='', type=str)
     page = request.args.get('page', default=1, type=int)
     limit = request.args.get('limit', default=20, type=int)

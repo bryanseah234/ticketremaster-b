@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import redis
+from flasgger import Swagger
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
@@ -19,6 +20,12 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('JWT_SECRET', 'dev-secret')
+
+Swagger(app, template={
+    "info": {"title": "Notification Service", "version": "1.0.0",
+             "description": "Real-time WebSocket notifications via Socket.IO. Connect to ws://localhost:8109 for WebSocket events."},
+    "tags": [{"name": "Health"}, {"name": "Internal"}],
+})
 
 # CORS configuration
 CORS(app, origins=[
@@ -140,15 +147,61 @@ def subscribe_to_redis():
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint."""
+    """
+    Health check
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+            service:
+              type: string
+              example: notification-service
+    """
     return jsonify({'status': 'ok', 'service': 'notification-service'}), 200
 
 
 @app.route('/broadcast', methods=['POST'])
 def broadcast():
     """
-    Internal endpoint for services to broadcast events.
-    Should be called by other microservices via internal network.
+    Broadcast an event to WebSocket subscribers (internal use)
+    ---
+    tags:
+      - Internal
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [seat_update, ticket_update, transfer_update, purchase_update, user_update, event_update]
+            payload:
+              type: object
+              description: Arbitrary payload to broadcast
+            traceId:
+              type: string
+              format: uuid
+    responses:
+      200:
+        description: Event broadcasted
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+      400:
+        description: Missing body or unknown event type
     """
     data = request.get_json(silent=True)
     if not data:
@@ -168,7 +221,28 @@ def broadcast():
 
 @app.route('/stats', methods=['GET'])
 def stats():
-    """Get notification service statistics."""
+    """
+    Get service statistics
+    ---
+    tags:
+      - Internal
+    responses:
+      200:
+        description: Service statistics
+        schema:
+          type: object
+          properties:
+            connected_clients:
+              type: integer
+              description: Number of connected WebSocket clients
+            channels:
+              type: array
+              items:
+                type: string
+              description: Available event channels
+            redis_connected:
+              type: boolean
+    """
     return jsonify({
         'connected_clients': len(socketio.server.eio.sockets),
         'channels': list(EVENT_CHANNELS.keys()),

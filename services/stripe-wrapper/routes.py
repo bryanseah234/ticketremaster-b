@@ -10,11 +10,63 @@ def _validation_error(message):
 
 @bp.get('/health')
 def health():
+    """
+    Health check
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+    """
     return jsonify({'status': 'ok'}), 200
 
 
 @bp.post('/stripe/create-payment-intent')
 def create_payment_intent():
+    """
+    Create a Stripe payment intent
+    ---
+    tags:
+      - Payments
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [amount, userId]
+          properties:
+            amount:
+              type: integer
+              description: Amount in credits (positive integer). Converted to cents internally.
+              example: 50
+            userId:
+              type: string
+              format: uuid
+    responses:
+      200:
+        description: Payment intent created
+        schema:
+          type: object
+          properties:
+            clientSecret:
+              type: string
+              description: Stripe client secret — pass to Stripe.js on the frontend
+            paymentIntentId:
+              type: string
+            amount:
+              type: integer
+              description: Credits being purchased
+      400:
+        description: Missing or invalid fields
+    """
     payload = request.get_json(silent=True) or {}
     amount = payload.get('amount')
     user_id = payload.get('userId')
@@ -49,6 +101,41 @@ def create_payment_intent():
 
 @bp.post('/stripe/retrieve-payment-intent')
 def retrieve_payment_intent():
+    """
+    Retrieve payment intent status
+    ---
+    tags:
+      - Payments
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [paymentIntentId]
+          properties:
+            paymentIntentId:
+              type: string
+    responses:
+      200:
+        description: Payment intent details
+        schema:
+          type: object
+          properties:
+            userId:
+              type: string
+              format: uuid
+            credits:
+              type: string
+              description: Number of credits being purchased
+            paymentIntentId:
+              type: string
+            status:
+              type: string
+              description: Stripe payment status
+      400:
+        description: Missing paymentIntentId or payment not succeeded
+    """
     payload = request.get_json(silent=True) or {}
     payment_intent_id = payload.get('paymentIntentId')
     if not payment_intent_id:
@@ -71,6 +158,41 @@ def retrieve_payment_intent():
 
 @bp.post('/stripe/webhook')
 def stripe_webhook():
+    """
+    Stripe webhook handler
+    ---
+    tags:
+      - Webhooks
+    parameters:
+      - in: header
+        name: Stripe-Signature
+        type: string
+        required: true
+        description: Stripe webhook signature for verification
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          description: Raw Stripe event payload
+    responses:
+      200:
+        description: Webhook processed
+        schema:
+          type: object
+          properties:
+            received:
+              type: boolean
+            userId:
+              type: string
+              format: uuid
+            credits:
+              type: string
+            paymentIntentId:
+              type: string
+      400:
+        description: Invalid signature
+    """
     payload = request.get_data(cache=False, as_text=False)
     signature = request.headers.get('Stripe-Signature')
     webhook_secret = current_app.config['STRIPE_WEBHOOK_SECRET']

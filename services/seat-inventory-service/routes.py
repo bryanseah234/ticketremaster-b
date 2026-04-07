@@ -8,11 +8,63 @@ bp = Blueprint('seat_inventory', __name__)
 
 @bp.get('/health')
 def health():
+    """
+    Health check
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+    """
     return jsonify({'status': 'ok'}), 200
 
 
 @bp.get('/inventory/event/<event_id>')
 def list_inventory_by_event(event_id):
+    """
+    List seat inventory for an event
+    ---
+    tags:
+      - Inventory
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Seat inventory for the event
+        schema:
+          type: object
+          properties:
+            eventId:
+              type: string
+              format: uuid
+            inventory:
+              type: array
+              items:
+                $ref: '#/definitions/SeatInventory'
+    definitions:
+      SeatInventory:
+        type: object
+        properties:
+          seatId:
+            type: string
+            format: uuid
+          eventId:
+            type: string
+            format: uuid
+          status:
+            type: string
+            description: Seat availability status (e.g. available, reserved, sold)
+    """
     inventory = (
         SeatInventory.query.filter_by(eventId=event_id)
         .order_by(SeatInventory.seatId.asc())
@@ -24,7 +76,53 @@ def list_inventory_by_event(event_id):
 @bp.post('/inventory/batch')
 def create_inventory_batch():
     """
-    Create multiple seat inventory records for an event (admin)
+    Batch-create seat inventory for an event
+    ---
+    tags:
+      - Inventory
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [eventId, seats]
+          properties:
+            eventId:
+              type: string
+              format: uuid
+            seats:
+              type: array
+              items:
+                type: object
+                required: [seatId]
+                properties:
+                  seatId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    default: available
+    responses:
+      201:
+        description: Seats created
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                eventId:
+                  type: string
+                  format: uuid
+                createdCount:
+                  type: integer
+      400:
+        description: Validation error
+      409:
+        description: Inventory already exists for this event
+      500:
+        description: Database error
     """
     data = request.get_json(silent=True) or {}
     event_id = data.get('eventId')

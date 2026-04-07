@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 
 from dotenv import load_dotenv
+from flasgger import Swagger
 from flask import Flask, jsonify, request
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
@@ -129,6 +130,11 @@ def create_app(test_config=None):
 
     app.register_blueprint(seats_bp)
     _register_error_handlers(app)
+
+    Swagger(app, template={
+        "info": {"title": "Seat Service", "version": "1.0.0"},
+        "tags": [{"name": "Health"}, {"name": "Seats"}],
+    })
 
     return app
 

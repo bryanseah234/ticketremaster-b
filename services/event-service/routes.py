@@ -29,11 +29,57 @@ UPDATABLE_FIELDS = {'venueId', 'name', 'date', 'description', 'type', 'image', '
 
 @bp.get('/health')
 def health():
+    """
+    Health check
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+    """
     return jsonify({'status': 'ok'}), 200
 
 
 @bp.get('/events')
 def list_events():
+    """
+    List all events
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: limit
+        type: integer
+        default: 20
+      - in: query
+        name: type
+        type: string
+        description: Filter by event type (concert, sports, theater, conference, festival, other)
+    responses:
+      200:
+        description: Paginated list of events
+        schema:
+          type: object
+          properties:
+            events:
+              type: array
+              items:
+                $ref: '#/definitions/Event'
+            pagination:
+              $ref: '#/definitions/Pagination'
+    """
     page = request.args.get('page', default=1, type=int)
     limit = request.args.get('limit', default=20, type=int)
     event_type = request.args.get('type', type=str)
@@ -68,7 +114,31 @@ def list_events():
 
 @bp.post('/admin/events/<event_id>/publish')
 def publish_event(event_id: str):
-    """Admin endpoint to publish an event (make it visible to public)."""
+    """
+    Publish an event (admin)
+    ---
+    tags:
+      - Admin Events
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Event published
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            event:
+              $ref: '#/definitions/Event'
+      400:
+        description: Event already cancelled or in the past
+      404:
+        description: Event not found
+    """
     event = db.session.get(Event, event_id)
     if not event:
         return error_response(404, 'EVENT_NOT_FOUND', 'Event not found')
@@ -92,7 +162,37 @@ def publish_event(event_id: str):
 
 @bp.post('/admin/events/<event_id>/duplicate')
 def duplicate_event(event_id: str):
-    """Admin endpoint to duplicate an event."""
+    """
+    Duplicate an event (admin)
+    ---
+    tags:
+      - Admin Events
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Name for the duplicated event (defaults to original name + " (Copy)")
+    responses:
+      201:
+        description: Event duplicated
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            event:
+              $ref: '#/definitions/Event'
+      404:
+        description: Event not found
+    """
     event = db.session.get(Event, event_id)
     if not event:
         return error_response(404, 'EVENT_NOT_FOUND', 'Event not found')
@@ -120,7 +220,36 @@ def duplicate_event(event_id: str):
 
 @bp.get('/events/upcoming')
 def list_upcoming_events():
-    """Get upcoming events (not cancelled, date in future)."""
+    """
+    List upcoming events
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: limit
+        type: integer
+        default: 20
+      - in: query
+        name: type
+        type: string
+    responses:
+      200:
+        description: Paginated list of upcoming events
+        schema:
+          type: object
+          properties:
+            events:
+              type: array
+              items:
+                $ref: '#/definitions/Event'
+            pagination:
+              $ref: '#/definitions/Pagination'
+    """
     page = request.args.get('page', default=1, type=int)
     limit = request.args.get('limit', default=20, type=int)
     event_type = request.args.get('type', type=str)
@@ -159,7 +288,40 @@ def list_upcoming_events():
 
 @bp.get('/events/search')
 def search_events():
-    """Search events by name or description."""
+    """
+    Search events by name or description
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: query
+        name: q
+        type: string
+        required: true
+        description: Search query string
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: limit
+        type: integer
+        default: 20
+    responses:
+      200:
+        description: Matching events
+        schema:
+          type: object
+          properties:
+            events:
+              type: array
+              items:
+                $ref: '#/definitions/Event'
+            pagination:
+              $ref: '#/definitions/Pagination'
+      400:
+        description: Missing search query
+    """
     query_param = request.args.get('q', default='', type=str)
     page = request.args.get('page', default=1, type=int)
     limit = request.args.get('limit', default=20, type=int)
@@ -198,7 +360,27 @@ def search_events():
 
 @bp.get('/events/types')
 def list_event_types():
-    """Get list of available event types."""
+    """
+    Get available event types
+    ---
+    tags:
+      - Events
+    responses:
+      200:
+        description: List of event types
+        schema:
+          type: object
+          properties:
+            types:
+              type: array
+              items:
+                type: object
+                properties:
+                  value:
+                    type: string
+                  label:
+                    type: string
+    """
     types = [
         {'value': 'concert', 'label': 'Concert'},
         {'value': 'sports', 'label': 'Sports'},
@@ -212,6 +394,24 @@ def list_event_types():
 
 @bp.get('/events/<event_id>')
 def get_event(event_id):
+    """
+    Get event by ID
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Event details
+        schema:
+          $ref: '#/definitions/Event'
+      404:
+        description: Event not found
+    """
     event = db.session.get(Event, event_id)
     if not event:
         return error_response(404, 'EVENT_NOT_FOUND', 'Event not found')
@@ -220,6 +420,97 @@ def get_event(event_id):
 
 @bp.post('/events')
 def create_event():
+    """
+    Create an event
+    ---
+    tags:
+      - Events
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [venueId, name, date, type, price]
+          properties:
+            venueId:
+              type: string
+              format: uuid
+            name:
+              type: string
+            date:
+              type: string
+              format: date-time
+            type:
+              type: string
+              enum: [concert, sports, theater, conference, festival, other]
+            price:
+              type: number
+            description:
+              type: string
+            image:
+              type: string
+    responses:
+      201:
+        description: Event created
+        schema:
+          type: object
+          properties:
+            eventId:
+              type: string
+              format: uuid
+            venueId:
+              type: string
+              format: uuid
+            name:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+      400:
+        description: Missing required fields or invalid date
+    definitions:
+      Event:
+        type: object
+        properties:
+          eventId:
+            type: string
+            format: uuid
+          venueId:
+            type: string
+            format: uuid
+          name:
+            type: string
+          date:
+            type: string
+            format: date-time
+          type:
+            type: string
+          price:
+            type: number
+          description:
+            type: string
+          image:
+            type: string
+          cancelledAt:
+            type: string
+            format: date-time
+          createdAt:
+            type: string
+            format: date-time
+          updatedAt:
+            type: string
+            format: date-time
+      Pagination:
+        type: object
+        properties:
+          page:
+            type: integer
+          limit:
+            type: integer
+          total:
+            type: integer
+    """
     data = request.get_json(silent=True)
     if not data or any(field not in data for field in REQUIRED_FIELDS):
         return error_response(400, 'VALIDATION_ERROR', 'Missing required fields')
@@ -251,7 +542,48 @@ def create_event():
 
 @bp.put('/admin/events/<event_id>')
 def update_event(event_id):
-    """Admin endpoint to update event details."""
+    """
+    Update event (admin)
+    ---
+    tags:
+      - Admin Events
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            venueId:
+              type: string
+              format: uuid
+            name:
+              type: string
+            date:
+              type: string
+              format: date-time
+            type:
+              type: string
+            description:
+              type: string
+            image:
+              type: string
+            price:
+              type: number
+    responses:
+      200:
+        description: Updated event
+        schema:
+          $ref: '#/definitions/Event'
+      400:
+        description: Validation error or event already cancelled
+      404:
+        description: Event not found
+    """
     data = request.get_json(silent=True)
     if not data:
         return error_response(400, 'VALIDATION_ERROR', 'Request body is required')
@@ -286,7 +618,31 @@ def update_event(event_id):
 
 @bp.delete('/admin/events/<event_id>')
 def delete_event(event_id):
-    """Admin endpoint to soft-delete (cancel) an event."""
+    """
+    Cancel event (admin, soft delete)
+    ---
+    tags:
+      - Admin Events
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Event cancelled
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            event:
+              $ref: '#/definitions/Event'
+      400:
+        description: Event already cancelled
+      404:
+        description: Event not found
+    """
     event = db.session.get(Event, event_id)
     if not event:
         return error_response(404, 'EVENT_NOT_FOUND', 'Event not found')
@@ -306,7 +662,40 @@ def delete_event(event_id):
 
 @bp.post('/admin/events/<event_id>/cancel')
 def cancel_event(event_id):
-    """Admin endpoint to cancel an event with optional reason."""
+    """
+    Cancel event with optional reason (admin)
+    ---
+    tags:
+      - Admin Events
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        schema:
+          type: object
+          properties:
+            reason:
+              type: string
+    responses:
+      200:
+        description: Event cancelled
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            event:
+              $ref: '#/definitions/Event'
+            cancelReason:
+              type: string
+      400:
+        description: Event already cancelled
+      404:
+        description: Event not found
+    """
     event = db.session.get(Event, event_id)
     if not event:
         return error_response(404, 'EVENT_NOT_FOUND', 'Event not found')
@@ -333,7 +722,38 @@ def cancel_event(event_id):
 
 @bp.get('/admin/events')
 def admin_list_events():
-    """Admin endpoint to list all events including cancelled ones."""
+    """
+    List all events including cancelled (admin)
+    ---
+    tags:
+      - Admin Events
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: limit
+        type: integer
+        default: 20
+      - in: query
+        name: include_cancelled
+        type: string
+        enum: ['true', 'false']
+        default: 'false'
+    responses:
+      200:
+        description: Paginated list of events
+        schema:
+          type: object
+          properties:
+            events:
+              type: array
+              items:
+                $ref: '#/definitions/Event'
+            pagination:
+              $ref: '#/definitions/Pagination'
+    """
     page = request.args.get('page', default=1, type=int)
     limit = request.args.get('limit', default=20, type=int)
     include_cancelled = request.args.get('include_cancelled', default='false', type=str)
