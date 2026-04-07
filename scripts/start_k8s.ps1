@@ -24,6 +24,8 @@ param(
 $ErrorActionPreference = "Stop"
 $Tag = "local-k8s-20260329"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$script:LocalGatewayPort = 8000
+$script:LocalGatewayUrl = "http://localhost:8000"
 
 function Write-Step($Message) {
     Write-Host "`n==> $Message" -ForegroundColor Cyan
@@ -127,13 +129,16 @@ function Get-KubernetesNames {
         [string]$Namespace
     )
 
-    $jsonPath = "{range .items[*]}{.metadata.name}{'`n'}{end}"
-    $result = & kubectl get $Kind -n $Namespace -o "jsonpath=$jsonPath"
+    $result = & kubectl get $Kind -n $Namespace -o name
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to list $Kind resources in namespace $Namespace."
     }
 
-    return @($result -split "`r?`n" | Where-Object { $_ -and $_.Trim() })
+    return @(
+        $result -split "`r?`n" |
+        Where-Object { $_ -and $_.Trim() } |
+        ForEach-Object { ($_ -split '/', 2)[-1] }
+    )
 }
 
 function Wait-StatefulSetsReady {
@@ -166,6 +171,23 @@ function Wait-DeploymentsReady {
     foreach ($name in $targetNames) {
         Write-Host "    Waiting for deployment/$name..."
         Invoke-External -Command "kubectl" -Arguments @("rollout", "status", "deployment/$name", "-n", $Namespace, "--timeout=300s") -ErrorMessage "Deployment $name in $Namespace did not become ready."
+    }
+}
+
+function Try-WaitDeploymentReady {
+    param(
+        [Parameter(Mandatory)][string]$Namespace,
+        [Parameter(Mandatory)][string]$Name,
+        [int]$TimeoutSeconds = 300
+    )
+
+    try {
+        Write-Host "    Waiting for deployment/$Name..."
+        Invoke-External -Command "kubectl" -Arguments @("rollout", "status", "deployment/$Name", "-n", $Namespace, "--timeout=${TimeoutSeconds}s") -ErrorMessage "Deployment $Name in $Namespace did not become ready."
+        return $true
+    } catch {
+        Write-Warn $_.Exception.Message
+        return $false
     }
 }
 
@@ -212,23 +234,81 @@ function Wait-HttpEndpoint {
     throw "$Name did not become reachable at $Url within $TimeoutSeconds seconds."
 }
 
+function Test-KongGateway {
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [int]$TimeoutSeconds = 5
+    )
+
+    try {
+        $response = Invoke-WebRequest -Uri "$Url/events" -TimeoutSec $TimeoutSeconds -UseBasicParsing
+        $contentType = (($response.Headers['Content-Type'] | Select-Object -First 1) -as [string])
+        if (-not $contentType) {
+            $contentType = [string]$response.ContentType
+        }
+        if ($response.StatusCode -ne 200) {
+            return $false
+        }
+        if ($contentType -notmatch 'application/json') {
+            return $false
+        }
+        $body = $response.Content | ConvertFrom-Json -ErrorAction Stop
+        return ($null -ne $body.data -or $null -ne $body.events)
+    } catch {
+        return $false
+    }
+}
+
+function Get-FreeTcpPort {
+    param(
+        [int[]]$Candidates = @(8000, 18000, 18080, 28000)
+    )
+
+    foreach ($candidate in $Candidates) {
+        $listener = Get-NetTCPConnection -LocalPort $candidate -State Listen -ErrorAction SilentlyContinue
+        if (-not $listener) {
+            return $candidate
+        }
+    }
+
+    throw "Could not find a free local port for the Kong port-forward."
+}
+
 function Ensure-PortForward {
     if ($SkipPortForward -or $PublicOnly) {
         return
     }
 
-    Write-Step "Ensuring Kong port-forward is available on localhost:8000"
+    Write-Step "Ensuring Kong port-forward is available locally"
 
-    $portInUse = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
-    if (-not $portInUse) {
-        Start-Process powershell -ArgumentList "-NoExit -Command kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80" -WindowStyle Minimized | Out-Null
-        Start-Sleep -Seconds 3
-        Write-OK "Started a minimized Kong port-forward window"
-    } else {
-        Write-Warn "Port 8000 is already listening. Reusing the existing listener."
+    $preferredPort = 8000
+    if (Test-KongGateway -Url "http://localhost:$preferredPort") {
+        $script:LocalGatewayPort = $preferredPort
+        $script:LocalGatewayUrl = "http://localhost:$preferredPort"
+        Write-OK "Existing Kong listener detected on $script:LocalGatewayUrl"
+        return
     }
 
-    Wait-HttpEndpoint -Name "Local Kong gateway" -Url "http://localhost:8000/events" -ExpectedStatusCodes @(200)
+    $portInUse = Get-NetTCPConnection -LocalPort $preferredPort -State Listen -ErrorAction SilentlyContinue
+    if ($portInUse) {
+        Write-Warn "Port $preferredPort is already in use by a non-Kong service. Selecting a fallback port."
+        $script:LocalGatewayPort = Get-FreeTcpPort
+    } else {
+        $script:LocalGatewayPort = $preferredPort
+    }
+
+    $script:LocalGatewayUrl = "http://localhost:$script:LocalGatewayPort"
+    Start-Process powershell -ArgumentList "-NoExit -Command kubectl port-forward -n ticketremaster-edge service/kong-proxy $script:LocalGatewayPort`:80" -WindowStyle Minimized | Out-Null
+    Start-Sleep -Seconds 3
+
+    if (-not (Test-KongGateway -Url $script:LocalGatewayUrl)) {
+        Wait-HttpEndpoint -Name "Local Kong gateway" -Url "$script:LocalGatewayUrl/events" -ExpectedStatusCodes @(200)
+        if (-not (Test-KongGateway -Url $script:LocalGatewayUrl)) {
+            throw "A listener is reachable at $script:LocalGatewayUrl but it does not appear to be the Kong gateway."
+        }
+    }
+
+    Write-OK "Kong is available at $script:LocalGatewayUrl"
 }
 
 if ($PublicOnly -and -not $RunPublicTests) {
@@ -267,12 +347,8 @@ Wait-DeploymentsReady -Namespace "ticketremaster-core"
 Write-OK "Core deployments ready"
 
 Write-Step "Waiting for edge deployments"
-$edgeDeployments = @("kong")
-if ($RunPublicTests) {
-    $edgeDeployments += "cloudflared"
-}
-Wait-DeploymentsReady -Namespace "ticketremaster-edge" -Names $edgeDeployments
-Write-OK "Edge deployments ready"
+Wait-DeploymentsReady -Namespace "ticketremaster-edge" -Names @("kong")
+Write-OK "Kong is ready"
 
 Write-Step "Waiting for seed jobs"
 Wait-JobsComplete -Namespace "ticketremaster-core"
@@ -280,9 +356,21 @@ Write-OK "Seed jobs completed"
 
 Ensure-PortForward
 
+$canRunPublicTests = $RunPublicTests
 if ($RunPublicTests) {
-    Write-Step "Waiting for Cloudflare public URL"
-    Wait-HttpEndpoint -Name "Public gateway" -Url "https://ticketremasterapi.hong-yi.me/events" -ExpectedStatusCodes @(200) -TimeoutSeconds 180
+    Write-Step "Checking Cloudflare tunnel readiness"
+    $cloudflaredReady = Try-WaitDeploymentReady -Namespace "ticketremaster-edge" -Name "cloudflared" -TimeoutSeconds 180
+    if (-not $cloudflaredReady) {
+        Write-Warn "Cloudflared rollout did not report ready. Checking the public URL directly before skipping public tests."
+    }
+
+    try {
+        Wait-HttpEndpoint -Name "Public gateway" -Url "https://ticketremasterapi.hong-yi.me/events" -ExpectedStatusCodes @(200) -TimeoutSeconds 180
+    } catch {
+        Write-Warn $_.Exception.Message
+        Write-Warn "Public URL is not reachable yet. Continuing with localhost only."
+        $canRunPublicTests = $false
+    }
 }
 
 Write-Step "Running gateway smoke tests"
@@ -292,11 +380,12 @@ if (-not $PublicOnly) {
         "run",
         "postman/TicketRemaster.gateway.postman_collection.json",
         "-e", "postman/TicketRemaster.gateway-localhost.postman_environment.json",
+        "--env-var", "gateway_url=$script:LocalGatewayUrl",
         "--reporters", "cli"
     ) -ErrorMessage "Localhost Newman smoke tests failed."
 }
 
-if ($RunPublicTests) {
+if ($canRunPublicTests) {
     Write-Host "`n--- Public URL via Cloudflare ---" -ForegroundColor White
     Invoke-External -Command "newman" -Arguments @(
         "run",
@@ -311,7 +400,9 @@ if ($RunPublicTests) {
 }
 
 Write-Step "Done"
-Write-Host "    Local gateway: http://localhost:8000" -ForegroundColor Green
-if ($RunPublicTests) {
+Write-Host "    Local gateway: $script:LocalGatewayUrl" -ForegroundColor Green
+if ($canRunPublicTests) {
     Write-Host "    Public gateway: https://ticketremasterapi.hong-yi.me" -ForegroundColor Green
+} elseif ($RunPublicTests) {
+    Write-Host "    Public gateway: not ready yet (cloudflared or public endpoint still reconnecting)" -ForegroundColor Yellow
 }
