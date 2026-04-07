@@ -1,547 +1,273 @@
-# TicketRemaster API Reference
+# TicketRemaster Gateway API Reference
 
-This document provides a complete API reference for the TicketRemaster backend.
+This document is the offline gateway reference for the routes currently exposed through Kong.
 
-## Base URL
+## Base URLs
 
-- **Local Development**: `http://localhost:8000`
-- **Production**: `https://ticketremasterapi.hong-yi.me`
+- Local: `http://localhost:8000`
+- Shared public URL: `https://ticketremasterapi.hong-yi.me`
 
-## Authentication
+Kong also accepts `/api/...` aliases, but new clients should use the no-prefix form.
 
-Most endpoints require authentication via JWT token:
+## Auth model
 
-```
-Authorization: Bearer <jwt_token>
-```
+Headers used across the platform:
 
-Some endpoints also require an API key for rate limiting:
-
-```
-apikey: <api_key>
+```http
+Authorization: Bearer <jwt>
+apikey: tk_front_123456789
 ```
 
-## Response Format
+Rules:
 
-### Success Response
+- public routes need neither header
+- JWT-protected routes need `Authorization`
+- Kong-protected route groups need both `Authorization` and `apikey`
+- staff verification routes require a JWT with `role=staff`
+- admin event creation and dashboard routes require an admin JWT
+
+## Response envelope
+
+Success responses normally use:
 
 ```json
 {
-  "data": { /* response data */ },
-  "message": "Optional success message"
+  "data": {}
 }
 ```
 
-### Error Response
+Errors use:
 
 ```json
 {
   "error": {
     "code": "ERROR_CODE",
-    "message": "Human-readable error message",
-    "status": 400,
-    "traceId": "trace_abc123"
+    "message": "Human readable message"
   }
 }
 ```
 
-## Endpoints
+## Auth routes
 
-### Authentication
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/auth/register` | public | Creates the user, initializes external credit best-effort, sends registration OTP |
+| `POST` | `/auth/verify-registration` | public | Verifies OTP and returns JWT |
+| `POST` | `/auth/login` | public | Returns JWT |
+| `GET` | `/auth/me` | JWT | Current user profile |
+| `POST` | `/auth/logout` | JWT | Revokes current token |
+| `POST` | `/auth/logout-all` | JWT | Placeholder all-device logout that currently revokes the current token |
 
-#### Register User
+Important behavior:
 
-```http
-POST /auth/register
-Content-Type: application/json
+- `POST /auth/register` does not return a JWT
+- login or successful registration verification is what produces a token
 
+Example register request:
+
+```json
 {
-  "email": "user@example.com",
-  "password": "securepassword",
-  "phoneNumber": "+1234567890"
+  "email": "buyer@example.com",
+  "password": "Password123!",
+  "phoneNumber": "+6591234567"
 }
 ```
 
-**Response:**
+Example login response:
+
 ```json
 {
   "data": {
-    "userId": "user_123",
-    "email": "user@example.com",
-    "role": "user"
-  },
-  "access_token": "jwt_token_here",
-  "refresh_token": "refresh_token_here"
-}
-```
-
-#### Login
-
-```http
-POST /auth/login
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "securepassword"
-}
-```
-
-**Response:** Same as register
-
-#### Get Current User
-
-```http
-GET /auth/me
-Authorization: Bearer <token>
-```
-
-**Response:**
-```json
-{
-  "data": {
-    "userId": "user_123",
-    "email": "user@example.com",
-    "phoneNumber": "+1234567890",
-    "role": "user",
-    "isFlagged": false,
-    "createdAt": "2024-01-01T00:00:00Z"
-  }
-}
-```
-
-### Events
-
-#### List Events
-
-```http
-GET /events?type=concert&page=1&limit=20
-```
-
-**Response:**
-```json
-{
-  "data": {
-    "events": [
-      {
-        "eventId": "evt_123",
-        "name": "Taylor Swift - Eras Tour",
-        "date": "2025-06-15T19:30:00Z",
-        "venueId": "venue_456",
-        "price": 149.99,
-        "type": "concert",
-        "venue": {
-          "venueId": "venue_456",
-          "name": "Madison Square Garden",
-          "address": "4 Pennsylvania Plaza, New York"
-        },
-        "seatsAvailable": 1250
-      }
-    ],
-    "pagination": {
-      "page": 1,
-      "limit": 20,
-      "total": 50
+    "token": "eyJhbGciOiJIUzI1NiIs...",
+    "expiresAt": "2026-04-07T12:00:00+00:00",
+    "user": {
+      "userId": "usr_001",
+      "email": "buyer@example.com",
+      "role": "user"
     }
   }
 }
 ```
 
-#### Get Event Details
+## Event and venue routes
 
-```http
-GET /events/{eventId}
-```
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/venues` | public | Returns venue-service payload |
+| `GET` | `/events` | public | Supports `type`, `page`, `limit` |
+| `GET` | `/events/{eventId}` | public | Event enriched with venue |
+| `GET` | `/events/{eventId}/seats` | public | Seat map with inventory state and seat metadata |
+| `GET` | `/events/{eventId}/seats/{inventoryId}` | public | Single seat detail |
+| `POST` | `/admin/events` | admin JWT | Creates event and seat inventory |
+| `GET` | `/admin/events/{eventId}/dashboard` | admin JWT | Revenue and attendee summary |
 
-**Response:**
+## Credit routes
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `GET` | `/credits/balance` | JWT + apikey |
+| `POST` | `/credits/topup/initiate` | JWT + apikey |
+| `POST` | `/credits/topup/confirm` | JWT + apikey |
+| `POST` | `/credits/topup/webhook` | backend-to-backend |
+| `GET` | `/credits/transactions` | JWT + apikey |
+
+Current top-up flow:
+
+1. frontend calls `/credits/topup/initiate`
+2. Stripe wrapper creates a PaymentIntent and returns `clientSecret`
+3. frontend completes Stripe confirmation
+4. frontend calls `/credits/topup/confirm` with `paymentIntentId`
+5. credit-orchestrator updates OutSystems and logs the internal ledger record
+
+Example initiate response:
+
 ```json
 {
   "data": {
-    "eventId": "evt_123",
-    "name": "Taylor Swift - Eras Tour",
-    "date": "2025-06-15T19:30:00Z",
-    "description": "The Eras Tour concert experience",
-    "venueId": "venue_456",
-    "type": "concert",
-    "price": 149.99,
-    "image": "/hero-concert.jpeg",
-    "venue": {
-      "venueId": "venue_456",
-      "name": "Madison Square Garden",
-      "address": "4 Pennsylvania Plaza, New York"
-    },
-    "seatsAvailable": 1250
+    "clientSecret": "cs_test_...",
+    "paymentIntentId": "pi_123",
+    "amount": 100
   }
 }
 ```
 
-#### Search Events
+## Purchase routes
 
-```http
-GET /events/search?q=taylor&type=concert
-```
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/purchase/hold/{inventoryId}` | JWT + apikey | Places a 5-minute hold via gRPC |
+| `DELETE` | `/purchase/hold/{inventoryId}` | JWT + apikey | Releases a hold early |
+| `POST` | `/purchase/confirm/{inventoryId}` | JWT + apikey | Confirms purchase using `eventId` and `holdToken` |
 
-### Seats
+Design notes:
 
-#### Get Seat Map
+- hold, release, and sell are executed through `seat-inventory-service` gRPC
+- a Redis hold cache speeds up confirm-path validation
+- RabbitMQ carries hold-expiry messages
+- OutSystems credit balance is checked before seat sale is finalized
 
-```http
-GET /events/{eventId}/seats
-Authorization: Bearer <token>
-apikey: <api_key>
-```
+Example hold response:
 
-**Response:**
 ```json
 {
   "data": {
-    "seats": [
-      {
-        "seatId": "seat_123",
-        "rowNumber": "A",
-        "seatNumber": "1",
-        "section": "Floor",
-        "inventoryId": "inv_456",
-        "status": "available",
-        "price": 149.99
-      }
-    ]
+    "inventoryId": "inv_001",
+    "status": "held",
+    "heldUntil": "2026-04-07T12:15:00+00:00",
+    "holdToken": "c378f45d-4236-4d49-8d93-d5e965964ada"
   }
 }
 ```
 
-### Purchases
+Example confirm request:
 
-#### Hold Seat
-
-```http
-POST /purchase/hold
-Authorization: Bearer <token>
-apikey: <api_key>
-Idempotency-Key: unique_request_id
-Content-Type: application/json
-
-{
-  "eventId": "evt_123",
-  "seatIds": ["seat_123", "seat_124"]
-}
-```
-
-**Response:**
 ```json
 {
-  "data": {
-    "holdId": "hold_789",
-    "holdsUntil": "2025-03-30T10:15:00Z",
-    "totalAmount": 299.98
-  }
+  "eventId": "evt_001",
+  "holdToken": "c378f45d-4236-4d49-8d93-d5e965964ada"
 }
 ```
 
-#### Confirm Purchase
+## Ticket and QR routes
 
-```http
-POST /purchase/confirm
-Authorization: Bearer <token>
-apikey: <api_key>
-Idempotency-Key: unique_request_id
-Content-Type: application/json
+| Method | Path | Auth |
+| --- | --- | --- |
+| `GET` | `/tickets` | JWT + apikey |
+| `GET` | `/tickets/{ticketId}/qr` | JWT + apikey |
 
-{
-  "holdId": "hold_789",
-  "paymentMethod": "credits"
-}
-```
+QR behavior:
 
-**Response:**
+- each QR fetch generates a fresh SHA-256 hash
+- the hash is persisted on the ticket record
+- TTL is currently 60 seconds
+- scan-time expiry is enforced by `ticket-verification-orchestrator`
+
+## Marketplace routes
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `GET` | `/marketplace` | public |
+| `POST` | `/marketplace/list` | JWT + apikey |
+| `DELETE` | `/marketplace/{listingId}` | JWT + apikey |
+
+`GET /marketplace` supports `eventId`, `page`, and `limit`.
+
+Implementation note:
+
+- `marketplace-service` stores the listing record
+- `marketplace-orchestrator` enriches listings with seller and event data
+- the `eventId` filter is applied after enrichment because the raw listing record does not own `eventId`
+
+## Transfer routes
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `POST` | `/transfer/initiate` | JWT + apikey |
+| `GET` | `/transfer/pending` | JWT + apikey |
+| `GET` | `/transfer/{transferId}` | JWT + apikey |
+| `POST` | `/transfer/{transferId}/seller-accept` | JWT + apikey |
+| `POST` | `/transfer/{transferId}/seller-reject` | JWT + apikey |
+| `POST` | `/transfer/{transferId}/buyer-verify` | JWT + apikey |
+| `POST` | `/transfer/{transferId}/seller-verify` | JWT + apikey |
+| `POST` | `/transfer/{transferId}/resend-otp` | JWT + apikey |
+| `POST` | `/transfer/{transferId}/cancel` | JWT + apikey |
+
+Transfer design logic:
+
+- initiation starts from a `listingId`, not a `ticketId`
+- seller acceptance sends buyer OTP
+- buyer verification sends seller OTP
+- seller verification executes the credit and ownership saga
+- RabbitMQ is used both for seller notification and timeout scheduling
+
+Example initiate request:
+
 ```json
 {
-  "data": {
-    "purchaseId": "pur_123",
-    "status": "confirmed",
-    "tickets": [
-      {
-        "ticketId": "tkt_123",
-        "seatId": "seat_123",
-        "qrHash": "qr_hash_abc"
-      }
-    ]
-  }
+  "listingId": "lst_001"
 }
 ```
 
-### Tickets
+## Staff verification routes
 
-#### Get My Tickets
+| Method | Path | Auth |
+| --- | --- | --- |
+| `POST` | `/verify/scan` | staff JWT + apikey |
+| `POST` | `/verify/manual` | staff JWT + apikey |
 
-```http
-GET /tickets
-Authorization: Bearer <token>
-apikey: <api_key>
-```
+Scan ordering is intentional:
 
-**Response:**
-```json
-{
-  "data": {
-    "tickets": [
-      {
-        "ticketId": "tkt_123",
-        "eventId": "evt_456",
-        "seatId": "seat_789",
-        "status": "valid",
-        "purchasedAt": "2025-03-30T10:00:00Z",
-        "event": {
-          "eventId": "evt_456",
-          "name": "Taylor Swift - Eras Tour",
-          "date": "2025-06-15T19:30:00Z"
-        },
-        "seat": {
-          "seatId": "seat_789",
-          "rowNumber": "A",
-          "seatNumber": "1",
-          "section": "Floor"
-        }
-      }
-    ]
-  }
-}
-```
+1. lookup ticket by QR hash
+2. validate QR TTL
+3. validate event
+4. validate sold inventory state
+5. validate active ticket state
+6. detect duplicate scan from ticket logs
+7. validate venue match from staff JWT
+8. mark ticket used and append a check-in log
 
-#### Get Ticket QR Code
+## External ingress route
 
-```http
-GET /tickets/{ticketId}/qr
-Authorization: Bearer <token>
-```
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/webhooks/stripe` | Routed through Kong to the user-service Stripe webhook ingress |
 
-### Transfers
+## Common status codes
 
-#### Initiate Transfer
+| Status | Meaning in this codebase |
+| --- | --- |
+| `400` | Validation or state mismatch |
+| `401` | Missing or invalid JWT, or missing Kong key-auth credential |
+| `402` | Insufficient credits |
+| `403` | Authenticated but forbidden, such as wrong owner or wrong role |
+| `404` | Resource missing |
+| `409` | Conflict, duplicate action, concurrent action, or already-used ticket |
+| `410` | Expired seat hold |
+| `429` | Rate limit |
+| `503` | Downstream dependency unavailable |
 
-```http
-POST /transfer/initiate
-Authorization: Bearer <token>
-apikey: <api_key>
-Idempotency-Key: unique_request_id
-Content-Type: application/json
+## Related docs
 
-{
-  "ticketId": "tkt_123",
-  "toUserEmail": "recipient@example.com"
-}
-```
-
-**Response:**
-```json
-{
-  "data": {
-    "transferId": "xfer_123",
-    "status": "pending",
-    "expiresAt": "2025-04-06T10:00:00Z"
-  }
-}
-```
-
-#### Accept Transfer
-
-```http
-POST /transfer/{transferId}/accept
-Authorization: Bearer <token>
-apikey: <api_key>
-Content-Type: application/json
-
-{
-  "otpCode": "123456"
-}
-```
-
-### Marketplace
-
-#### List Marketplace Listings
-
-```http
-GET /marketplace?eventId=evt_123&page=1&limit=20
-```
-
-**Response:**
-```json
-{
-  "data": {
-    "listings": [
-      {
-        "listingId": "list_123",
-        "ticketId": "tkt_456",
-        "eventId": "evt_123",
-        "price": 199.99,
-        "status": "active",
-        "createdAt": "2025-03-01T09:00:00Z",
-        "event": {
-          "eventId": "evt_123",
-          "name": "Taylor Swift - Eras Tour",
-          "date": "2025-06-15T19:30:00Z"
-        }
-      }
-    ],
-    "pagination": {
-      "page": 1,
-      "limit": 20,
-      "total": 50
-    }
-  }
-}
-```
-
-#### Create Listing
-
-```http
-POST /marketplace/list
-Authorization: Bearer <token>
-apikey: <api_key>
-Content-Type: application/json
-
-{
-  "ticketId": "tkt_123",
-  "price": 199.99
-}
-```
-
-### Credits
-
-#### Get Credit Balance
-
-```http
-GET /credits/balance
-Authorization: Bearer <token>
-apikey: <api_key>
-```
-
-**Response:**
-```json
-{
-  "data": {
-    "userId": "user_123",
-    "balance": 500.00,
-    "currency": "USD",
-    "updatedAt": "2025-03-30T10:00:00Z"
-  }
-}
-```
-
-#### Top Up Credits
-
-```http
-POST /credits/topup/initiate
-Authorization: Bearer <token>
-apikey: <api_key>
-Idempotency-Key: unique_request_id
-Content-Type: application/json
-
-{
-  "amount": 100.00,
-  "paymentMethod": "stripe"
-}
-```
-
-### Verification
-
-#### Verify Ticket (Staff Only)
-
-```http
-GET /verify/{qrHash}
-Authorization: Bearer <staff_token>
-apikey: <api_key>
-```
-
-**Response:**
-```json
-{
-  "data": {
-    "isValid": true,
-    "ticket": {
-      "ticketId": "tkt_123",
-      "eventId": "evt_456",
-      "seatId": "seat_789",
-      "ownerId": "user_123",
-      "status": "valid"
-    },
-    "event": {
-      "eventId": "evt_456",
-      "name": "Taylor Swift - Eras Tour",
-      "date": "2025-06-15T19:30:00Z"
-    }
-  }
-}
-```
-
-## Error Codes
-
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `VALIDATION_ERROR` | 400 | Invalid input data |
-| `UNAUTHORIZED` | 401 | Missing or invalid authentication |
-| `FORBIDDEN` | 403 | Insufficient permissions |
-| `NOT_FOUND` | 404 | Resource not found |
-| `CONFLICT` | 409 | Resource conflict |
-| `SEAT_UNAVAILABLE` | 409 | Seat already held or sold |
-| `SEAT_ALREADY_SOLD` | 409 | Seat has been sold |
-| `HOLD_EXPIRED` | 410 | Seat hold has expired |
-| `INSUFFICIENT_CREDITS` | 402 | Not enough credits |
-| `OTP_REQUIRED` | 400 | OTP verification required |
-| `OTP_INVALID` | 400 | Invalid OTP code |
-| `OTP_EXPIRED` | 410 | OTP code expired |
-| `TRANSFER_IN_PROGRESS` | 409 | Transfer already pending |
-| `TRANSFER_NOT_FOUND` | 404 | Transfer not found |
-| `NOT_SEAT_OWNER` | 403 | User doesn't own the ticket |
-| `SELF_TRANSFER` | 400 | Cannot transfer to self |
-| `EMAIL_ALREADY_EXISTS` | 409 | Email already registered |
-| `RATE_LIMITED` | 429 | Too many requests |
-
-## Rate Limiting
-
-API rate limits are enforced per endpoint:
-
-| Endpoint | Limit |
-|----------|-------|
-| `/auth/register` | 5 requests/minute |
-| `/auth/login` | 10 requests/minute |
-| All other endpoints | 50 requests/minute |
-
-Rate limit headers are included in responses:
-- `X-RateLimit-Limit`: Maximum requests allowed
-- `X-RateLimit-Remaining`: Requests remaining
-- `X-RateLimit-Reset`: Time when limit resets
-
-## Idempotency
-
-State-changing operations (POST, PUT, DELETE) support idempotency keys:
-
-```
-Idempotency-Key: unique_request_identifier
-```
-
-If the same key is sent within 24 hours, the server returns the cached response instead of repeating the operation.
-
-## WebSocket Notifications
-
-For real-time updates, connect to the WebSocket server:
-
-```javascript
-const socket = io('wss://ticketremasterapi.hong-yi.me');
-
-socket.on('connect', () => {
-  socket.emit('subscribe', { channel: 'seat_update' });
-});
-
-socket.on('seat_update', (data) => {
-  console.log('Seat updated:', data);
-});
-```
-
-See [services/notification-service/NOTIFICATIONS.md](services/notification-service/NOTIFICATIONS.md) for details.
-
-## OpenAPI Documentation
-
-Interactive API documentation is available at:
-- Local: `http://localhost:810X/apidocs` (per orchestrator)
-- Combined: `openapi.unified.json` in repository root
+- [FRONTEND.md](FRONTEND.md)
+- [TESTING.md](TESTING.md)
+- [OUTSYSTEMS.md](OUTSYSTEMS.md)

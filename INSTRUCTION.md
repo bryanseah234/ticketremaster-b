@@ -1,340 +1,119 @@
-# TicketRemaster - Implementation Instructions
+# TicketRemaster Engineering Notes
 
-This document provides implementation guidance for deploying and maintaining the TicketRemaster system.
+This document explains the current design logic of the backend codebase.
 
-## System Overview
+## Core architectural decisions
 
-TicketRemaster is a microservice-based ticketing platform built with:
-- **Frontend**: Vue 3 + TypeScript + Vite
-- **Backend**: Flask microservices (8 orchestrators + 12 services)
-- **Infrastructure**: Docker Compose (local), Kubernetes (production)
-- **Observability**: Sentry + PostHog
-- **Real-time**: WebSocket notifications via Socket.IO
+### 1. Kubernetes-first runtime
 
-## Quick Start
+The maintained system-level environment is the Minikube stack under `k8s/base`.
 
-### Local Development
+That means:
 
-```bash
-# Backend
-cd ticketremaster-b
-cp .env.example .env
-docker compose up -d --build
+- Kong is the real browser ingress even in local development
+- seed jobs are part of normal startup, not a separate manual step
+- service DNS names in `ticketremaster-core` are the actual inter-service contract
+- stateful dependencies live in `ticketremaster-data`
 
-# Frontend
-cd ticketremaster-f
-npm install
-npm run dev
-```
+### 2. Orchestrator plus atomic-service split
 
-### Production Deployment
+The codebase separates:
 
-```bash
-# Kubernetes
-kubectl apply -k k8s/base
+- orchestrators, which own frontend-facing workflow composition and auth logic
+- services, which own bounded-context data and narrow internal contracts
 
-# Vercel (Frontend)
-# Connect repository and add environment variables
-```
+This keeps the browser surface stable while allowing internal service boundaries to stay small and explicit.
 
-## Architecture Decisions
+### 3. Service-owned persistence
 
-### Why Microservices?
+Every stateful business service owns its own PostgreSQL database. No service should write directly into another service's database.
 
-1. **Independent Scaling**: Each service scales based on its load
-2. **Technology Flexibility**: Services can use different tech stacks
-3. **Fault Isolation**: One service failure doesn't crash the entire system
-4. **Team Autonomy**: Teams can work on services independently
+Why that matters:
 
-### Why Flask?
+- it keeps domain ownership clear
+- it avoids cross-service migration coupling
+- it makes failures easier to localize
 
-1. **Rapid Development**: Quick to prototype and deploy
-2. **Python Ecosystem**: Rich libraries for data processing
-3. **Lightweight**: Low overhead compared to Django
-4. **Easy Testing**: Simple unit and integration testing
+### 4. External credit authority
 
-### Why Kubernetes?
+OutSystems is the authority for credit balance. The internal `credit-transaction-service` is the ledger of platform-side credit movements, not the authoritative balance.
 
-1. **Scalability**: Auto-scaling based on load
-2. **Self-Healing**: Automatic restart of failed containers
-3. **Service Discovery**: Built-in DNS for service communication
-4. **Rolling Updates**: Zero-downtime deployments
-
-## Key Components
+That split is intentional:
 
-### Orchestrators
+- OutSystems remains the financial record of balance
+- the internal ledger gives TicketRemaster queryable audit history for purchase, top-up, and transfer flows
 
-Orchestrators aggregate data from multiple services for frontend consumption:
+### 5. Mixed sync and async workflow model
 
-| Orchestrator | Purpose |
-|--------------|---------|
-| `auth-orchestrator` | Authentication and user management |
-| `event-orchestrator` | Event discovery and details |
-| `credit-orchestrator` | Credit balance and top-ups |
-| `ticket-purchase-orchestrator` | Seat holds and purchases |
-| `qr-orchestrator` | Ticket retrieval and QR codes |
-| `marketplace-orchestrator` | Resale marketplace |
-| `transfer-orchestrator` | P2P ticket transfers |
-| `ticket-verification-orchestrator` | Staff ticket verification |
+TicketRemaster uses both immediate request/response composition and asynchronous messaging:
 
-### Atomic Services
+- synchronous HTTP between orchestrators and services for request-time operations
+- gRPC for the latency-sensitive seat hold and sale path
+- Redis for ephemeral hold cache and distributed lock support
+- RabbitMQ for hold expiry, seller notifications, and timeout work
 
-Services own a single bounded context and database:
+## Why specific components exist
 
-| Service | Database | Purpose |
-|---------|----------|---------|
-| `user-service` | PostgreSQL | User accounts and profiles |
-| `venue-service` | PostgreSQL | Venue information |
-| `seat-service` | PostgreSQL | Seat definitions |
-| `event-service` | PostgreSQL | Event data |
-| `seat-inventory-service` | PostgreSQL + gRPC | Seat availability and holds |
-| `ticket-service` | PostgreSQL | Ticket records |
-| `ticket-log-service` | PostgreSQL | Audit trail |
-| `marketplace-service` | PostgreSQL | Resale listings |
-| `transfer-service` | PostgreSQL | Transfer records |
-| `credit-transaction-service` | PostgreSQL | Credit transactions |
-| `stripe-wrapper` | None | Stripe API abstraction |
-| `otp-wrapper` | None | OTP generation and verification |
+### Kong
 
-### Notification Service
+Kong centralizes:
 
-The `notification-service` provides real-time updates via WebSocket:
+- CORS
+- key-auth for selected route groups
+- basic rate limiting
+- a consistent browser ingress surface
 
-- **Connection**: Socket.IO on port 8109
-- **Broadcasting**: HTTP API for services to emit events
-- **Pub/Sub**: Redis for cross-instance communication
-- **Events**: `seat_update`, `ticket_update`, `transfer_update`, etc.
+This lets individual services stay focused on gateway policy rather than duplicating it.
 
-## Deployment Guide
+### `seat-inventory-service`
 
-### Environment Variables
+This service exists separately from `seat-service` because the physical seat definition and the event-specific seat state are different concerns.
 
-Required variables are in `.env.example`. Key variables:
+- `seat-service` owns venue seat metadata
+- `seat-inventory-service` owns event seat status such as `available`, `held`, and `sold`
 
-```bash
-# General
-APP_ENV=production
-LOG_LEVEL=INFO
+### `ticket-log-service`
 
-# Security
-JWT_SECRET=<strong-random-secret>
-QR_SECRET=<strong-random-secret>
-QR_ENCRYPTION_KEY=<32-byte-key>
+Duplicate staff scans are a workflow concern that depends on persistent scan history, so check-in logs live in a dedicated service instead of being embedded inside `ticket-service`.
 
-# Observability
-SENTRY_DSN=https://...
-SENTRY_ENVIRONMENT=production
+### `notification-service`
 
-# Database
-USER_SERVICE_DATABASE_URL=postgresql://...
-EVENT_SERVICE_DATABASE_URL=postgresql://...
+Realtime fan-out is isolated so other services can publish domain events without each of them becoming a WebSocket host.
 
-# External Services
-REDIS_URL=redis://redis:6379/0
-RABBITMQ_HOST=rabbitmq
-CREDIT_SERVICE_URL=https://...
+## Authentication and authorization model
 
-# Frontend
-VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
-VITE_SENTRY_DSN=https://...
-VITE_POSTHOG_API_KEY=phc_...
-```
+- JWTs are minted by `auth-orchestrator`
+- shared middleware in orchestrators validates JWTs
+- staff authorization depends on `role=staff`
+- venue-specific staff checks use `venueId` carried in the JWT
+- Kong key-auth is additive to JWT on selected route groups
 
-### Database Migrations
+## Current route-shape principles
 
-```bash
-# Run migrations for all services
-for service in user-service venue-service seat-service event-service \
-               seat-inventory-service ticket-service ticket-log-service \
-               marketplace-service transfer-service credit-transaction-service; do
-  docker compose run --rm $service python -m flask --app app.py db upgrade
-done
-```
+- browser routes are exposed through Kong only
+- public browse surfaces stay public: `events`, `venues`, `marketplace`
+- transactional routes are protected by JWT plus Kong key-auth
+- admin routes use orchestrator-side JWT role checks
+- staff verification routes are POST-only
 
-### Seed Data
+## Startup design logic
 
-```bash
-docker compose run --rm user-service python user_seed.py
-docker compose run --rm venue-service python seed_venues.py
-docker compose run --rm seat-service python seed_seats.py
-docker compose run --rm event-service python seed_events.py
-docker compose run --rm seat-inventory-service python seed_seat_inventory.py
-```
-
-### Health Checks
-
-```bash
-# Check all services
-curl http://localhost:8000/health
-
-# Check individual services
-docker compose exec user-service curl http://localhost:5000/health
-docker compose exec event-service curl http://localhost:5000/health
-```
-
-## Monitoring
-
-### Sentry
-
-All services report errors to Sentry:
-
-```python
-import sentry_sdk
-sentry_sdk.capture_exception(error)
-sentry_sdk.capture_message("Important event")
-```
-
-### PostHog
-
-Frontend tracks user behavior:
-
-```typescript
-import posthog from 'posthog-js'
-posthog.capture('purchase_completed', { amount: 100 })
-```
-
-### Logs
-
-```bash
-# View service logs
-docker compose logs -f user-service
-
-# Filter by level
-docker compose logs --tail=100 user-service | grep ERROR
-```
-
-### Metrics
-
-Key metrics to monitor:
-
-- API response time (p50, p95, p99)
-- Error rate by service
-- Database connection pool usage
-- Redis memory usage
-- RabbitMQ queue depth
-- WebSocket connection count
-
-## Troubleshooting
-
-### Service Won't Start
-
-1. Check logs: `docker compose logs service-name`
-2. Verify environment: `docker compose exec service-name env`
-3. Test database connection: `docker compose exec service-name python -c "from app import db; db.engine.connect()"`
-
-### Database Issues
-
-```bash
-# Check database status
-docker compose exec user-service-db pg_isready
-
-# View database logs
-docker compose logs user-service-db
-
-# Reset database (CAUTION: Deletes all data)
-docker compose down -v
-docker compose up -d user-service-db
-```
-
-### Redis Issues
-
-```bash
-# Check Redis status
-docker compose exec redis redis-cli ping
-
-# View Redis memory
-docker compose exec redis redis-cli info memory
-
-# Flush cache (CAUTION: Deletes all cache)
-docker compose exec redis redis-cli flushall
-```
-
-### RabbitMQ Issues
-
-```bash
-# Check RabbitMQ status
-docker compose exec rabbitmq rabbitmq-diagnostics -q ping
-
-# List queues
-docker compose exec rabbitmq rabbitmqctl list_queues
-
-# Purge queue
-docker compose exec rabbitmq rabbitmqctl purge_queue queue_name
-```
-
-## Security Considerations
-
-### Authentication
-
-- JWT tokens expire after 24 hours
-- Refresh tokens not implemented (stateless design)
-- Staff tokens include venue ID for authorization
-
-### Rate Limiting
-
-- Global: 50 requests/minute
-- Registration: 5 requests/minute
-- Login: 10 requests/minute
-
-### Input Validation
-
-- All inputs validated with Pydantic models
-- SQL injection prevention via SQLAlchemy ORM
-- XSS prevention via Vue.js auto-escaping
-
-### Secrets Management
-
-- Never commit secrets to version control
-- Use environment variables for secrets
-- Rotate secrets regularly
-- Use strong random values for keys
-
-## Performance Optimization
-
-### Caching
-
-- Redis for seat availability (reduces database load)
-- CDN for static assets
-- Browser caching for API responses
-
-### Database
-
-- Indexes on frequently queried columns
-- Connection pooling
-- Query optimization with EXPLAIN
-
-### API
-
-- Pagination for list endpoints
-- Compression (gzip)
-- HTTP/2 support
-
-## Backup and Recovery
-
-### Database Backups
-
-```bash
-# Backup all databases
-for db in user_service venue_service seat_service event_service \
-          seat_inventory_service ticket_service ticket_log_service \
-          marketplace_service transfer_service credit_transaction_service; do
-  docker compose exec user-service-db pg_dump -U ticketremaster $db > backups/${db}_$(date +%Y%m%d).sql
-done
-```
-
-### Restore
-
-```bash
-docker compose exec -T user-service-db psql -U ticketremaster -d user_service < backup.sql
-```
-
-## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| [README.md](README.md) | System overview |
-| [API.md](API.md) | API reference |
-| [COMPLETE_SYSTEM_DOCUMENTATION.md](COMPLETE_SYSTEM_DOCUMENTATION.md) | Full architecture |
-| [TESTING.md](TESTING.md) | Testing procedures |
-| [AGENTS.md](AGENTS.md) | Development guidelines |
-| [PRD.md](PRD.md) | Product requirements |
+The current maintained startup flow waits on real conditions, not fixed sleep windows:
+
+- data StatefulSets must be ready
+- core and edge Deployments must roll out successfully
+- seed Jobs must complete
+- Kong must answer on `localhost:8000`
+- optional Cloudflare smoke checks wait for the public `/events` endpoint
+
+This prevents the old failure mode where auth smoke tests ran before user-service or seed jobs were actually usable.
+
+## Documentation map
+
+- [README.md](README.md): top-level overview
+- [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md): maintainer setup
+- [TESTING.md](TESTING.md): verification flow
+- [API.md](API.md): route reference
+- [FRONTEND.md](FRONTEND.md): frontend contract
+- [services/README.md](services/README.md): service index
+- [orchestrators/README.md](orchestrators/README.md): orchestrator index

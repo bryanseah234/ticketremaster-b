@@ -1,505 +1,251 @@
 # Local Development Setup
 
----
+This is the current local development guide for the Kubernetes-backed backend in `ticketremaster-b`.
 
-## Already set up? Quick start
+## Fastest path
 
-### I'm the backend maintainer (running Minikube + Cloudflare tunnel)
+### I maintain the backend and run Minikube
 
-Double-click `start-backend.bat` in the repo root — it handles everything automatically (Docker check, Minikube start, manifest apply, port-forward, tests).
+Double-click `start-backend.bat` in the repo root.
 
-Or manually:
+It now covers the full happy path:
+
+- checks `k8s/base/secrets.local.yaml`
+- starts Docker Desktop if needed
+- starts Minikube if needed
+- applies `k8s/base`
+- waits for data StatefulSets, core Deployments, edge Deployments, and seed Jobs
+- opens a Kong port-forward on `localhost:8000`
+- runs the localhost Newman gateway smoke suite
+- runs the public Newman smoke suite too when `CLOUDFLARE_TUNNEL_TOKEN` is configured
+
+### I want the same flow from PowerShell
 
 ```powershell
-minikube start
-kubectl apply -k k8s/base
-kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
+.\scripts\start_k8s.ps1
 ```
 
-Wait ~2 minutes for pods to be ready. Both `http://localhost:8000` and `https://ticketremasterapi.hong-yi.me` will work once cloudflared reconnects.
-
-To verify:
+Public smoke suite too:
 
 ```powershell
-kubectl get pods --all-namespaces
-newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
+.\scripts\start_k8s.ps1 -RunPublicTests
 ```
 
----
+### I only consume the shared backend from the frontend
 
-### I'm a teammate (frontend dev, no Minikube)
-
-Just point your frontend at the shared public URL — no Minikube, no port-forward needed.
-
-In `ticketremaster-f/.env.local`:
+You do not need Minikube. Point the frontend at:
 
 ```env
 VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
 VITE_KONG_API_KEY=tk_front_123456789
 ```
 
-Then `npm run dev`. Done. The backend maintainer needs to have their Minikube running for this to work.
-
----
-
-### I want to run the full backend myself (no Cloudflare, fully offline)
-
-Double-click `start-backend.bat` — same script, works for both cases.
-
-> If your `secrets.local.yaml` doesn't have a Cloudflare tunnel token, the script detects this and skips the public URL. You'll use `localhost:8000` only — which is perfectly fine for local development.
-
-Or manually:
-
-```powershell
-minikube start
-kubectl apply -k k8s/base
-kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
-```
-
-In `ticketremaster-f/.env.local`:
-
-```env
-VITE_API_BASE_URL=http://localhost:8000
-VITE_KONG_API_KEY=tk_front_123456789
-```
-
-Then `npm run dev`. Keep the port-forward terminal open while developing.
-
-> First time doing this? See [Option B — First-time setup](#option-b--run-minikube-yourself) below.
-
----
+The backend maintainer still needs their local cluster and Cloudflare tunnel to be healthy.
 
 ## Prerequisites
 
-| Tool | Version | Install |
-| --- | --- | --- |
-| Node.js | `^20.19.0` or `>=22.12.0` | [nodejs.org](https://nodejs.org) |
-| kubectl | any recent | [Install guide](https://kubernetes.io/docs/tasks/tools/) |
-| Minikube | any recent | [Install guide](https://minikube.sigs.k8s.io/docs/start/) |
-| newman | any recent | `npm install -g newman` |
-| Docker Desktop | any recent | [docker.com](https://www.docker.com/products/docker-desktop/) |
+| Tool | Notes |
+| --- | --- |
+| Docker Desktop | Required for Minikube image builds and runtime |
+| Minikube | Local Kubernetes cluster |
+| kubectl | Cluster access |
+| Newman | Gateway smoke suite runner |
+| Node.js | Needed for `newman` and the frontend repo |
 
----
+## Required local secret file
 
-## Two ways to connect
+`k8s/base/secrets.local.yaml` is required and is intentionally gitignored.
 
-### Option A — Public Cloudflare URL (easiest, no Minikube needed)
+It typically contains:
 
-The backend is live at `https://ticketremasterapi.hong-yi.me`. No port-forwarding or Minikube required.
+- Cloudflare tunnel token for the edge namespace
+- OutSystems API key for credit operations
+- database passwords and shared runtime secrets
+- Stripe and OTP wrapper secrets
 
-Set in your frontend `.env.local`:
+If this file is missing or stale, startup may succeed only partially. A common symptom is:
 
-```env
-VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
-```
+- `POST /auth/register` returning `400`
+- followed by `POST /auth/login` returning `401`
 
-Skip to [Frontend Setup](#frontend-setup).
+That usually means auth came up before one of its downstream services, or the secret material is outdated.
 
----
+## First-time machine setup
 
-### Option B — Run Minikube yourself
+### 1. Allocate enough Minikube memory
 
-#### First-time setup
-
-**Step 1 — Configure Minikube memory (once per machine)**
-
-```bash
+```powershell
 minikube config set memory 12288
 minikube config set cpus 4
 ```
 
-Also set in `C:\Users\<you>\.wslconfig` (Windows):
+If you use WSL on Windows, also set:
 
 ```ini
 [wsl2]
 memory=12GB
 ```
 
-Then run `wsl --shutdown` and restart Docker Desktop.
-
-**Step 2 — Get secrets file**
-
-`k8s/base/secrets.local.yaml` is gitignored. Ask the backend maintainer for this file and place it at `k8s/base/secrets.local.yaml` before continuing.
-
-> This file contains the Cloudflare tunnel token AND the OutSystems API key. If you use an old or wrong `OUTSYSTEMS_API_KEY`, credit balance initialisation will silently fail on registration — but registration itself will still succeed. Credits just won't be initialised until the correct key is used.
-
-**Step 3 — Start Minikube**
-
-```bash
-minikube start
-```
-
-> If you previously ran Minikube with less memory, delete and recreate: `minikube delete && minikube start`
-
-**Step 4 — Build and load images (first time or after `minikube delete`)**
+Then run:
 
 ```powershell
-# Build all images (~5 mins)
-.\scripts\build_k8s_images.ps1
-
-# Load into Minikube (~10 mins)
-$tag = "local-k8s-20260329"
-$images = @(
-  "user-service","venue-service","seat-service","event-service",
-  "seat-inventory-service","ticket-service","ticket-log-service",
-  "marketplace-service","transfer-service","credit-transaction-service",
-  "stripe-wrapper","otp-wrapper","auth-orchestrator","event-orchestrator",
-  "credit-orchestrator","ticket-purchase-orchestrator","qr-orchestrator",
-  "marketplace-orchestrator","transfer-orchestrator","ticket-verification-orchestrator"
-)
-foreach ($img in $images) { minikube image load "ticketremaster/${img}:${tag}" }
+wsl --shutdown
 ```
 
-> After `minikube stop` / `minikube start`, images persist — no reload needed. Only reload after `minikube delete`.
+### 2. Build the local images
 
-**Step 5 — Apply manifests**
+Run this the first time, or after `minikube delete`, or after you have changed backend code that must be rebuilt:
 
-```bash
+```powershell
+.\scripts\build_k8s_images.ps1
+```
+
+The current default local image tag is `local-k8s-20260329`, which is also the tag referenced by `k8s/base`.
+
+### 3. Apply the stack
+
+```powershell
 kubectl apply -k k8s/base
 ```
 
-**Step 6 — Wait for pods**
+### 4. Wait for the stack properly
 
-```bash
-kubectl get pods --all-namespaces --watch
+Do not rely on a fixed sleep. Wait for real conditions:
+
+```powershell
+kubectl rollout status statefulset/redis -n ticketremaster-data --timeout=300s
+kubectl rollout status statefulset/rabbitmq -n ticketremaster-data --timeout=300s
+kubectl rollout status deployment/auth-orchestrator -n ticketremaster-core --timeout=300s
+kubectl rollout status deployment/kong -n ticketremaster-edge --timeout=300s
+kubectl wait --for=condition=complete job --all -n ticketremaster-core --timeout=600s
 ```
 
-All pods should show `1/1 Running`. Takes 2–5 minutes on first run.
+The maintained startup scripts perform this waiting for you.
 
-**Step 7 — Run migrations (first time only)**
+### 5. Port-forward Kong
 
-```bash
-kubectl exec -n ticketremaster-core deployment/user-service -- flask db upgrade
-```
-
-**Step 8 — Port-forward Kong**
-
-```bash
+```powershell
 kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
 ```
 
-Keep this terminal open. Kong is now at `http://localhost:8000`.
+Keep that terminal open while using `http://localhost:8000`.
 
----
+## Manual maintainer flow
 
-#### Every subsequent start (already set up)
+Use this when you want full control rather than the launcher:
 
-```bash
+```powershell
 minikube start
 kubectl apply -k k8s/base
+kubectl wait --for=condition=available deployment --all -n ticketremaster-core --timeout=300s
+kubectl wait --for=condition=complete job --all -n ticketremaster-core --timeout=600s
 kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-localhost.postman_environment.json --reporters cli
 ```
 
-That's it. No image loading, no migrations, no rebuilding.
+## Frontend setup
 
----
-
-## Frontend Setup
-
-**1. Install dependencies**
-
-```bash
-cd ticketremaster-f
-npm install
-```
-
-**2. Create env file**
-
-```bash
-cp .env.example .env.local
-```
-
-Edit `.env.local`:
+For local backend usage:
 
 ```env
-# Option A — public URL (no Minikube needed):
-VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
-
-# Option B — local Minikube (requires port-forward running):
-# VITE_API_BASE_URL=http://localhost:8000
-
-# Kong API key
+VITE_API_BASE_URL=http://localhost:8000
 VITE_KONG_API_KEY=tk_front_123456789
-
-# Stripe public key (test mode)
-VITE_STRIPE_PUBLIC_KEY=pk_test_51T2WUnLMrVGaDjow...
-
-# Leave blank for local dev
-VITE_SENTRY_DSN=
-VITE_POSTHOG_API_KEY=
 ```
 
-**3. Start dev server**
+For the shared public backend:
 
-```bash
-npm run dev
+```env
+VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
+VITE_KONG_API_KEY=tk_front_123456789
 ```
 
-Frontend runs at `http://localhost:5173`.
+## Smoke verification
 
----
+### Localhost
 
-## API Routes Reference
+```powershell
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-localhost.postman_environment.json --reporters cli
+```
 
-All requests go to `VITE_API_BASE_URL` — no `/api` prefix. Kong routes them internally.
+### Public Cloudflare route
 
-### Auth
+```powershell
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
+```
 
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| POST | `/auth/register` | none | Rate limited: 5/min |
-| POST | `/auth/login` | none | Rate limited: 10/min |
-| POST | `/auth/verify-registration` | none | OTP phone verification |
-| GET | `/auth/me` | JWT | Current user profile |
-| POST | `/auth/logout` | JWT | Revoke token |
+### Quick cluster checks
 
-### Events & Venues
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| GET | `/events` | none | Supports `?type=&page=&limit=` |
-| GET | `/events/:id` | none | Event detail with venue |
-| GET | `/events/:id/seats` | none | Seat map with availability |
-| GET | `/events/:id/seats/:inventoryId` | none | Single seat detail |
-| GET | `/venues` | none | All venues |
-| POST | `/admin/events` | admin JWT | Create event |
-| GET | `/admin/events/:id/dashboard` | admin JWT | Event analytics |
-
-### Purchase
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| POST | `/purchase/hold/:inventoryId` | JWT + apikey | 5-min hold, distributed lock |
-| DELETE | `/purchase/hold/:inventoryId` | JWT + apikey | Release hold early |
-| POST | `/purchase/confirm/:inventoryId` | JWT + apikey | Use `Idempotency-Key` header |
-
-### Tickets
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| GET | `/tickets` | JWT + apikey | My tickets |
-| GET | `/tickets/:id/qr` | JWT + apikey | QR code (1-min expiry) |
-
-### Credits
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| GET | `/credits/balance` | JWT + apikey | Current balance |
-| POST | `/credits/topup/initiate` | JWT + apikey | Returns Stripe clientSecret |
-| POST | `/credits/topup/confirm` | JWT + apikey | Use `Idempotency-Key` header |
-| GET | `/credits/transactions` | JWT + apikey | Transaction history |
-
-### Marketplace
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| GET | `/marketplace` | none | Supports `?eventId=&page=&limit=` |
-| POST | `/marketplace/list` | JWT + apikey | List a ticket for sale |
-| DELETE | `/marketplace/:listingId` | JWT + apikey | Remove listing |
-
-### Transfer (P2P)
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| POST | `/transfer/initiate` | JWT + apikey | Start transfer from listing |
-| GET | `/transfer/pending` | JWT + apikey | My pending transfers |
-| GET | `/transfer/:id` | JWT + apikey | Transfer status |
-| POST | `/transfer/:id/seller-accept` | JWT + apikey | Seller accepts |
-| POST | `/transfer/:id/seller-reject` | JWT + apikey | Seller rejects |
-| POST | `/transfer/:id/buyer-verify` | JWT + apikey | Buyer OTP — rate limited: 3/15min |
-| POST | `/transfer/:id/seller-verify` | JWT + apikey | Seller OTP — rate limited: 3/15min |
-| POST | `/transfer/:id/resend-otp` | JWT + apikey | Resend OTP |
-| POST | `/transfer/:id/cancel` | JWT + apikey | Cancel transfer |
-
-### Verification (Staff)
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| POST | `/verify/scan` | staff JWT + apikey | Scan QR hash |
-| POST | `/verify/manual` | staff JWT + apikey | Manual ticket ID lookup |
-
-### Webhooks
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| POST | `/webhooks/stripe` | Stripe signature | Backend-to-backend only |
-
----
-
-## Test Accounts
-
-| Role | How to get |
-| --- | --- |
-| Regular user | Register a new account via `/auth/register` |
-| Admin | Ask the backend maintainer |
-| Staff | Ask the backend maintainer |
-
----
+```powershell
+kubectl get pods -n ticketremaster-edge
+kubectl get pods -n ticketremaster-core
+kubectl get pods -n ticketremaster-data
+kubectl get jobs -n ticketremaster-core
+```
 
 ## Troubleshooting
 
-### Known Issues & Fixes
+### `start-backend.bat` fails at Docker check with `... was unexpected at this time.`
 
-#### Stale Cloudflare connectors causing 503s on public URL
+That was a Windows batch parsing bug in the old launcher. The current launcher delegates to PowerShell after lightweight checks and no longer uses the broken branch structure.
 
-**Symptom:** `https://ticketremasterapi.hong-yi.me/events` returns 503 but `http://localhost:8000/events` works.
+### Register returns `400`, then login and other protected routes return `401`
 
-**Cause:** Multiple cloudflared connectors from old Minikube restarts. Cloudflare load-balances across all — stale ones point to dead backends.
+Treat this as a readiness chain, not as many unrelated auth bugs.
 
-**Fix (PowerShell):**
-
-```powershell
-$h = @{"X-Auth-Email"="<your-cf-email>";"X-Auth-Key"="<your-global-api-key>";"Content-Type"="application/json"}
-$a = "<account-id>"; $t = "<tunnel-id>"
-
-# List connectors
-(Invoke-WebRequest "https://api.cloudflare.com/client/v4/accounts/$a/cfd_tunnel/$t/connections" -Headers $h -UseBasicParsing).Content | ConvertFrom-Json | Select -Expand result | ForEach-Object { Write-Host "$($_.id) | $($_.arch) | $(($_.conns|Select -First 1).origin_ip)" }
-
-# Delete a stale one
-Invoke-WebRequest "https://api.cloudflare.com/client/v4/accounts/$a/cfd_tunnel/$t/connections?client_id=<id>" -Method DELETE -Headers $h -UseBasicParsing
-```
-
-Keep only connectors matching your current machine's IP. Delete all others.
-
-**Prevention:** cloudflared and Kong are set to `replicas: 1` in the manifests — never scale them up.
-
----
-
-#### cloudflared Windows service keeps reconnecting
-
-**Symptom:** A `windows_amd64` connector reappears in Cloudflare dashboard after deletion.
-
-**Fix (admin PowerShell):**
+Check:
 
 ```powershell
-sc.exe stop cloudflared
-sc.exe config cloudflared start= disabled
+kubectl get pods -n ticketremaster-core
+kubectl get jobs -n ticketremaster-core
+kubectl logs deployment/auth-orchestrator -n ticketremaster-core --tail=100
+kubectl logs deployment/user-service -n ticketremaster-core --tail=100
 ```
 
----
+Typical causes:
 
-#### Minikube OOM / kubectl TLS timeout
+- user-service was not ready when auth tried to create the test account
+- seed jobs had not completed yet
+- secrets were outdated, especially OutSystems or database secrets
 
-**Symptom:** `kubectl` hangs or returns `net/http: TLS handshake timeout`.
+### Public URL works intermittently
 
-**Fix:**
+Cloudflare Tunnel is still a single-connector edge. If the public URL is unstable:
 
-```bash
-minikube delete
-minikube config set memory 12288
-minikube start
+```powershell
+kubectl logs deployment/cloudflared -n ticketremaster-edge --tail=100
+kubectl logs deployment/kong -n ticketremaster-edge --tail=100
 ```
 
-Ensure `.wslconfig` has `memory=12GB`, then `wsl --shutdown` before starting.
+Also confirm the public endpoint itself:
 
----
+```powershell
+Invoke-WebRequest https://ticketremasterapi.hong-yi.me/events
+```
 
-#### RabbitMQ CrashLoopBackOff
+### `ImagePullBackOff` after `minikube delete`
 
-**Symptom:** `rabbitmq-0` crashes with `RABBITMQ_VM_MEMORY_HIGH_WATERMARK is set but deprecated`.
+Rebuild and reload local images:
 
-**Fix:** Already fixed in current manifests. Pull latest and `kubectl apply -k k8s/base`.
+```powershell
+.\scripts\build_k8s_images.ps1
+```
 
----
+The maintained startup script will load missing images into Minikube automatically.
 
-#### Auth orchestrator OOM / login returns 401 or 502
+### Port-forward drops
 
-**Symptom:** Login intermittently fails via public URL.
+Restart it:
 
-**Fix:** Already fixed — auth orchestrator runs 2 gunicorn workers with 512MB limit. Pull latest manifests.
-
----
-
-#### ImagePullBackOff after minikube delete
-
-**Symptom:** Core pods stuck in `ImagePullBackOff`.
-
-**Fix:** Reload images (Step 4 above). `minikube delete` wipes the image registry.
-
----
-
-#### Port-forward drops after idle
-
-**Fix:** Restart it:
-
-```bash
+```powershell
 kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
 ```
 
----
+### RabbitMQ management UI
 
-#### CORS errors in browser
+To inspect queues locally:
 
-- `VITE_API_BASE_URL` must have no trailing slash and correct protocol.
-- CORS allowlist includes `http://localhost:5173` only — other ports won't work.
-
----
-
-#### 401 on protected routes
-
-- Session expired (JWT TTL is 24h) — log in again.
-- `VITE_KONG_API_KEY=tk_front_123456789` must be set in `.env.local`.
-
----
-
-#### Pod stuck in Init or CrashLoopBackOff
-
-```bash
-kubectl describe pod <pod-name> -n ticketremaster-core
-kubectl logs <pod-name> -n ticketremaster-core
+```powershell
+kubectl port-forward -n ticketremaster-data service/rabbitmq 15672:15672
 ```
 
----
-
-#### Secrets missing
-
-You are missing `k8s/base/secrets.local.yaml`. Ask the backend maintainer.
-
----
-
-### Setting up your own Cloudflare Tunnel
-
-If you want your own public URL instead of the shared one:
-
-1. Create a Cloudflare account, add your domain
-2. Zero Trust → Networks → Tunnels → Create tunnel → copy the token
-3. Update `k8s/base/secrets.local.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: edge-secrets
-  namespace: ticketremaster-edge
-type: Opaque
-stringData:
-  CLOUDFLARE_TUNNEL_TOKEN: "<your-token>"
-```
-
-4. In the Cloudflare tunnel dashboard, add a public hostname route:
-   - Hostname: `<your-subdomain>.<your-domain>`
-   - Service: `http://kong-proxy.ticketremaster-edge.svc.cluster.local:80`
-5. Update `postman/TicketRemaster.gateway-public.postman_environment.json` with your URL
-6. `kubectl apply -k k8s/base`
-
-Keep cloudflared at `replicas: 1` — multiple replicas cause stale connector accumulation.
-
----
-
-## Notes for the Backend Maintainer
-
-- `k8s/base/secrets.local.yaml` is gitignored — share out-of-band (encrypted message, password manager).
-- After pulling new backend changes:
-
-```bash
-docker build -t ticketremaster/<service>:local-k8s-20260329 -f <service>/Dockerfile .
-minikube image load ticketremaster/<service>:local-k8s-20260329
-kubectl rollout restart deployment/<service> -n ticketremaster-core
-```
-
-- After config changes:
-
-```bash
-kubectl apply -k k8s/base
-kubectl rollout restart deployment/kong -n ticketremaster-edge
-```
+Then open `http://localhost:15672`.

@@ -1,39 +1,33 @@
 # marketplace-service
 
-Marketplace Service stores resale listings and listing state transitions.
+`marketplace-service` stores the raw resale listing record.
 
-## Endpoints
+## Design role
+
+- owns listing lifecycle such as `active`, `completed`, and `cancelled`
+- stores listing metadata only
+- does not enrich listings with event or seller display data; `marketplace-orchestrator` does that
+
+## Current routes
 
 - `GET /health`
 - `POST /listings`
 - `GET /listings`
-- `GET /listings/<listing_id>`
-- `PATCH /listings/<listing_id>`
+- `GET /listings/{listingId}`
+- `PATCH /listings/{listingId}`
 
-## Data Notes
+## Runtime notes
 
-- Listing state supports values such as active, completed, and cancelled.
-- Backed by service-owned PostgreSQL database.
+- dedicated PostgreSQL database
+- used by both resale browse and transfer initiation flows
 
-## Common Local Commands
-
-```powershell
-docker compose run --rm marketplace-service python -m flask --app app.py db upgrade -d migrations
-docker compose up -d --build marketplace-service
-```
-
-## Testing
+## Local verification
 
 ```powershell
-docker compose run --rm marketplace-service python -m pytest -p no:cacheprovider tests
+python -m pytest -p no:cacheprovider services/marketplace-service/tests
 ```
 
-Integration references:
-- [../../postman/README.md](../../postman/README.md)
-- [../../TESTING.md](../../TESTING.md)
+Related docs:
 
-## Related Docs
-
-- Services index: [../README.md](../README.md)
-- Root docs hub: [../../README.md](../../README.md)
-
+- [../README.md](../README.md)
+- [../../API.md](../../API.md)

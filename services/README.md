@@ -1,31 +1,40 @@
 # Services Index
 
-This folder contains all atomic backend services and external wrappers.
+This folder contains the atomic services and wrappers that sit behind the orchestrator layer.
 
-## Service Groups
+## Service groups
 
 ### Core data services
+
 - [user-service/README.md](user-service/README.md)
 - [venue-service/README.md](venue-service/README.md)
 - [seat-service/README.md](seat-service/README.md)
 - [event-service/README.md](event-service/README.md)
 - [seat-inventory-service/README.md](seat-inventory-service/README.md)
-
-### Ticketing and transfer services
 - [ticket-service/README.md](ticket-service/README.md)
 - [ticket-log-service/README.md](ticket-log-service/README.md)
 - [marketplace-service/README.md](marketplace-service/README.md)
 - [transfer-service/README.md](transfer-service/README.md)
 - [credit-transaction-service/README.md](credit-transaction-service/README.md)
 
-### External wrappers
+### Wrappers and infrastructure-facing services
+
 - [stripe-wrapper/README.md](stripe-wrapper/README.md)
 - [otp-wrapper/README.md](otp-wrapper/README.md)
+- [notification-service/README.md](notification-service/README.md)
 
-## Related Docs
+## Design role
 
-- End-to-end testing and Postman flow: [../TESTING.md](../TESTING.md)
-- Postman assets and environment assumptions: [../postman/README.md](../postman/README.md)
-- Global architecture and implementation order: [../INSTRUCTION.md](../INSTRUCTION.md)
-- Root documentation hub: [../README.md](../README.md)
+Atomic services own:
 
+- one bounded context
+- one database or one external integration surface
+- narrow, internal HTTP or gRPC contracts
+
+They do not own browser aggregation or gateway policy. That remains the orchestrator and Kong responsibility.
+
+## Related docs
+
+- [../README.md](../README.md)
+- [../INSTRUCTION.md](../INSTRUCTION.md)
+- [../TESTING.md](../TESTING.md)

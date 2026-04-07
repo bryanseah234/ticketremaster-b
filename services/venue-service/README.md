@@ -1,39 +1,32 @@
 # venue-service
 
-Venue Service stores venue metadata used by event browsing and inventory generation flows.
+`venue-service` owns canonical venue metadata.
 
-## Endpoints
+## Design role
+
+- provides the read model for venue name and address data
+- is intentionally separate from `event-service`
+- is used by event browse, ticket QR enrichment, and staff verification responses
+
+## Current routes
 
 - `GET /health`
 - `GET /venues`
-- `GET /venues/<venue_id>`
+- `GET /venues/{venueId}`
 
-## Data and Seeding
+## Runtime notes
 
-- Uses its own PostgreSQL database.
-- Seed script: `seed.py`
-- Seed includes canonical venue IDs used by other seeded services (for example `ven_001`, `ven_002`, and additional venues).
+- dedicated PostgreSQL database
+- seeded through the Kubernetes `seed-venues` job
+- read-only for most frontend-facing flows
 
-## Common Local Commands
-
-```powershell
-docker compose run --rm venue-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm venue-service python seed.py
-docker compose up -d --build venue-service
-```
-
-## Testing
+## Local verification
 
 ```powershell
-docker compose run --rm venue-service python -m pytest -p no:cacheprovider tests
+python -m pytest -p no:cacheprovider services/venue-service/tests
 ```
 
-Manual E2E path:
-- [../../postman/README.md](../../postman/README.md)
-- [../../TESTING.md](../../TESTING.md)
+Related docs:
 
-## Related Docs
-
-- Services index: [../README.md](../README.md)
-- Root docs hub: [../../README.md](../../README.md)
-
+- [../README.md](../README.md)
+- [../../API.md](../../API.md)

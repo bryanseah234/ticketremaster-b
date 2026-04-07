@@ -1,40 +1,39 @@
 # ticket-service
 
-Ticket Service stores ticket ownership, ticket lifecycle status, and QR metadata.
+`ticket-service` owns the canonical ticket record.
 
-## Endpoints
+## What it stores
+
+- owner
+- event and venue linkage
+- inventory linkage
+- price
+- ticket status such as `active`, `listed`, `used`, or `payment_failed`
+- QR metadata such as `qrHash` and `qrTimestamp`
+
+## Current routes
 
 - `GET /health`
 - `POST /tickets`
-- `GET /tickets/<ticket_id>`
-- `GET /tickets/owner/<owner_id>`
-- `GET /tickets/qr/<qr_hash>`
-- `PATCH /tickets/<ticket_id>`
+- `GET /tickets/{ticketId}`
+- `GET /tickets/owner/{ownerId}`
+- `GET /tickets/event/{eventId}`
+- `GET /tickets/qr/{qrHash}`
+- `PATCH /tickets/{ticketId}`
 
-## Data Notes
+## Design role
 
-- Backed by dedicated PostgreSQL schema.
-- Includes fields used by QR workflows (`qrHash`, `qrTimestamp`) and ownership transfer.
+- purchase completion creates ticket records here
+- marketplace and transfer flows update ticket ownership or listing state here
+- QR generation persists fresh hashes here before staff scan validation
 
-## Common Local Commands
-
-```powershell
-docker compose run --rm ticket-service python -m flask --app app.py db upgrade -d migrations
-docker compose up -d --build ticket-service
-```
-
-## Testing
+## Local verification
 
 ```powershell
-docker compose run --rm ticket-service python -m pytest -p no:cacheprovider tests
+python -m pytest -p no:cacheprovider services/ticket-service/tests
 ```
 
-End-to-end references:
-- [../../postman/README.md](../../postman/README.md)
-- [../../TESTING.md](../../TESTING.md)
+Related docs:
 
-## Related Docs
-
-- Services index: [../README.md](../README.md)
-- Root docs hub: [../../README.md](../../README.md)
-
+- [../README.md](../README.md)
+- [../../API.md](../../API.md)

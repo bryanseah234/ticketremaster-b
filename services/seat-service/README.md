@@ -1,38 +1,31 @@
 # seat-service
 
-Seat Service stores venue seat layouts and exposes seat lists by venue.
+`seat-service` owns the physical seat definitions for a venue.
 
-## Endpoints
+## Design role
+
+- stores seat metadata such as row and seat number
+- does not own event-specific availability
+- works together with `seat-inventory-service`, which owns `available`, `held`, and `sold` state per event
+
+## Current routes
 
 - `GET /health`
-- `GET /seats/venue/<venue_id>`
+- `GET /seats/venue/{venueId}`
 
-## Data and Seeding
+## Runtime notes
 
-- Uses isolated PostgreSQL storage.
-- Seed script: `seed.py`
-- Seed generates seat rows for all configured venue capacities in `VENUE_CAPACITIES`.
+- dedicated PostgreSQL database
+- seeded through the Kubernetes `seed-seats` job
+- queried by `event-orchestrator` and admin reporting flows
 
-## Common Local Commands
-
-```powershell
-docker compose run --rm seat-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm seat-service python seed.py
-docker compose up -d --build seat-service
-```
-
-## Testing
+## Local verification
 
 ```powershell
-docker compose run --rm seat-service python -m pytest -p no:cacheprovider tests
+python -m pytest -p no:cacheprovider services/seat-service/tests
 ```
 
-E2E references:
-- [../../postman/README.md](../../postman/README.md)
-- [../../TESTING.md](../../TESTING.md)
+Related docs:
 
-## Related Docs
-
-- Services index: [../README.md](../README.md)
-- Root docs hub: [../../README.md](../../README.md)
-
+- [../README.md](../README.md)
+- [../../INSTRUCTION.md](../../INSTRUCTION.md)

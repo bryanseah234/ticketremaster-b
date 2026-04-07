@@ -1,38 +1,39 @@
 # transfer-service
 
-Transfer Service stores peer-to-peer transfer workflow state, OTP verification flags, and completion metadata.
+`transfer-service` stores the persistent record of a peer-to-peer ticket transfer.
 
-## Endpoints
+## What it stores
+
+- buyer and seller IDs
+- listing link
+- credit amount
+- current transfer status
+- OTP verification SIDs and flags
+- completion and cancellation timestamps
+
+## Current routes
 
 - `GET /health`
 - `POST /transfers`
-- `GET /transfers/<transfer_id>`
-- `PATCH /transfers/<transfer_id>`
+- `GET /transfers`
+- `GET /transfers/{transferId}`
+- `PATCH /transfers/{transferId}`
+- `POST /transfers/{transferId}/cancel`
+- `GET /transfers/pending`
 
-## Data Notes
+## Design role
 
-- Persists buyer/seller verification progress and transfer status transitions.
-- Uses dedicated PostgreSQL schema for transfer records.
+- owns transfer persistence only
+- does not call OTP, credits, or ticket services directly for the full workflow
+- `transfer-orchestrator` is the layer that coordinates the saga around this record
 
-## Common Local Commands
-
-```powershell
-docker compose run --rm transfer-service python -m flask --app app.py db upgrade -d migrations
-docker compose up -d --build transfer-service
-```
-
-## Testing
+## Local verification
 
 ```powershell
-docker compose run --rm transfer-service python -m pytest -p no:cacheprovider tests
+python -m pytest -p no:cacheprovider services/transfer-service/tests
 ```
 
-Cross-service references:
-- [../../services/otp-wrapper/README.md](../../services/otp-wrapper/README.md)
-- [../../TESTING.md](../../TESTING.md)
+Related docs:
 
-## Related Docs
-
-- Services index: [../README.md](../README.md)
-- Root docs hub: [../../README.md](../../README.md)
-
+- [../README.md](../README.md)
+- [../../API.md](../../API.md)

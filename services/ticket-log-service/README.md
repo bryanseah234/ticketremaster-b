@@ -1,37 +1,31 @@
 # ticket-log-service
 
-Ticket Log Service stores scan/check-in history for tickets.
+`ticket-log-service` stores ticket scan and verification history.
 
-## Endpoints
+## Design role
+
+- append-only check-in and scan status history
+- powers duplicate-scan detection for staff verification
+- provides an audit trail for ticket usage outcomes
+
+## Current routes
 
 - `GET /health`
 - `POST /ticket-logs`
-- `GET /ticket-logs/ticket/<ticket_id>`
+- `GET /ticket-logs/ticket/{ticketId}`
 
-## Data Notes
+## Runtime notes
 
-- Used by verification flow for duplicate-scan detection and audit history.
-- Runs on dedicated PostgreSQL database.
+- dedicated PostgreSQL database
+- queried by `ticket-verification-orchestrator` before marking a ticket used
 
-## Common Local Commands
-
-```powershell
-docker compose run --rm ticket-log-service python -m flask --app app.py db upgrade -d migrations
-docker compose up -d --build ticket-log-service
-```
-
-## Testing
+## Local verification
 
 ```powershell
-docker compose run --rm ticket-log-service python -m pytest -p no:cacheprovider tests
+python -m pytest -p no:cacheprovider services/ticket-log-service/tests
 ```
 
-Cross-service verification flow references:
-- [../../TESTING.md](../../TESTING.md)
-- [../../FRONTEND.md](../../FRONTEND.md)
+Related docs:
 
-## Related Docs
-
-- Services index: [../README.md](../README.md)
-- Root docs hub: [../../README.md](../../README.md)
-
+- [../README.md](../README.md)
+- [../../API.md](../../API.md)

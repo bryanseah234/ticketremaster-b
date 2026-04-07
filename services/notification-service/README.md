@@ -1,72 +1,51 @@
-# Notification Service
+# notification-service
 
-Real-time notification service for TicketRemaster using WebSocket and Redis Pub/Sub.
+`notification-service` is the realtime broadcast layer for TicketRemaster.
 
-## Features
+## Design role
 
-- WebSocket connections for real-time client updates
-- Redis Pub/Sub for cross-service event broadcasting
-- Event channels for different domain events (seats, tickets, transfers, etc.)
-- HTTP API for services to broadcast events
+- accepts internal HTTP broadcast requests
+- emits Socket.IO events to connected clients
+- uses Redis Pub/Sub so event fan-out is decoupled from the caller
 
-## Running Locally
+## Current interfaces
 
-```bash
-pip install -r requirements.txt
-python app.py
+### HTTP
+
+- `GET /health`
+- `POST /broadcast`
+- `GET /stats`
+
+### Socket.IO events
+
+- `connect`
+- `disconnect`
+- `subscribe`
+- `unsubscribe`
+
+Supported event channels:
+
+- `seat_update`
+- `ticket_update`
+- `transfer_update`
+- `purchase_update`
+- `user_update`
+- `event_update`
+
+## Runtime notes
+
+- no service-owned database
+- depends on Redis
+- not exposed through Kong for normal browser API calls
+
+## Local verification
+
+```powershell
+python services/notification-service/app.py
+Invoke-WebRequest http://localhost:8109/health
 ```
 
-## Docker
+Related docs:
 
-```bash
-docker build -t notification-service .
-docker run -p 8109:8109 notification-service
-```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `REDIS_URL` | Redis connection URL | `redis://redis:6379/0` |
-| `JWT_SECRET` | Secret key for Socket.IO | `dev-secret` |
-| `NOTIFICATION_SERVICE_HOST` | Host to bind | `0.0.0.0` |
-| `NOTIFICATION_SERVICE_PORT` | Port to bind | `8109` |
-| `SENTRY_DSN` | Sentry DSN | - |
-| `FRONTEND_URL` | Frontend URL for CORS | `http://localhost:5173` |
-
-## Event Types
-
-| Event Type | Description |
-|------------|-------------|
-| `seat_update` | Seat status changes (available, held, sold) |
-| `ticket_update` | Ticket status changes |
-| `transfer_update` | Transfer status changes |
-| `purchase_update` | Purchase status changes |
-| `user_update` | User profile changes |
-| `event_update` | Event changes |
-
-## API Endpoints
-
-### POST /broadcast
-
-Broadcast an event to all connected clients.
-
-```json
-{
-  "type": "seat_update",
-  "payload": {
-    "eventId": "evt_123",
-    "seatId": "seat_456",
-    "status": "sold"
-  },
-  "traceId": "trace_789"
-}
-```
-
-### GET /stats
-
-Get service statistics.
-
-### GET /health
-
-Health check endpoint.
+- [NOTIFICATIONS.md](NOTIFICATIONS.md)
+- [../README.md](../README.md)

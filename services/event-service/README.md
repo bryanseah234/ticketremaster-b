@@ -1,42 +1,43 @@
 # event-service
 
-Event Service stores event metadata and exposes list, lookup, and create endpoints.
+`event-service` owns the event catalog and admin event lifecycle.
 
-## Endpoints
+## Design role
+
+- stores event metadata
+- supports public listing and detail reads
+- supports admin create, update, duplicate, publish, cancel, and delete operations
+- does not aggregate venue or seat availability itself; `event-orchestrator` does that
+
+## Current routes
 
 - `GET /health`
 - `GET /events`
-- `GET /events/<event_id>`
+- `GET /events/upcoming`
+- `GET /events/search`
+- `GET /events/types`
+- `GET /events/{eventId}`
 - `POST /events`
+- `POST /admin/events/{eventId}/publish`
+- `POST /admin/events/{eventId}/duplicate`
+- `PUT /admin/events/{eventId}`
+- `DELETE /admin/events/{eventId}`
+- `POST /admin/events/{eventId}/cancel`
+- `GET /admin/events`
 
-## Data and Seeding
+## Runtime notes
 
-- Uses its own PostgreSQL schema/database.
-- Seed script: `seed.py`
-- Seed purpose: create baseline events for shared manual/Postman testing.
+- dedicated PostgreSQL database
+- seeded through the Kubernetes `seed-events` job
+- admin event creation through Kong ultimately lands here after `event-orchestrator` validates the workflow
 
-## Common Local Commands
-
-```powershell
-docker compose run --rm event-service python -m flask --app app.py db upgrade -d migrations
-docker compose run --rm event-service python seed.py
-docker compose up -d --build event-service
-```
-
-## Testing
-
-- Service tests:
+## Local verification
 
 ```powershell
-docker compose run --rm event-service python -m pytest -p no:cacheprovider tests
+python -m pytest -p no:cacheprovider services/event-service/tests
 ```
 
-- Integrated flow:
-  - [../../postman/README.md](../../postman/README.md)
-  - [../../TESTING.md](../../TESTING.md)
+Related docs:
 
-## Related Docs
-
-- Services index: [../README.md](../README.md)
-- Root docs hub: [../../README.md](../../README.md)
-
+- [../README.md](../README.md)
+- [../../API.md](../../API.md)

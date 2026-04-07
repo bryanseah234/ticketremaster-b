@@ -1,345 +1,188 @@
-# TicketRemaster Backend - Testing Guide
+# TicketRemaster Backend Testing Guide
 
-This guide covers testing the TicketRemaster backend, including local development, API testing, and deployment verification.
+This repository is tested at three levels:
 
-## Quick Start
+- gateway smoke tests through Kong
+- service and orchestrator pytest suites
+- Kubernetes readiness and runtime verification
 
-### Prerequisites
+The maintained local flow is Kubernetes-first. Docker Compose may still exist in the repo for isolated service work, but the current system-level source of truth is the Minikube stack under `k8s/base`.
 
-- Docker and Docker Compose
-- Python 3.10+
-- Postman (optional)
-- kubectl (for Kubernetes testing)
+## Recommended smoke flow
 
-### Start the Stack
+### One-command path
 
-```bash
-# From ticketremaster-b directory
-cp .env.example .env  # Configure environment
-
-# Start all services
-docker compose up -d --build
-
-# Check status
-docker compose ps
+```powershell
+.\start-backend.bat
 ```
 
-### Run Migrations
+### PowerShell path
 
-```bash
-# Run database migrations for all services
-docker compose run --rm user-service python -m flask --app app.py db upgrade
-docker compose run --rm venue-service python -m flask --app app.py db upgrade
-docker compose run --rm seat-service python -m flask --app app.py db upgrade
-docker compose run --rm event-service python -m flask --app app.py db upgrade
-docker compose run --rm seat-inventory-service python -m flask --app app.py db upgrade
-docker compose run --rm ticket-service python -m flask --app app.py db upgrade
-docker compose run --rm ticket-log-service python -m flask --app app.py db upgrade
-docker compose run --rm marketplace-service python -m flask --app app.py db upgrade
-docker compose run --rm transfer-service python -m flask --app app.py db upgrade
-docker compose run --rm credit-transaction-service python -m flask --app app.py db upgrade
+```powershell
+.\scripts\start_k8s.ps1
 ```
 
-### Seed Test Data
+Optional public verification after Cloudflare reconnects:
 
-```bash
-docker compose run --rm user-service python user_seed.py
-docker compose run --rm venue-service python seed_venues.py
-docker compose run --rm seat-service python seed_seats.py
-docker compose run --rm event-service python seed_events.py
-docker compose run --rm seat-inventory-service python seed_seat_inventory.py
+```powershell
+.\scripts\start_k8s.ps1 -RunPublicTests
 ```
 
-## Unit Testing
+## Gateway smoke suite
 
-### Run All Tests
+The maintained collection is:
 
-```bash
-pytest
+```text
+postman/TicketRemaster.gateway.postman_collection.json
 ```
 
-> `tests/test_rabbitmq_integration.py` is an infrastructure integration suite. It requires RabbitMQ DNS/service reachability (for example `rabbitmq:5672` from Docker Compose network or Kubernetes service networking).
+Key behavior of the current collection:
 
-### Run Tests for Specific Service
+- runs against Kong, not direct service ports
+- generates a fresh `test_email` for each run
+- uses the current purchase routes with `inventoryId` in the path
+- uses the current transfer route with `listingId`
+- uses the current staff verification path `POST /verify/scan`
 
-```bash
-pytest services/user-service/tests/
-pytest services/event-service/tests/
+### Localhost run
+
+```powershell
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-localhost.postman_environment.json --reporters cli
 ```
 
-### Run with Coverage
+### Public run
 
-```bash
-pytest --cov=. --cov-report=html
+```powershell
+newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
 ```
 
-## API Testing
+## What the smoke suite proves
 
-### Using Swagger UI
+- Kong routing is alive
+- auth registration and login work end-to-end
+- a JWT is issued and reused for protected routes
+- current public routes match the committed orchestrator code
+- key-auth protected gateway routes reject missing credentials
 
-Each orchestrator has a local Swagger UI:
+## Common smoke failures
 
-| Orchestrator | URL |
-|--------------|-----|
-| auth-orchestrator | http://localhost:8100/apidocs |
-| event-orchestrator | http://localhost:8101/apidocs |
-| credit-orchestrator | http://localhost:8102/apidocs |
-| ticket-purchase-orchestrator | http://localhost:8103/apidocs |
-| qr-orchestrator | http://localhost:8104/apidocs |
-| marketplace-orchestrator | http://localhost:8105/apidocs |
-| transfer-orchestrator | http://localhost:8107/apidocs |
-| ticket-verification-orchestrator | http://localhost:8108/apidocs |
+### Register `400`, then protected routes `401`
 
-### Using Postman
+This usually means the first auth request failed before a JWT was created. Most often:
 
-1. Import `postman/TicketRemaster.postman_collection.json`
-2. Import `postman/TicketRemaster.local.postman_environment.json`
-3. Select the "TicketRemaster.local" environment
-4. Run requests in order
+- downstream auth dependencies were not ready yet
+- seed jobs were still running
+- the cluster was tested before port-forward or Cloudflare had settled
 
-#### CLI Collection Runs
+Check:
 
-```bash
-# Install one of these first:
-postman --version
-# or
-newman --version
-
-# Example with Newman
-newman run postman/TicketRemaster.postman_collection.json \
-  -e postman/TicketRemaster.local.postman_environment.json
-```
-
-### Using curl
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Register user
-curl -X POST http://localhost:8000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"test123","phoneNumber":"+1234567890"}'
-
-# Login
-curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"test123"}'
-
-# List events
-curl http://localhost:8000/events
-```
-
-## Testing Real-time Notifications
-
-### WebSocket Connection Test
-
-```javascript
-// In browser console or Node.js
-const io = require('socket.io-client');
-const socket = io('ws://localhost:8109');
-
-socket.on('connect', () => {
-  console.log('Connected to notification service');
-  socket.emit('subscribe', { channel: 'seat_update' });
-});
-
-socket.on('seat_update', (data) => {
-  console.log('Seat update received:', data);
-});
-```
-
-### Broadcasting Test
-
-```python
-import requests
-
-# Broadcast a test event
-response = requests.post('http://localhost:8109/notifications/broadcast', json={
-    'type': 'seat_update',
-    'payload': {
-        'eventId': 'demo-event-001',
-        'seatId': 'demo-seat-001',
-        'status': 'sold'
-    },
-    'traceId': 'test-123'
-})
-print(response.status_code)
-```
-
-## Testing Observability
-
-### Sentry
-
-```python
-# In any service
-import sentry_sdk
-sentry_sdk.capture_message("Test message from testing")
-sentry_sdk.capture_exception(ValueError("Test error"))
-```
-
-Check Sentry dashboard at https://sentry.io/ for captured events.
-
-### PostHog (Frontend)
-
-See frontend TESTING.md for PostHog testing.
-
-## Infrastructure Testing
-
-### RabbitMQ
-
-```bash
-# Check RabbitMQ is running
-docker compose exec rabbitmq rabbitmq-diagnostics -q ping
-
-# View queues
-docker compose exec rabbitmq rabbitmqctl list_queues
-
-# View exchanges
-docker compose exec rabbitmq rabbitmqctl list_exchanges
-
-# Access management UI
-# Open http://localhost:15672 (guest/guest)
-```
-
-### Redis
-
-```bash
-# Check Redis is running
-docker compose exec redis redis-cli ping
-
-# View keys
-docker compose exec redis redis-cli keys '*'
-
-# Monitor commands
-docker compose exec redis redis-cli monitor
-```
-
-### PostgreSQL
-
-```bash
-# List all databases
-docker compose exec user-service-db psql -U ticketremaster -c '\l'
-
-# Connect to a database
-docker compose exec user-service-db psql -U ticketremaster -d user_service
-
-# Run a query
-docker compose exec user-service-db psql -U ticketremaster -d user_service -c "SELECT * FROM users LIMIT 5;"
-```
-
-## Kubernetes Testing
-
-### Apply Manifests
-
-```bash
-# Validate manifests
-kubectl kustomize k8s/base
-
-# Apply to cluster
-kubectl apply -k k8s/base
-```
-
-### Check Deployment
-
-```bash
-# Check pods
+```powershell
 kubectl get pods -n ticketremaster-core
+kubectl get jobs -n ticketremaster-core
+kubectl logs deployment/auth-orchestrator -n ticketremaster-core --tail=100
+kubectl logs deployment/user-service -n ticketremaster-core --tail=100
+```
+
+### Protected routes return `401`
+
+Verify both headers are being sent where required:
+
+- `Authorization: Bearer <jwt>`
+- `apikey: tk_front_123456789`
+
+### Credit routes return `503`
+
+That normally points to the external OutSystems dependency rather than to Kong itself.
+
+### Marketplace or transfer creation returns `400` or `404`
+
+That is valid when the smoke run has not purchased a ticket first, or when a listing is intentionally missing.
+
+## Kubernetes verification
+
+### Pods and jobs
+
+```powershell
 kubectl get pods -n ticketremaster-edge
+kubectl get pods -n ticketremaster-core
 kubectl get pods -n ticketremaster-data
-
-# Check services
-kubectl get svc -n ticketremaster-core
-
-# Check seed jobs
 kubectl get jobs -n ticketremaster-core
 ```
 
-### View Logs
+### Logs
 
-```bash
-# Orchestrator logs
+```powershell
+kubectl logs deployment/kong -n ticketremaster-edge --tail=100
 kubectl logs deployment/auth-orchestrator -n ticketremaster-core --tail=100
-
-# Service logs
-kubectl logs deployment/user-service -n ticketremaster-core --tail=100
-
-# Follow logs
-kubectl logs -f deployment/event-orchestrator -n ticketremaster-core
+kubectl logs deployment/ticket-purchase-orchestrator -n ticketremaster-core --tail=100
+kubectl logs deployment/transfer-orchestrator -n ticketremaster-core --tail=100
 ```
 
-### Port Forwarding
+### Readiness
 
-```bash
-# Forward Kong proxy
-kubectl port-forward -n ticketremaster-edge svc/kong-proxy 8000:80
-
-# Forward RabbitMQ management
-kubectl port-forward -n ticketremaster-data svc/rabbitmq 15672:15672
-
-# Forward a service directly
-kubectl port-forward -n ticketremaster-core deployment/user-service 5000:5000
+```powershell
+kubectl rollout status deployment/kong -n ticketremaster-edge --timeout=300s
+kubectl wait --for=condition=available deployment --all -n ticketremaster-core --timeout=300s
+kubectl wait --for=condition=complete job --all -n ticketremaster-core --timeout=600s
 ```
 
-## Troubleshooting
+## Service and orchestrator pytest suites
 
-### Service Won't Start
+Run from the repo root unless a README says otherwise.
 
-1. Check container logs: `docker compose logs service-name`
-2. Verify environment variables: `docker compose exec service-name env | grep KEY`
-3. Check database connectivity: `docker compose exec service-name python -c "import psycopg2; psycopg2.connect('...')"`
+### Whole-repo checks
 
-### Database Migration Errors
-
-```bash
-# Reset migrations
-docker compose run --rm service-name python -m flask --app app.py db stamp head
-docker compose run --rm service-name python -m flask --app app.py db migrate
-docker compose run --rm service-name python -m flask --app app.py db upgrade
+```powershell
+python -m pytest
 ```
 
-### RabbitMQ Connection Issues
+### Targeted examples
 
-```bash
-# Restart RabbitMQ
-docker compose restart rabbitmq
-
-# Check queue status
-docker compose exec rabbitmq rabbitmqctl list_queues name messages consumers
+```powershell
+python -m pytest -p no:cacheprovider services/user-service/tests
+python -m pytest -p no:cacheprovider services/seat-inventory-service/tests
+python -m pytest -p no:cacheprovider orchestrators/ticket-purchase-orchestrator/tests
+python -m pytest -p no:cacheprovider orchestrators/transfer-orchestrator/tests
 ```
 
-### Redis Connection Issues
+Notes:
 
-```bash
-# Restart Redis
-docker compose restart redis
+- most service tests use isolated test databases or in-memory SQLite fixtures
+- `tests/test_rabbitmq_integration.py` expects RabbitMQ reachability
+- gRPC tests live in `services/seat-inventory-service/tests`
 
-# Check memory usage
-docker compose exec redis redis-cli info memory
+## Manual checks by subsystem
+
+### RabbitMQ
+
+```powershell
+kubectl port-forward -n ticketremaster-data service/rabbitmq 15672:15672
 ```
 
-## Test Checklist
+Open `http://localhost:15672`.
 
-Before deploying to production:
+### Redis
 
-- [ ] All unit tests pass (`pytest`)
-- [ ] All services start successfully (`docker compose ps`)
-- [ ] Health endpoints return 200 (`curl http://localhost:8000/health`)
-- [ ] Database migrations run without errors
-- [ ] Seed data loads correctly
-- [ ] RabbitMQ queues are created
-- [ ] Redis is accessible
-- [ ] Sentry test events appear in dashboard
-- [ ] WebSocket notifications work
-- [ ] Kubernetes manifests validate (`kubectl kustomize`)
-- [ ] API documentation is accessible (Swagger UIs)
+```powershell
+kubectl exec -n ticketremaster-data statefulset/redis -- redis-cli ping
+```
 
-## Documentation
+### Kong
 
-| Document | Purpose |
-|----------|---------|
-| [README.md](README.md) | System overview |
-| [API.md](API.md) | API reference |
-| [FRONTEND.md](FRONTEND.md) | Frontend integration contract |
-| [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) | Minikube setup and known issues |
-| [AGENTS.md](AGENTS.md) | AI agent guidelines |
+```powershell
+Invoke-WebRequest http://localhost:8000/events
+```
+
+### Public edge
+
+```powershell
+Invoke-WebRequest https://ticketremasterapi.hong-yi.me/events
+```
+
+## Related docs
+
+- [README.md](README.md)
+- [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md)
+- [API.md](API.md)
+- [FRONTEND.md](FRONTEND.md)
+- [postman/README.md](postman/README.md)
