@@ -749,7 +749,7 @@ def buyer_verify(transfer_id):
 @require_auth
 def seller_accept(transfer_id):
     """
-    Seller accepts the transfer request — OTP sent to seller
+    Seller accepts the transfer request — OTP sent to buyer
     ---
     tags:
       - Transfer
@@ -762,7 +762,7 @@ def seller_accept(transfer_id):
         type: string
     responses:
       200:
-        description: Accepted — status moves to pending_seller_otp
+        description: Accepted — status moves to pending_buyer_otp
       400:
         description: Wrong transfer status
       401:
@@ -780,38 +780,38 @@ def seller_accept(transfer_id):
     if transfer["status"] != "pending_seller_acceptance":
         return _error("VALIDATION_ERROR", "Transfer is not awaiting seller acceptance.", 400)
 
-    seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
+    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
     if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not retrieve seller details.", 503)
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve buyer details.", 503)
 
     otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
-                                   json={"phoneNumber": seller["phoneNumber"]})
+                                   json={"phoneNumber": buyer["phoneNumber"]})
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
 
     call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
-        "sellerVerificationSid": otp_result["sid"],
-        "status":                "pending_seller_otp",
+        "buyerVerificationSid": otp_result["sid"],
+        "status":               "pending_buyer_otp",
     })
     updated_transfer = _load_enriched_transfer(transfer_id, {
         **transfer,
-        "sellerVerificationSid": otp_result["sid"],
-        "status": "pending_seller_otp",
+        "buyerVerificationSid": otp_result["sid"],
+        "status": "pending_buyer_otp",
     })
-    
+
     # Broadcast seller acceptance
     _broadcast_transfer_notification("seller_accepted", {
         "transferId": transfer_id,
         "buyerId": transfer["buyerId"],
         "sellerId": seller_id,
-        "status": "pending_seller_otp",
+        "status": "pending_buyer_otp",
     })
 
     return jsonify({"data": {
         **(updated_transfer or {}),
         "transferId": transfer_id,
-        "status":     "pending_seller_otp",
-        "message":    "Request accepted. OTP sent to seller.",
+        "status":     "pending_buyer_otp",
+        "message":    "Request accepted. OTP sent to buyer.",
     }}), 200
 
 

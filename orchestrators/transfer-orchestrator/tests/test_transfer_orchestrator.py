@@ -241,14 +241,14 @@ def test_seller_accept_success(mock_svc, mock_broadcast, client):
     transfer = {**MOCK_TRANSFER, "status": "pending_seller_acceptance", "sellerOtpVerified": False}
     mock_svc.side_effect = [
         (transfer, None),
-        (MOCK_SELLER_USER, None),
-        ({"sid": "VE_seller"}, None),
+        (MOCK_BUYER_USER, None),
+        ({"sid": "VE_buyer"}, None),
         (None, None),
         (
             {
                 **transfer,
-                "status": "pending_seller_otp",
-                "sellerVerificationSid": "VE_seller",
+                "status": "pending_buyer_otp",
+                "buyerVerificationSid": "VE_buyer",
             },
             None,
         ),
@@ -263,8 +263,8 @@ def test_seller_accept_success(mock_svc, mock_broadcast, client):
     ]
     res = client.post("/transfer/txr_001/seller-accept", headers=_auth(SELLER))
     assert res.status_code == 200
-    assert res.get_json()["data"]["status"] == "pending_seller_otp"
-    assert res.get_json()["data"]["sellerVerificationSid"] == "VE_seller"
+    assert res.get_json()["data"]["status"] == "pending_buyer_otp"
+    assert res.get_json()["data"]["buyerVerificationSid"] == "VE_buyer"
     mock_broadcast.assert_called_once()
     assert mock_broadcast.call_args.args[0] == "seller_accepted"
 

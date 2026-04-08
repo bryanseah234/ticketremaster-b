@@ -52,7 +52,7 @@ data:
               end
       - name: rate-limiting
         config:
-          minute: 50
+          minute: 300
           policy: local
       - name: cors
         config:
