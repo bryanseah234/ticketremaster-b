@@ -54,40 +54,178 @@ function Invoke-External {
     }
 }
 
-function Get-DesiredImages {
+function Get-ImageDefinitions {
     @(
-        "ticketremaster/user-service:$Tag",
-        "ticketremaster/venue-service:$Tag",
-        "ticketremaster/seat-service:$Tag",
-        "ticketremaster/event-service:$Tag",
-        "ticketremaster/seat-inventory-service:$Tag",
-        "ticketremaster/ticket-service:$Tag",
-        "ticketremaster/ticket-log-service:$Tag",
-        "ticketremaster/marketplace-service:$Tag",
-        "ticketremaster/transfer-service:$Tag",
-        "ticketremaster/credit-transaction-service:$Tag",
-        "ticketremaster/stripe-wrapper:$Tag",
-        "ticketremaster/otp-wrapper:$Tag",
-        "ticketremaster/auth-orchestrator:$Tag",
-        "ticketremaster/event-orchestrator:$Tag",
-        "ticketremaster/credit-orchestrator:$Tag",
-        "ticketremaster/ticket-purchase-orchestrator:$Tag",
-        "ticketremaster/qr-orchestrator:$Tag",
-        "ticketremaster/marketplace-orchestrator:$Tag",
-        "ticketremaster/transfer-orchestrator:$Tag",
-        "ticketremaster/ticket-verification-orchestrator:$Tag"
+        @{ Name = "ticketremaster/user-service"; Context = "."; Dockerfile = "services/user-service/Dockerfile"; ComponentPath = "services/user-service" },
+        @{ Name = "ticketremaster/venue-service"; Context = "services/venue-service"; ComponentPath = "services/venue-service" },
+        @{ Name = "ticketremaster/seat-service"; Context = "services/seat-service"; ComponentPath = "services/seat-service" },
+        @{ Name = "ticketremaster/event-service"; Context = "."; Dockerfile = "services/event-service/Dockerfile"; ComponentPath = "services/event-service" },
+        @{ Name = "ticketremaster/seat-inventory-service"; Context = "."; Dockerfile = "services/seat-inventory-service/Dockerfile"; ComponentPath = "services/seat-inventory-service" },
+        @{ Name = "ticketremaster/ticket-service"; Context = "."; Dockerfile = "services/ticket-service/Dockerfile"; ComponentPath = "services/ticket-service" },
+        @{ Name = "ticketremaster/ticket-log-service"; Context = "services/ticket-log-service"; ComponentPath = "services/ticket-log-service" },
+        @{ Name = "ticketremaster/marketplace-service"; Context = "services/marketplace-service"; ComponentPath = "services/marketplace-service" },
+        @{ Name = "ticketremaster/transfer-service"; Context = "services/transfer-service"; ComponentPath = "services/transfer-service" },
+        @{ Name = "ticketremaster/credit-transaction-service"; Context = "services/credit-transaction-service"; ComponentPath = "services/credit-transaction-service" },
+        @{ Name = "ticketremaster/stripe-wrapper"; Context = "services/stripe-wrapper"; ComponentPath = "services/stripe-wrapper" },
+        @{ Name = "ticketremaster/otp-wrapper"; Context = "services/otp-wrapper"; ComponentPath = "services/otp-wrapper" },
+        @{ Name = "ticketremaster/auth-orchestrator"; Context = "."; Dockerfile = "orchestrators/auth-orchestrator/Dockerfile"; ComponentPath = "orchestrators/auth-orchestrator" },
+        @{ Name = "ticketremaster/event-orchestrator"; Context = "."; Dockerfile = "orchestrators/event-orchestrator/Dockerfile"; ComponentPath = "orchestrators/event-orchestrator" },
+        @{ Name = "ticketremaster/credit-orchestrator"; Context = "orchestrators/credit-orchestrator"; ComponentPath = "orchestrators/credit-orchestrator" },
+        @{ Name = "ticketremaster/ticket-purchase-orchestrator"; Context = "."; Dockerfile = "orchestrators/ticket-purchase-orchestrator/Dockerfile"; ComponentPath = "orchestrators/ticket-purchase-orchestrator" },
+        @{ Name = "ticketremaster/qr-orchestrator"; Context = "orchestrators/qr-orchestrator"; ComponentPath = "orchestrators/qr-orchestrator" },
+        @{ Name = "ticketremaster/marketplace-orchestrator"; Context = "orchestrators/marketplace-orchestrator"; ComponentPath = "orchestrators/marketplace-orchestrator" },
+        @{ Name = "ticketremaster/transfer-orchestrator"; Context = "."; Dockerfile = "orchestrators/transfer-orchestrator/Dockerfile"; ComponentPath = "orchestrators/transfer-orchestrator" },
+        @{ Name = "ticketremaster/ticket-verification-orchestrator"; Context = "orchestrators/ticket-verification-orchestrator"; ComponentPath = "orchestrators/ticket-verification-orchestrator" }
     )
 }
 
-function Get-SourceHash {
-    $paths = @("services", "orchestrators") | ForEach-Object { Join-Path $repoRoot $_ }
-    $files = $paths | ForEach-Object {
-        Get-ChildItem -Path $_ -Recurse -File -Include "*.py","*.txt","Dockerfile" -ErrorAction SilentlyContinue
-    } | Sort-Object FullName
-    $combined = ($files | ForEach-Object { "$($_.FullName):$($_.LastWriteTimeUtc.Ticks)" }) -join "|"
-    return ([System.Security.Cryptography.MD5]::Create().ComputeHash(
+function Get-DesiredImages {
+    @(Get-ImageDefinitions | ForEach-Object { "$($_.Name):$Tag" })
+}
+
+function Get-TrackedFilesFromRelativePath {
+    param([Parameter(Mandatory)][string]$RelativePath)
+
+    $path = Join-Path $repoRoot $RelativePath
+    if (-not (Test-Path $path)) {
+        return @()
+    }
+
+    @(
+        Get-ChildItem -Path $path -Recurse -File -Include "*.py", "*.txt", "*.json", "*.yaml", "*.yml", "Dockerfile" -ErrorAction SilentlyContinue
+    )
+}
+
+function Get-ImageTrackedFiles {
+    param([Parameter(Mandatory)][hashtable]$Image)
+
+    $pathsToTrack = @($Image.ComponentPath)
+    $dockerfileRelativePath = if ($Image.ContainsKey("Dockerfile")) { $Image.Dockerfile } else { Join-Path $Image.ComponentPath "Dockerfile" }
+    $dockerfilePath = Join-Path $repoRoot $dockerfileRelativePath
+
+    if (Test-Path $dockerfilePath) {
+        $dockerfileContent = Get-Content $dockerfilePath -Raw
+        if ($dockerfileContent -match '(?im)^\s*COPY\s+shared[\\/]\s+') {
+            $pathsToTrack += "shared"
+        }
+    }
+
+    $files = @()
+    foreach ($relativePath in ($pathsToTrack | Select-Object -Unique)) {
+        $files += Get-TrackedFilesFromRelativePath -RelativePath $relativePath
+    }
+
+    if (Test-Path $dockerfilePath) {
+        $files += Get-Item $dockerfilePath
+    }
+
+    @($files | Sort-Object FullName -Unique)
+}
+
+function Get-FilesFingerprint {
+    param([System.IO.FileInfo[]]$Files)
+
+    $orderedFiles = @($Files | Sort-Object FullName -Unique)
+    if ($orderedFiles.Count -eq 0) {
+        return ""
+    }
+
+    $combined = ($orderedFiles | ForEach-Object { "$($_.FullName):$($_.LastWriteTimeUtc.Ticks)" }) -join "|"
+    ([System.Security.Cryptography.MD5]::Create().ComputeHash(
         [System.Text.Encoding]::UTF8.GetBytes($combined)
     ) | ForEach-Object { $_.ToString("x2") }) -join ''
+}
+
+function Get-ImageSourceHashes {
+    param([hashtable[]]$ImageDefinitions)
+
+    $hashes = @{}
+    foreach ($image in $ImageDefinitions) {
+        $files = Get-ImageTrackedFiles -Image $image
+        $hashes[$image.Name] = Get-FilesFingerprint -Files $files
+    }
+
+    $hashes
+}
+
+function Read-ImageHashState {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return @{}
+    }
+
+    try {
+        $raw = Get-Content $Path -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return @{}
+        }
+
+        $parsed = ConvertFrom-Json $raw
+        $hashes = @{}
+        foreach ($property in $parsed.PSObject.Properties) {
+            $hashes[$property.Name] = [string]$property.Value
+        }
+
+        return $hashes
+    } catch {
+        Write-Warn "Could not parse build hash state at $Path. Rebuilding changed images."
+        return @{}
+    }
+}
+
+function Write-ImageHashState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][hashtable]$Hashes
+    )
+
+    $json = $Hashes | ConvertTo-Json
+    Set-Content -Path $Path -Value $json
+}
+
+function Get-ChangedImageNames {
+    param(
+        [Parameter(Mandatory)][hashtable[]]$ImageDefinitions,
+        [Parameter(Mandatory)][hashtable]$CurrentHashes,
+        [Parameter(Mandatory)][hashtable]$PreviousHashes
+    )
+
+    $changed = @()
+    foreach ($image in $ImageDefinitions) {
+        $name = $image.Name
+        if (-not $PreviousHashes.ContainsKey($name) -or [string]$PreviousHashes[$name] -ne [string]$CurrentHashes[$name]) {
+            $changed += $name
+        }
+    }
+
+    $changed
+}
+
+function Get-ChangedImageNamesSinceTimestamp {
+    param(
+        [Parameter(Mandatory)][hashtable[]]$ImageDefinitions,
+        [Parameter(Mandatory)][DateTime]$TimestampUtc
+    )
+
+    $changed = @()
+    foreach ($image in $ImageDefinitions) {
+        $files = Get-ImageTrackedFiles -Image $image
+        $hasChanges = $false
+
+        foreach ($file in $files) {
+            if ($file.LastWriteTimeUtc -gt $TimestampUtc) {
+                $hasChanges = $true
+                break
+            }
+        }
+
+        if ($hasChanges) {
+            $changed += $image.Name
+        }
+    }
+
+    $changed
 }
 
 function Ensure-ImagesLoaded {
@@ -118,7 +256,8 @@ function Ensure-ImagesLoaded {
 
     if ($missingDockerImages.Count -gt 0) {
         Write-Warn "Building missing Docker images first"
-        & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag
+        $missingImageNames = @($missingDockerImages | ForEach-Object { ($_ -split ":", 2)[0] } | Select-Object -Unique)
+        & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag -Images $missingImageNames
         if ($LASTEXITCODE -ne 0) {
             throw "Docker image build failed."
         }
@@ -360,27 +499,63 @@ if ($PublicOnly -and -not $RunPublicTests) {
     throw "PublicOnly requires RunPublicTests."
 }
 
-# ── Auto-rebuild if source files have changed since last build ───────────────
-$hashFile = Join-Path $repoRoot ".build-hash"
-$currentHash = Get-SourceHash
-$needsRebuild = $true
-if (Test-Path $hashFile) {
-    $lastHash = Get-Content $hashFile -Raw
-    if ($lastHash.Trim() -eq $currentHash) { $needsRebuild = $false }
+# ── Auto-rebuild only changed service/orchestrator images ─────────────────────
+$imageDefinitions = Get-ImageDefinitions
+$imageHashFile = Join-Path $repoRoot ".build-hashes.json"
+$legacyHashFile = Join-Path $repoRoot ".build-hash"
+$currentImageHashes = Get-ImageSourceHashes -ImageDefinitions $imageDefinitions
+$previousImageHashes = Read-ImageHashState -Path $imageHashFile
+$hasImageHashState = @($previousImageHashes.Keys).Count -gt 0
+$changedImageNames = @()
+
+if ($hasImageHashState) {
+    $changedImageNames = Get-ChangedImageNames -ImageDefinitions $imageDefinitions -CurrentHashes $currentImageHashes -PreviousHashes $previousImageHashes
+} elseif (Test-Path $legacyHashFile) {
+    $legacyTimestampUtc = (Get-Item $legacyHashFile).LastWriteTimeUtc
+    $changedImageNames = Get-ChangedImageNamesSinceTimestamp -ImageDefinitions $imageDefinitions -TimestampUtc $legacyTimestampUtc
+} else {
+    # First run with no prior hash state: build all images once.
+    $changedImageNames = @($imageDefinitions | ForEach-Object { $_.Name })
 }
 
+$needsRebuild = $changedImageNames.Count -gt 0
+
 if ($needsRebuild -and -not $SkipImageLoad) {
-    Write-Step "Source changes detected - rebuilding Docker images"
-    & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag
-    if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
-    foreach ($image in (Get-DesiredImages)) {
-        Write-Host "    Loading $image"
-        & minikube image load $image
+    Write-Step "Source changes detected - rebuilding changed Docker images ($($changedImageNames.Count))"
+    foreach ($imageName in $changedImageNames) {
+        Write-Host "    $($imageName):$Tag"
     }
-    $currentHash | Set-Content $hashFile
+
+    & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag -Images $changedImageNames
+    if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
+
+    foreach ($imageName in $changedImageNames) {
+        $imageTag = "$($imageName):$Tag"
+        Write-Host "    Loading $imageTag"
+        Invoke-External -Command "minikube" -Arguments @("image", "load", $imageTag) -ErrorMessage "Failed to load $imageTag into Minikube."
+    }
+
+    Write-ImageHashState -Path $imageHashFile -Hashes $currentImageHashes
     Write-OK "Rebuild complete"
 } elseif (-not $needsRebuild) {
     Write-OK "No source changes detected - skipping rebuild"
+
+    # Migrate legacy/global hash state to per-image hash state when clean.
+    if (-not $hasImageHashState) {
+        Write-ImageHashState -Path $imageHashFile -Hashes $currentImageHashes
+    }
+}
+
+function Restart-Deployments {
+    param(
+        [Parameter(Mandatory)][string]$Namespace,
+        [Parameter(Mandatory)][string[]]$Names
+    )
+
+    foreach ($name in @($Names | Where-Object { $_ } | Select-Object -Unique)) {
+        Write-Host "    Restarting deployment/$name..."
+        Invoke-External -Command "kubectl" -Arguments @("rollout", "restart", "deployment/$name", "-n", $Namespace) -ErrorMessage "Failed to restart deployment/$name in $Namespace."
+    }
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -407,11 +582,13 @@ Write-Step "Applying k8s manifests"
 Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed."
 Write-OK "Manifests applied"
 
-Write-Step "Restarting all workloads"
-Restart-StatefulSets -Namespace "ticketremaster-data"
-& kubectl rollout restart deployment -n ticketremaster-core 2>&1 | Out-Null
-& kubectl rollout restart deployment -n ticketremaster-edge 2>&1 | Out-Null
-Write-OK "Restart triggered"
+if ($needsRebuild) {
+    Write-Step "Restarting changed application deployments"
+    Restart-Deployments -Namespace "ticketremaster-core" -Names $changedImageNames
+    Write-OK "Changed deployments restarted"
+} else {
+    Write-OK "No workload restart needed"
+}
 
 Write-Step "Waiting for data plane statefulsets"
 Wait-StatefulSetsReady -Namespace "ticketremaster-data"

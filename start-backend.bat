@@ -64,7 +64,7 @@ echo [3/5] Checking Docker Desktop...
 call :require_command docker "Docker CLI"
 if errorlevel 1 goto fail
 docker info >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo Docker Desktop is not running. Starting it...
     if exist "C:\Program Files\Docker\Docker\Docker Desktop.exe" (
         start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe"
@@ -72,7 +72,7 @@ if %errorlevel% neq 0 (
         timeout /t 30 /nobreak >nul
         docker info >nul 2>&1
     )
-    if %errorlevel% neq 0 (
+    if errorlevel 1 (
         echo ERROR: Docker Desktop failed to start. Start it manually and run start-backend.bat again.
         pause
         exit /b 1
@@ -85,10 +85,10 @@ echo [4/5] Checking Minikube...
 call :require_command minikube "Minikube CLI"
 if errorlevel 1 goto fail
 minikube status >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo Starting Minikube...
     minikube start
-    if %errorlevel% neq 0 (
+    if errorlevel 1 (
         echo ERROR: Minikube failed to start.
         pause
         exit /b 1
