@@ -24,6 +24,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Tag = "local-k8s-20260329"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "db_snapshot_common.ps1")
 $script:LocalGatewayStateFile = Join-Path $repoRoot ".local-gateway-url"
 $script:LocalGatewayPort = 8000
 $script:LocalGatewayUrl = "http://localhost:8000"
@@ -626,11 +627,21 @@ try {
 }
 
 if ($eventsCount -eq 0) {
-    Write-Warn "Event data missing (DB was likely wiped on restart). Re-running seed jobs..."
-    & kubectl delete job seed-venues seed-events seed-seats seed-seat-inventory seed-users -n ticketremaster-core 2>&1 | Out-Null
-    Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed during reseed."
-    Wait-JobsComplete -Namespace "ticketremaster-core"
-    Write-OK "Reseed completed"
+    $snapshotPath = Get-DefaultSnapshotDirectory -RepoRoot $repoRoot
+    if (Test-DbSnapshotAvailable -SnapshotPath $snapshotPath) {
+        Write-Warn "Event data missing (DB was likely wiped on restart). Restoring repo snapshot from $snapshotPath..."
+        & (Join-Path $PSScriptRoot "restore_k8s_db_snapshots.ps1") -SnapshotPath $snapshotPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Snapshot restore failed."
+        }
+        Write-OK "Snapshot restored and seed jobs replayed"
+    } else {
+        Write-Warn "Event data missing (DB was likely wiped on restart). Re-running seed jobs..."
+        & kubectl delete job seed-venues seed-events seed-seats seed-seat-inventory seed-users -n ticketremaster-core 2>&1 | Out-Null
+        Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed during reseed."
+        Wait-JobsComplete -Namespace "ticketremaster-core"
+        Write-OK "Reseed completed"
+    }
 } else {
     Write-OK "Seed data verified ($eventsCount events present)"
 }

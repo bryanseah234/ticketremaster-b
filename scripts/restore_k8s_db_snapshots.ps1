@@ -1,0 +1,54 @@
+param(
+    [string]$SnapshotPath,
+    [switch]$SkipSeedJobs
+)
+
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "db_snapshot_common.ps1")
+
+if (-not $SnapshotPath) {
+    $SnapshotPath = Get-DefaultSnapshotDirectory -RepoRoot $repoRoot
+}
+
+if (-not (Test-Path $SnapshotPath)) {
+    throw "Snapshot path not found: $SnapshotPath"
+}
+
+$targets = Get-DbSnapshotTargets
+$restoredCount = 0
+
+foreach ($target in $targets) {
+    $dumpPath = Join-Path $SnapshotPath $target.FileName
+    if (-not (Test-Path $dumpPath)) {
+        Write-Warning "Skipping $($target.Name) because $dumpPath is missing."
+        continue
+    }
+
+    $remotePath = "/tmp/$($target.FileName)"
+    Write-Host "Restoring $($target.Name) ($($target.Database)) from $dumpPath"
+
+    & kubectl cp $dumpPath "$($target.Namespace)/$($target.Pod):$remotePath" -c postgres
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to copy dump for $($target.Name)"
+    }
+
+    & kubectl exec -n $target.Namespace $target.Pod -c postgres -- sh -lc "export PGPASSWORD=`"`$POSTGRES_PASSWORD`"; psql -v ON_ERROR_STOP=1 -U `"`$POSTGRES_USER`" -d `"`$POSTGRES_DB`" -f $remotePath"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to restore $($target.Name)"
+    }
+
+    & kubectl exec -n $target.Namespace $target.Pod -c postgres -- rm -f $remotePath | Out-Null
+    $restoredCount += 1
+}
+
+Write-Host ""
+Write-Host "Restore complete. Restored $restoredCount database dump(s)."
+
+if (-not $SkipSeedJobs) {
+    Write-Host "Re-running seed jobs to backfill any baseline rows missing from the snapshot..."
+    & (Join-Path $PSScriptRoot "rerun_k8s_seeds.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Seed replay failed after restore."
+    }
+}

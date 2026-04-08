@@ -336,6 +336,28 @@ Use this only if you want to bring up the localhost stack without `start-backend
    .\scripts\rerun_k8s_seeds.ps1
    ```
 
+### Persisting Local Database State
+
+If you want your local cluster data to survive a Minikube restart or PVC loss, keep a repo-local SQL snapshot of all 10 Postgres databases.
+
+Create or refresh the snapshot:
+
+```powershell
+.\scripts\backup_k8s_db_snapshots.ps1
+```
+
+That writes SQL dumps to `db-snapshots/k8s/latest/`. Those files live inside the repo, so you can keep them locally or commit them if this is demo-only data that you intentionally want to recover later.
+
+Restore the snapshot into a rebuilt cluster:
+
+```powershell
+.\scripts\restore_k8s_db_snapshots.ps1
+```
+
+The restore script reloads every Postgres database dump, then reruns the existing seed jobs so only baseline rows that are still missing get added back.
+
+The automated startup flow now also checks `db-snapshots/k8s/latest/` when it detects wiped database state. If a snapshot exists, it restores that first and only falls back to plain reseeding when no snapshot is available.
+
 8. Open the localhost gateway:
 
    ```powershell
@@ -609,7 +631,19 @@ Use `minikube delete` if you want a completely fresh start or if you're having p
 
 Cause: Minikube's persistent volumes were wiped and the cluster no longer has the expected seed data.
 
-If you use the automated startup flow (`.\start-backend.bat` or `.\scripts\start_k8s.ps1`), it will try to detect missing seed data and reseed automatically.
+If you use the automated startup flow (`.\start-backend.bat` or `.\scripts\start_k8s.ps1`), it now tries to detect missing seed data and restore `db-snapshots/k8s/latest/` first. If no repo snapshot exists, it falls back to reseeding automatically.
+
+If you want to keep your local state between cluster rebuilds, take a fresh snapshot before shutting down:
+
+```powershell
+.\scripts\backup_k8s_db_snapshots.ps1
+```
+
+To restore that state later:
+
+```powershell
+.\scripts\restore_k8s_db_snapshots.ps1
+```
 
 If you need to reseed manually, run:
 
@@ -637,6 +671,18 @@ minikube start
 ```
 
 Then rerun the normal startup flow.
+
+### Notes About Seeding Safety
+
+The committed seed jobs already work in a missing-row-only style for the baseline reference data:
+
+- venues are keyed by fixed `venueId` values like `ven_001`
+- events are keyed by fixed `eventId` values like `evt_001`
+- seats are backfilled only when a `(venueId, seatNumber)` pair is missing
+- seat inventory is backfilled only when an `(eventId, seatId)` pair is missing
+- demo users are skipped when the seeded email already exists
+
+Most business tables in this repo also use string or UUID primary keys instead of integer autoincrement keys, so replaying seeds after a snapshot restore does not create the usual sequence drift problems you would expect from serial IDs.
 
 **Issue: Out of disk space**
 
