@@ -95,18 +95,21 @@ def test_initiate_success(mock_credit, mock_svc, mock_enrich, mock_notify, mock_
     mock_svc.side_effect = [
         (MOCK_LISTING, None),
         ({"transferId": "txr_001", "status": "pending_seller_acceptance"}, None),
+        (MOCK_BUYER_USER, None),
+        ({"sid": "VE_buyer"}, None),
+        (None, None),
     ]
     mock_enrich.return_value = {
         "transferId": "txr_001",
         "listingId": "lst_001",
-        "status": "pending_seller_acceptance",
+        "status": "pending_buyer_otp",
         "eventName": "Symphony Night",
     }
     res = client.post("/transfer/initiate", json={"listingId": "lst_001"}, headers=_auth(BUYER))
     assert res.status_code == 201
-    assert res.get_json()["data"]["status"] == "pending_seller_acceptance"
+    assert res.get_json()["data"]["status"] == "pending_buyer_otp"
     assert res.get_json()["data"]["eventName"] == "Symphony Night"
-    mock_notify.assert_called_once_with("txr_001", SELLER)
+    mock_notify.assert_not_called()
     mock_timeout.assert_called_once_with("txr_001", "lst_001", BUYER, SELLER)
     mock_broadcast.assert_called_once()
     assert mock_broadcast.call_args.args[0] == "transfer_initiated"
@@ -148,69 +151,44 @@ def test_initiate_no_listing_id(client):
 
 # ── POST /transfer/<id>/buyer-verify ─────────────────────────────────────────
 
-@patch("routes._build_transfer_notification_payload", return_value={
-    "transferId": "txr_001",
-    "ticketId": "tkt_001",
-    "eventName": "Symphony Night",
-    "event": {"id": "evt_001", "name": "Symphony Night"},
-})
-@patch("routes._broadcast_notification")
-@patch("routes.call_credit_service")
+@patch("routes._broadcast_transfer_notification")
+@patch("routes._publish_seller_notification")
+@patch("routes._load_enriched_transfer")
 @patch("routes.call_service")
-def test_buyer_verify_success(mock_svc, mock_credit, mock_broadcast, _mock_payload, client):
+def test_buyer_verify_success(mock_svc, mock_load_transfer, mock_notify, mock_broadcast, client):
     transfer = {
         **MOCK_TRANSFER,
         "status": "pending_buyer_otp",
         "buyerOtpVerified": False,
-        "sellerOtpVerified": True,
+        "sellerOtpVerified": False,
         "buyerVerificationSid": "VE_buyer",
+        "sellerVerificationSid": None,
+    }
+    mock_load_transfer.return_value = {
+        **transfer,
+        "buyerOtpVerified": True,
         "sellerVerificationSid": "VE_seller",
+        "status": "pending_seller_otp",
+        "eventName": "Symphony Night",
     }
     mock_svc.side_effect = [
-        (transfer, None),                   # GET transfer
-        (MOCK_BUYER_USER, None),           # GET buyer
-        ({"verified": True}, None),         # POST otp/verify
-        (None, None),                       # PATCH buyerOtpVerified
-        (MOCK_LISTING, None),               # GET listing
-        (None, None),                       # PATCH ticket
-        (None, None),                       # PATCH listing
-        (None, None),                       # PATCH transfer completed
-        (None, None),                       # POST buyer txn
-        (None, None),                       # POST seller txn
-        (
-            {
-                **transfer,
-                "ticketId": "tkt_001",
-                "status": "completed",
-                "buyerOtpVerified": True,
-                "sellerOtpVerified": True,
-                "completedAt": "2026-04-08T11:00:00+00:00",
-            },
-            None,
-        ),                                  # GET transfer after completion
-        (MOCK_SELLER_USER, None),           # GET seller
-        (MOCK_BUYER_USER, None),            # GET buyer
-        (MOCK_LISTING, None),               # GET listing (enrich)
-        (MOCK_TICKET, None),                # GET ticket
-        (MOCK_EVENT, None),                 # GET event
-        (MOCK_VENUE, None),                 # GET venue
-        (MOCK_INVENTORY, None),             # GET inventory
-        (MOCK_SEATS, None),                 # GET seats
-    ]
-    mock_credit.side_effect = [
-        ({"creditBalance": 200.0}, None),   # GET buyer balance
-        ({"creditBalance": 50.0}, None),    # GET seller balance
-        ({}, None),                         # PATCH buyer deduct
-        ({}, None),                         # PATCH seller credit
+        (transfer, None),          # GET transfer
+        (MOCK_BUYER_USER, None),   # GET buyer
+        ({"verified": True}, None),# POST otp/verify
+        (None, None),              # PATCH buyerOtpVerified
+        (MOCK_SELLER_USER, None),  # GET seller
+        ({"sid": "VE_seller"}, None), # POST otp/send
+        (None, None),              # PATCH transfer pending_seller_otp
     ]
     res = client.post("/transfer/txr_001/buyer-verify",
                       json={"otp": "123456"}, headers=_auth(BUYER))
     assert res.status_code == 200
-    assert res.get_json()["data"]["status"] == "completed"
-    assert res.get_json()["data"]["ticket"]["newOwnerId"] == BUYER
-    assert res.get_json()["data"]["sellerOtpVerified"] is True
+    assert res.get_json()["data"]["status"] == "pending_seller_otp"
     assert res.get_json()["data"]["buyerOtpVerified"] is True
-    assert [call.args[0] for call in mock_broadcast.call_args_list] == ["transfer_update", "ticket_update"]
+    assert res.get_json()["data"]["sellerVerificationSid"] == "VE_seller"
+    mock_notify.assert_called_once_with("txr_001", SELLER)
+    mock_broadcast.assert_called_once()
+    assert mock_broadcast.call_args.args[0] == "buyer_verified"
 
 
 @patch("routes.call_service")
@@ -235,12 +213,11 @@ def test_buyer_verify_wrong_status(mock_svc, client):
 
 
 @patch("routes.call_service")
-def test_buyer_verify_requires_seller_verification(mock_svc, client):
+def test_buyer_verify_requires_buyer_sid(mock_svc, client):
     transfer = {
         **MOCK_TRANSFER,
         "status": "pending_buyer_otp",
-        "sellerOtpVerified": False,
-        "buyerVerificationSid": "VE_buyer",
+        "buyerVerificationSid": None,
     }
     mock_svc.return_value = (transfer, None)
     res = client.post("/transfer/txr_001/buyer-verify",
@@ -309,49 +286,67 @@ def test_seller_accept_wrong_status(mock_svc, client):
 
 # ── POST /transfer/<id>/seller-verify — happy path ───────────────────────────
 
-@patch("routes._broadcast_transfer_notification")
+@patch("routes._build_transfer_notification_payload", return_value={
+    "transferId": "txr_001",
+    "ticketId": "tkt_001",
+    "eventName": "Symphony Night",
+    "event": {"id": "evt_001", "name": "Symphony Night"},
+})
+@patch("routes._broadcast_notification")
+@patch("routes.call_credit_service")
 @patch("routes.call_service")
-def test_seller_verify_success(mock_svc, mock_broadcast, client):
+def test_seller_verify_success(mock_svc, mock_credit, mock_broadcast, _mock_payload, client):
     transfer = {
         **MOCK_TRANSFER,
         "status": "pending_seller_otp",
         "sellerOtpVerified": False,
         "sellerVerificationSid": "VE_seller",
-        "buyerOtpVerified": False,
+        "buyerOtpVerified": True,
     }
     mock_svc.side_effect = [
-        (transfer, None),
-        (MOCK_SELLER_USER, None),
-        ({"verified": True}, None),
-        (MOCK_BUYER_USER, None),
-        ({"sid": "VE_buyer"}, None),
-        (None, None),
+        (transfer, None),                   # GET transfer
+        (MOCK_SELLER_USER, None),           # GET seller
+        ({"verified": True}, None),         # POST otp/verify
+        (None, None),                       # PATCH sellerOtpVerified
+        (MOCK_LISTING, None),               # GET listing
+        (None, None),                       # POST buyer txn
+        (None, None),                       # POST seller txn
+        (None, None),                       # PATCH ticket
+        (None, None),                       # PATCH listing
+        (None, None),                       # PATCH transfer completed
         (
             {
                 **transfer,
-                "status": "pending_buyer_otp",
+                "ticketId": "tkt_001",
+                "status": "completed",
+                "buyerOtpVerified": True,
                 "sellerOtpVerified": True,
-                "buyerVerificationSid": "VE_buyer",
+                "completedAt": "2026-04-08T11:00:00+00:00",
             },
             None,
-        ),
-        (MOCK_SELLER_USER, None),
-        (MOCK_BUYER_USER, None),
-        (MOCK_LISTING, None),
-        (MOCK_TICKET, None),
-        (MOCK_EVENT, None),
-        (MOCK_VENUE, None),
-        (MOCK_INVENTORY, None),
-        (MOCK_SEATS, None),
+        ),                                  # GET transfer after completion
+        (MOCK_SELLER_USER, None),           # GET seller
+        (MOCK_BUYER_USER, None),            # GET buyer
+        (MOCK_LISTING, None),               # GET listing (enrich)
+        (MOCK_TICKET, None),                # GET ticket
+        (MOCK_EVENT, None),                 # GET event
+        (MOCK_VENUE, None),                 # GET venue
+        (MOCK_INVENTORY, None),             # GET inventory
+        (MOCK_SEATS, None),                 # GET seats
+    ]
+    mock_credit.side_effect = [
+        ({"creditBalance": 200.0}, None),   # GET buyer balance
+        ({"creditBalance": 50.0}, None),    # GET seller balance
+        ({}, None),                         # PATCH buyer deduct
+        ({}, None),                         # PATCH seller credit
     ]
     res = client.post("/transfer/txr_001/seller-verify",
                       json={"otp": "654321"}, headers=_auth(SELLER))
     assert res.status_code == 200
-    assert res.get_json()["data"]["status"] == "pending_buyer_otp"
+    assert res.get_json()["data"]["status"] == "completed"
     assert res.get_json()["data"]["sellerOtpVerified"] is True
-    assert res.get_json()["data"]["buyerVerificationSid"] == "VE_buyer"
-    mock_broadcast.assert_called_once()
-    assert mock_broadcast.call_args.args[0] == "seller_verified"
+    assert res.get_json()["data"]["ticket"]["newOwnerId"] == BUYER
+    assert [call.args[0] for call in mock_broadcast.call_args_list] == ["transfer_update", "ticket_update"]
 
 
 # ── POST /transfer/<id>/seller-verify — failure scenarios ────────────────────
@@ -372,48 +367,46 @@ def test_seller_verify_wrong_otp(mock_svc, client):
 
 @patch("routes.call_credit_service")
 @patch("routes.call_service")
-def test_buyer_verify_insufficient_credits_at_execution(mock_svc, mock_credit, client):
-    """Buyer drained credits between initiation and execution."""
+def test_seller_verify_insufficient_credits_at_execution(mock_svc, mock_credit, client):
+    """Buyer drained credits between buyer OTP and seller completion."""
     transfer = {
         **MOCK_TRANSFER,
-        "status": "pending_buyer_otp",
-        "buyerOtpVerified": False,
-        "sellerOtpVerified": True,
-        "buyerVerificationSid": "VE_buyer",
+        "status": "pending_seller_otp",
+        "buyerOtpVerified": True,
+        "sellerOtpVerified": False,
         "sellerVerificationSid": "VE_seller",
     }
     mock_svc.side_effect = [
         (transfer, None),           # GET transfer
-        (MOCK_BUYER_USER, None),    # GET buyer
+        (MOCK_SELLER_USER, None),   # GET seller
         ({"verified": True}, None), # POST otp/verify
-        (None, None),               # PATCH buyerOtpVerified
+        (None, None),               # PATCH sellerOtpVerified
         (MOCK_LISTING, None),       # GET listing
         (None, None),               # PATCH transfer → failed  ← this was missing
     ]
     mock_credit.return_value = ({"creditBalance": 5.0}, None)   # insufficient now
-    res = client.post("/transfer/txr_001/buyer-verify",
-                      json={"otp": "123456"}, headers=_auth(BUYER))
+    res = client.post("/transfer/txr_001/seller-verify",
+                      json={"otp": "654321"}, headers=_auth(SELLER))
     assert res.status_code == 402
     assert res.get_json()["error"]["code"] == "INSUFFICIENT_CREDITS"
 
 
 @patch("routes.call_credit_service")
 @patch("routes.call_service")
-def test_buyer_verify_saga_compensation_on_failure(mock_svc, mock_credit, client):
+def test_seller_verify_saga_compensation_on_failure(mock_svc, mock_credit, client):
     """If saga fails after credits deducted, OutSystems balances must be restored."""
     transfer = {
         **MOCK_TRANSFER,
-        "status": "pending_buyer_otp",
-        "buyerOtpVerified": False,
-        "sellerOtpVerified": True,
-        "buyerVerificationSid": "VE_buyer",
+        "status": "pending_seller_otp",
+        "buyerOtpVerified": True,
+        "sellerOtpVerified": False,
         "sellerVerificationSid": "VE_seller",
     }
     mock_svc.side_effect = [
         (transfer, None),
-        (MOCK_BUYER_USER, None),
+        (MOCK_SELLER_USER, None),
         ({"verified": True}, None),
-        (None, None),           # PATCH buyerOtpVerified
+        (None, None),           # PATCH sellerOtpVerified
         (MOCK_LISTING, None),   # GET listing
         Exception("ticket service down"),   # step 5 fails
     ]
@@ -425,8 +418,8 @@ def test_buyer_verify_saga_compensation_on_failure(mock_svc, mock_credit, client
         ({}, None),                         # COMP: restore seller
         ({}, None),                         # COMP: restore buyer
     ]
-    res = client.post("/transfer/txr_001/buyer-verify",
-                      json={"otp": "123456"}, headers=_auth(BUYER))
+    res = client.post("/transfer/txr_001/seller-verify",
+                      json={"otp": "654321"}, headers=_auth(SELLER))
     assert res.status_code == 500
     assert res.get_json()["error"]["code"] == "INTERNAL_ERROR"
     # 4 credit calls: 2 deduct/credit + 2 compensations
@@ -506,9 +499,10 @@ def test_cancel_completed_transfer(mock_svc, client):
 
 @patch("routes.call_service")
 def test_get_pending_transfers_enriched(mock_svc, client):
-    pending = [{**MOCK_TRANSFER, "status": "pending_seller_acceptance"}]
+    pending = [{**MOCK_TRANSFER, "status": "pending_seller_otp", "buyerOtpVerified": True, "sellerVerificationSid": "VE_seller"}]
     mock_svc.side_effect = [
         ({"transfers": pending}, None),
+        ({"transfers": []}, None),
         (MOCK_LISTING, None),
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),

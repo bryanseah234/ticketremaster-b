@@ -3,13 +3,13 @@ Transfer Orchestrator routes.
 
 P2P transfer flow:
   POST /transfer/initiate            buyer initiates
-  POST /transfer/<id>/seller-accept  seller accepts → seller OTP sent
-  POST /transfer/<id>/seller-verify  seller submits OTP → buyer OTP sent
-  POST /transfer/<id>/buyer-verify   buyer submits OTP → saga executes
+  POST /transfer/<id>/buyer-verify   buyer submits OTP → seller OTP sent
+  POST /transfer/<id>/seller-verify  seller submits OTP → saga executes
+  POST /transfer/<id>/seller-accept  legacy seller acceptance → seller OTP sent
   GET  /transfer/<id>                poll status (buyer or seller)
   POST /transfer/<id>/cancel         cancel in-progress transfer
 
-Saga on buyer-verify:
+Saga on seller-verify:
   1. Deduct buyer credits (OutSystems)     COMP: restore buyer
   2. Credit seller (OutSystems)            COMP: restore buyer + seller
   3. Log buyer credit txn
@@ -565,7 +565,19 @@ def initiate():
     if err:
         return _error("INTERNAL_ERROR", "Could not create transfer record.", 500)
 
-    _publish_seller_notification(transfer["transferId"], seller_id)
+    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{buyer_id}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve buyer details.", 503)
+
+    buyer_otp, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                  json={"phoneNumber": buyer["phoneNumber"]})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not send OTP to buyer.", 503)
+
+    call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer['transferId']}", json={
+        "buyerVerificationSid": buyer_otp["sid"],
+        "status":               "pending_buyer_otp",
+    })
     
     # Schedule timeout for auto-cancellation
     _publish_transfer_timeout(
@@ -580,7 +592,7 @@ def initiate():
         "transferId": transfer["transferId"],
         "buyerId": buyer_id,
         "sellerId": seller_id,
-        "status": "pending_seller_acceptance",
+        "status": "pending_buyer_otp",
     })
 
     initiated_transfer = _enrich_transfer({
@@ -589,14 +601,15 @@ def initiate():
         "buyerId": buyer_id,
         "sellerId": seller_id,
         "creditAmount": credit_amount,
-        "status": "pending_seller_acceptance",
+        "buyerVerificationSid": buyer_otp["sid"],
+        "status": "pending_buyer_otp",
     })
 
     return jsonify({"data": {
         **initiated_transfer,
         "transferId": transfer["transferId"],
-        "status": "pending_seller_acceptance",
-        "message": "Request sent to seller. Pending acceptance.",
+        "status": "pending_buyer_otp",
+        "message": "Buyer OTP sent. Verify your identity to continue the transfer.",
     }}), 201
 
 
@@ -629,7 +642,7 @@ def buyer_verify(transfer_id):
               example: "123456"
     responses:
       200:
-        description: Transfer completed — ticket ownership transferred
+        description: Buyer verified — seller OTP sent and seller notified
       400:
         description: Invalid OTP or wrong transfer status
       401:
@@ -651,7 +664,6 @@ def buyer_verify(transfer_id):
     if (
         transfer["status"] != "pending_buyer_otp"
         or transfer.get("buyerOtpVerified")
-        or not transfer.get("sellerOtpVerified")
         or not transfer.get("buyerVerificationSid")
     ):
         return _error("VALIDATION_ERROR", "Transfer is not awaiting buyer OTP.", 400)
@@ -673,82 +685,43 @@ def buyer_verify(transfer_id):
     })
 
     seller_id = transfer["sellerId"]
-    credit_amount = transfer["creditAmount"]
-
-    listing, _ = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}")
-    ticket_id = listing["ticketId"] if listing else None
-
-    buyer_credit, err = call_credit_service("GET", f"/credits/{buyer_id}")
+    seller, err = call_service("GET", f"{USER_SERVICE}/users/{seller_id}")
     if err:
-        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
-        return _error("SERVICE_UNAVAILABLE", "Could not verify buyer balance.", 503)
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve seller details.", 503)
 
-    buyer_balance = _get_credit_balance(buyer_credit)
-    if buyer_balance < credit_amount:
-        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
-        return _error("INSUFFICIENT_CREDITS", "Buyer no longer has sufficient credits.", 402)
+    seller_otp, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                   json={"phoneNumber": seller["phoneNumber"]})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not send OTP to seller.", 503)
 
-    seller_credit, seller_err = call_credit_service("GET", f"/credits/{seller_id}")
-    seller_balance = _get_credit_balance(seller_credit) if not seller_err and seller_credit else 0.0
+    call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
+        "buyerOtpVerified":     True,
+        "sellerVerificationSid": seller_otp["sid"],
+        "status":               "pending_seller_otp",
+    })
 
-    try:
-        _execute_saga(
-            transfer_id=transfer_id,
-            buyer_id=buyer_id,
-            seller_id=seller_id,
-            credit_amount=credit_amount,
-            ticket_id=ticket_id,
-            listing_id=transfer["listingId"],
-            buyer_balance=buyer_balance,
-            seller_balance=seller_balance,
-        )
-
-        completed_transfer = {
-            "transferId": transfer_id,
-            "listingId": transfer["listingId"],
-            "buyerId": buyer_id,
-            "sellerId": seller_id,
-            "ticketId": ticket_id,
-            "status": "completed",
-        }
-
-        transfer_payload = _build_transfer_notification_payload("transfer_completed", completed_transfer)
-        _broadcast_notification("transfer_update", transfer_payload)
-
-        ticket_payload = {
-            "eventType": "ticket_transferred",
-            "ticketId": ticket_id,
-            "ownerId": buyer_id,
-            "previousOwnerId": seller_id,
-            "transferId": transfer_id,
-            "event": transfer_payload.get("event"),
-            "eventName": transfer_payload.get("eventName"),
-        }
-        _broadcast_notification(
-            "ticket_update",
-            {key: value for key, value in ticket_payload.items() if value is not None},
-        )
-    except Exception:
-        return _error("INTERNAL_ERROR", "Transfer failed — no credits were charged.", 500)
-
-    completed_at = datetime.now(timezone.utc).isoformat()
     updated_transfer = _load_enriched_transfer(transfer_id, {
         **transfer,
         "buyerId": buyer_id,
         "sellerId": seller_id,
-        "ticketId": ticket_id,
         "buyerOtpVerified": True,
-        "sellerOtpVerified": True,
-        "status": "completed",
-        "completedAt": completed_at,
+        "sellerVerificationSid": seller_otp["sid"],
+        "status": "pending_seller_otp",
+    })
+
+    _publish_seller_notification(transfer_id, seller_id)
+    _broadcast_transfer_notification("buyer_verified", {
+        "transferId": transfer_id,
+        "buyerId": buyer_id,
+        "sellerId": seller_id,
+        "status": "pending_seller_otp",
     })
 
     return jsonify({"data": {
         **(updated_transfer or {}),
-        "transferId":  transfer_id,
-        "status":      "completed",
-        "completedAt": (updated_transfer or {}).get("completedAt", completed_at),
-        "ticket": {"ticketId": ticket_id, "newOwnerId": buyer_id, "status": "active"},
+        "transferId": transfer_id,
+        "status":     "pending_seller_otp",
+        "message":    "Buyer verified. OTP sent to seller.",
     }}), 200
 
 
@@ -905,7 +878,7 @@ def seller_reject(transfer_id):
 @require_auth
 def seller_verify(transfer_id):
     """
-    Seller submits OTP — unlocks buyer OTP verification
+    Seller submits OTP — completes the transfer
     ---
     tags:
       - Transfer
@@ -928,7 +901,7 @@ def seller_verify(transfer_id):
               example: "654321"
     responses:
       200:
-        description: Seller verified — status moves to pending_buyer_otp
+        description: Transfer completed — ticket ownership transferred
       400:
         description: Invalid OTP or wrong transfer status
       401:
@@ -949,7 +922,12 @@ def seller_verify(transfer_id):
         return _error("TRANSFER_NOT_FOUND", "Transfer not found.", 404)
     if transfer["sellerId"] != seller_id:
         return _error("AUTH_FORBIDDEN", "Access denied.", 403)
-    if transfer["status"] != "pending_seller_otp" or transfer.get("sellerOtpVerified"):
+    if (
+        transfer["status"] != "pending_seller_otp"
+        or transfer.get("sellerOtpVerified")
+        or not transfer.get("buyerOtpVerified")
+        or not transfer.get("sellerVerificationSid")
+    ):
         return _error("VALIDATION_ERROR", "Transfer is not awaiting seller OTP.", 400)
 
     seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
@@ -964,39 +942,87 @@ def seller_verify(transfer_id):
     if err or not verify.get("verified"):
         return _error("VALIDATION_ERROR", "OTP is incorrect or has expired.", 400)
 
-    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
-    if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not retrieve buyer details.", 503)
-
-    buyer_otp, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
-                                  json={"phoneNumber": buyer["phoneNumber"]})
-    if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not send OTP to buyer.", 503)
-
     call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
-        "sellerOtpVerified":     True,
-        "buyerVerificationSid":  buyer_otp["sid"],
-        "status":                "pending_buyer_otp",
+        "sellerOtpVerified": True,
     })
+
+    buyer_id = transfer["buyerId"]
+    credit_amount = transfer["creditAmount"]
+
+    listing, _ = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}")
+    ticket_id = listing["ticketId"] if listing else None
+
+    buyer_credit, err = call_credit_service("GET", f"/credits/{buyer_id}")
+    if err:
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
+        return _error("SERVICE_UNAVAILABLE", "Could not verify buyer balance.", 503)
+
+    buyer_balance = _get_credit_balance(buyer_credit)
+    if buyer_balance < credit_amount:
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
+        return _error("INSUFFICIENT_CREDITS", "Buyer no longer has sufficient credits.", 402)
+
+    seller_credit, seller_err = call_credit_service("GET", f"/credits/{seller_id}")
+    seller_balance = _get_credit_balance(seller_credit) if not seller_err and seller_credit else 0.0
+
+    try:
+        _execute_saga(
+            transfer_id=transfer_id,
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            credit_amount=credit_amount,
+            ticket_id=ticket_id,
+            listing_id=transfer["listingId"],
+            buyer_balance=buyer_balance,
+            seller_balance=seller_balance,
+        )
+
+        completed_transfer = {
+            "transferId": transfer_id,
+            "listingId": transfer["listingId"],
+            "buyerId": buyer_id,
+            "sellerId": seller_id,
+            "ticketId": ticket_id,
+            "status": "completed",
+        }
+
+        transfer_payload = _build_transfer_notification_payload("transfer_completed", completed_transfer)
+        _broadcast_notification("transfer_update", transfer_payload)
+
+        ticket_payload = {
+            "eventType": "ticket_transferred",
+            "ticketId": ticket_id,
+            "ownerId": buyer_id,
+            "previousOwnerId": seller_id,
+            "transferId": transfer_id,
+            "event": transfer_payload.get("event"),
+            "eventName": transfer_payload.get("eventName"),
+        }
+        _broadcast_notification(
+            "ticket_update",
+            {key: value for key, value in ticket_payload.items() if value is not None},
+        )
+    except Exception:
+        return _error("INTERNAL_ERROR", "Transfer failed — no credits were charged.", 500)
+
+    completed_at = datetime.now(timezone.utc).isoformat()
     updated_transfer = _load_enriched_transfer(transfer_id, {
         **transfer,
-        "sellerOtpVerified": True,
-        "buyerVerificationSid": buyer_otp["sid"],
-        "status": "pending_buyer_otp",
-    })
-
-    _broadcast_transfer_notification("seller_verified", {
-        "transferId": transfer_id,
-        "buyerId": transfer["buyerId"],
+        "buyerId": buyer_id,
         "sellerId": seller_id,
-        "status": "pending_buyer_otp",
+        "ticketId": ticket_id,
+        "buyerOtpVerified": True,
+        "sellerOtpVerified": True,
+        "status": "completed",
+        "completedAt": completed_at,
     })
 
     return jsonify({"data": {
         **(updated_transfer or {}),
-        "transferId": transfer_id,
-        "status":     "pending_buyer_otp",
-        "message":    "Seller verified. OTP sent to buyer.",
+        "transferId":  transfer_id,
+        "status":      "completed",
+        "completedAt": (updated_transfer or {}).get("completedAt", completed_at),
+        "ticket": {"ticketId": ticket_id, "newOwnerId": buyer_id, "status": "active"},
     }}), 200
 
 
@@ -1057,7 +1083,7 @@ def _enrich_transfer(transfer):
 @require_auth
 def get_pending_transfers():
     """
-    Get all pending transfers awaiting the authenticated seller's acceptance
+    Get all pending transfers awaiting the authenticated seller's action
     ---
     tags:
       - Transfer
@@ -1105,13 +1131,17 @@ def get_pending_transfers():
         description: Transfer service unavailable
     """
     seller_id = request.user["userId"]
-    result, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers",
-                               params={"sellerId": seller_id, "status": "pending_seller_acceptance"})
-    if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not retrieve transfers.", 503)
-    
-    transfers = result.get("transfers", [])
-    enriched_transfers = [_enrich_transfer(t) for t in transfers]
+    pending_statuses = ["pending_seller_otp", "pending_seller_acceptance"]
+    transfers = []
+    for pending_status in pending_statuses:
+        result, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers",
+                                   params={"sellerId": seller_id, "status": pending_status})
+        if err:
+            return _error("SERVICE_UNAVAILABLE", "Could not retrieve transfers.", 503)
+        transfers.extend(result.get("transfers", []))
+
+    unique_transfers = {transfer["transferId"]: transfer for transfer in transfers}
+    enriched_transfers = [_enrich_transfer(t) for t in unique_transfers.values()]
     
     return jsonify({"data": {"transfers": enriched_transfers}}), 200
 
