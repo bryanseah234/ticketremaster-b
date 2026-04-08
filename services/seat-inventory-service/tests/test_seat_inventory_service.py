@@ -1,5 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+
+from app import db
+from models import SeatInventory
 
 from seat_inventory_pb2 import GetSeatStatusRequest, HoldSeatRequest, ReleaseSeatRequest, SellSeatRequest
 
@@ -145,6 +149,32 @@ def test_hold_seat_race_condition_only_one_succeeds(grpc_stub, seeded_inventory)
     successes = [result.success for result in (first, second)]
     assert successes.count(True) == 1
     assert successes.count(False) == 1
+
+
+def test_expired_hold_is_reclaimed_for_new_hold(grpc_stub, seeded_inventory, app):
+    inventory_id, _ = seeded_inventory
+
+    first_hold = grpc_stub.HoldSeat(
+        HoldSeatRequest(inventory_id=inventory_id, user_id='user-a', hold_duration_seconds=120)
+    )
+    assert first_hold.success is True
+
+    with app.app_context():
+        inventory = db.session.get(SeatInventory, inventory_id)
+        inventory.heldUntil = datetime.now(UTC) - timedelta(seconds=5)
+        db.session.commit()
+
+    second_hold = grpc_stub.HoldSeat(
+        HoldSeatRequest(inventory_id=inventory_id, user_id='user-b', hold_duration_seconds=120)
+    )
+
+    assert second_hold.success is True
+    assert second_hold.status == 'held'
+    assert second_hold.hold_token
+    assert second_hold.hold_token != first_hold.hold_token
+
+    status = grpc_stub.GetSeatStatus(GetSeatStatusRequest(inventory_id=inventory_id))
+    assert status.status == 'held'
 
 
 def test_stale_release_does_not_clear_newer_hold(grpc_stub, seeded_inventory):

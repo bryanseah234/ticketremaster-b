@@ -207,6 +207,30 @@ def _calculate_deadlock_delay(attempt):
     return delay + jitter
 
 
+def _normalize_timestamp(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _hold_has_expired(inventory: SeatInventory, now: datetime) -> bool:
+    if inventory.status != 'held' or not inventory.heldUntil:
+        return False
+    held_until = _normalize_timestamp(inventory.heldUntil)
+    if held_until is None:
+        return False
+    return held_until <= now
+
+
+def _clear_hold(inventory: SeatInventory) -> None:
+    inventory.status = 'available'
+    inventory.heldByUserId = None
+    inventory.holdToken = None
+    inventory.heldUntil = None
+
+
 class SeatInventoryGrpcService(SeatInventoryServiceServicer):
     def __init__(self, flask_app=None):
         self.app = flask_app or create_app()
@@ -242,6 +266,12 @@ class SeatInventoryGrpcService(SeatInventoryServiceServicer):
                             error_code='INVENTORY_NOT_FOUND',
                             hold_token='',
                         )
+
+                    if _hold_has_expired(locked_row, now):
+                        logger.info("Reclaiming expired hold for inventory %s", request.inventory_id)
+                        _clear_hold(locked_row)
+                        db.session.flush()
+                        _delete_hold_cache(request.inventory_id)
 
                     if locked_row.status != 'available':
                         db.session.rollback()
@@ -419,6 +449,17 @@ class SeatInventoryGrpcService(SeatInventoryServiceServicer):
             inventory = db.session.get(SeatInventory, request.inventory_id)
             if not inventory:
                 return GetSeatStatusResponse(inventory_id=request.inventory_id, status='not_found', held_until='')
+
+            if _hold_has_expired(inventory, datetime.now(UTC)):
+                logger.info("Returning available status for expired hold on inventory %s", request.inventory_id)
+                _clear_hold(inventory)
+                db.session.commit()
+                _delete_hold_cache(request.inventory_id)
+                return GetSeatStatusResponse(
+                    inventory_id=inventory.inventoryId,
+                    status='available',
+                    held_until='',
+                )
 
             return GetSeatStatusResponse(
                 inventory_id=inventory.inventoryId,
