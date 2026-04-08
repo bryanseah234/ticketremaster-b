@@ -571,10 +571,20 @@ def initiate():
         "status": "pending_seller_acceptance",
     })
 
+    initiated_transfer = _enrich_transfer({
+        **transfer,
+        "listingId": body["listingId"],
+        "buyerId": buyer_id,
+        "sellerId": seller_id,
+        "creditAmount": credit_amount,
+        "status": "pending_seller_acceptance",
+    })
+
     return jsonify({"data": {
+        **initiated_transfer,
         "transferId": transfer["transferId"],
-        "status":     "pending_seller_acceptance",
-        "message":    "Request sent to seller. Pending acceptance.",
+        "status": "pending_seller_acceptance",
+        "message": "Request sent to seller. Pending acceptance.",
     }}), 201
 
 
@@ -626,7 +636,12 @@ def buyer_verify(transfer_id):
         return _error("TRANSFER_NOT_FOUND", "Transfer not found.", 404)
     if transfer["buyerId"] != buyer_id:
         return _error("AUTH_FORBIDDEN", "Access denied.", 403)
-    if transfer["status"] != "pending_buyer_otp" or transfer.get("buyerOtpVerified"):
+    if (
+        transfer["status"] != "pending_buyer_otp"
+        or transfer.get("buyerOtpVerified")
+        or not transfer.get("sellerOtpVerified")
+        or not transfer.get("buyerVerificationSid")
+    ):
         return _error("VALIDATION_ERROR", "Transfer is not awaiting buyer OTP.", 400)
 
     verify, err = call_service("POST", f"{OTP_WRAPPER}/otp/verify", json={
@@ -1040,7 +1055,6 @@ def get_pending_transfers():
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not retrieve transfers.", 503)
     
-    # Enrich each transfer
     transfers = result.get("transfers", [])
     enriched_transfers = [_enrich_transfer(t) for t in transfers]
     
@@ -1110,6 +1124,41 @@ def get_my_pending_transfers():
     transfers = result.get("transfers", [])
     enriched_transfers = [_enrich_transfer(t) for t in transfers]
     
+    return jsonify({"data": {"transfers": enriched_transfers}}), 200
+
+
+# ── GET /transfer/history ─────────────────────────────────────────────────────
+
+@bp.get("/transfer/history")
+@require_auth
+def get_transfer_history():
+    """
+    Get completed transfers initiated by the authenticated seller
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of enriched completed transfers for seller archive/history views
+      401:
+        description: Unauthorized
+      503:
+        description: Transfer service unavailable
+    """
+    seller_id = request.user["userId"]
+    result, err = call_service(
+        "GET",
+        f"{TRANSFER_SERVICE}/transfers",
+        params={"sellerId": seller_id, "status": "completed"},
+    )
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve transfer history.", 503)
+
+    transfers = result.get("transfers", [])
+    enriched_transfers = [_enrich_transfer(t) for t in transfers]
+
     return jsonify({"data": {"transfers": enriched_transfers}}), 200
 
 

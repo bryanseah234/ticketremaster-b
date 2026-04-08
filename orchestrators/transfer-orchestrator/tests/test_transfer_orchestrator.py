@@ -87,17 +87,25 @@ def test_health(client):
 @patch("routes._broadcast_transfer_notification")
 @patch("routes._publish_transfer_timeout")
 @patch("routes._publish_seller_notification")
+@patch("routes._enrich_transfer")
 @patch("routes.call_service")
 @patch("routes.call_credit_service")
-def test_initiate_success(mock_credit, mock_svc, mock_notify, mock_timeout, mock_broadcast, client):
+def test_initiate_success(mock_credit, mock_svc, mock_enrich, mock_notify, mock_timeout, mock_broadcast, client):
     mock_credit.return_value = ({"creditBalance": 200.0}, None)
     mock_svc.side_effect = [
         (MOCK_LISTING, None),
         ({"transferId": "txr_001", "status": "pending_seller_acceptance"}, None),
     ]
+    mock_enrich.return_value = {
+        "transferId": "txr_001",
+        "listingId": "lst_001",
+        "status": "pending_seller_acceptance",
+        "eventName": "Symphony Night",
+    }
     res = client.post("/transfer/initiate", json={"listingId": "lst_001"}, headers=_auth(BUYER))
     assert res.status_code == 201
     assert res.get_json()["data"]["status"] == "pending_seller_acceptance"
+    assert res.get_json()["data"]["eventName"] == "Symphony Night"
     mock_notify.assert_called_once_with("txr_001", SELLER)
     mock_timeout.assert_called_once_with("txr_001", "lst_001", BUYER, SELLER)
     mock_broadcast.assert_called_once()
@@ -197,6 +205,20 @@ def test_buyer_verify_wrong_otp(mock_svc, client):
 @patch("routes.call_service")
 def test_buyer_verify_wrong_status(mock_svc, client):
     transfer = {**MOCK_TRANSFER, "status": "pending_seller_acceptance"}
+    mock_svc.return_value = (transfer, None)
+    res = client.post("/transfer/txr_001/buyer-verify",
+                      json={"otp": "123456"}, headers=_auth(BUYER))
+    assert res.status_code == 400
+
+
+@patch("routes.call_service")
+def test_buyer_verify_requires_seller_verification(mock_svc, client):
+    transfer = {
+        **MOCK_TRANSFER,
+        "status": "pending_buyer_otp",
+        "sellerOtpVerified": False,
+        "buyerVerificationSid": "VE_buyer",
+    }
     mock_svc.return_value = (transfer, None)
     res = client.post("/transfer/txr_001/buyer-verify",
                       json={"otp": "123456"}, headers=_auth(BUYER))
@@ -454,4 +476,26 @@ def test_get_my_pending_transfers_enriched(mock_svc, client):
     assert res.status_code == 200
     transfers = res.get_json()["data"]["transfers"]
     assert len(transfers) == 1
+    assert_enriched_transfer(transfers[0])
+
+
+@patch("routes.call_service")
+def test_get_transfer_history_enriched(mock_svc, client):
+    completed = [{**MOCK_TRANSFER, "status": "completed", "completedAt": "2026-03-20T12:30:00Z"}]
+    mock_svc.side_effect = [
+        ({"transfers": completed}, None),
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+        ({}, None),
+        (MOCK_INVENTORY, None),
+        (MOCK_SEATS, None),
+    ]
+    res = client.get("/transfer/history", headers=_auth(SELLER))
+    assert res.status_code == 200
+    transfers = res.get_json()["data"]["transfers"]
+    assert len(transfers) == 1
+    assert transfers[0]["status"] == "completed"
+    assert transfers[0]["completedAt"] == "2026-03-20T12:30:00Z"
     assert_enriched_transfer(transfers[0])

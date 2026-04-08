@@ -21,7 +21,7 @@ def test_create_transfer(client):
 
     assert response.status_code == 201
     payload = response.get_json()
-    assert payload['status'] == 'pending_buyer_otp'
+    assert payload['status'] == 'pending_seller_acceptance'
     assert payload['transferId']
     assert payload['createdAt']
 
@@ -107,3 +107,18 @@ def test_patch_transfer_rejects_empty_body(client):
 
     assert response.status_code == 400
     assert response.get_json()['error']['code'] == 'VALIDATION_ERROR'
+
+
+def test_list_transfers_by_buyer_id(client):
+    first = create_transfer(client, buyerId='buyer-lookup-001', sellerId='seller-lookup-001').get_json()
+    create_transfer(client, buyerId='buyer-other-001', sellerId='seller-other-001')
+
+    response = client.get('/transfers', query_string={
+        'buyerId': 'buyer-lookup-001',
+        'status': 'pending_seller_acceptance',
+    })
+
+    assert response.status_code == 200
+    payload = response.get_json()['transfers']
+    assert len(payload) == 1
+    assert payload[0]['transferId'] == first['transferId']

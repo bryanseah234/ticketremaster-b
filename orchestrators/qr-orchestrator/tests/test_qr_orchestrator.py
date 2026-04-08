@@ -129,3 +129,27 @@ def test_qr_hashes_are_unique_per_call(mock_svc, client):
 
 def test_get_qr_no_auth(client):
     assert client.get("/tickets/tkt_001/qr").status_code == 401
+
+
+@patch("routes.call_service")
+def test_get_ticket_context_by_qr_success(mock_svc, client):
+    mock_svc.side_effect = [
+        ({**MOCK_TICKET, "qrHash": "a" * 64, "section": "ORCH-A", "rowNumber": "12", "seatNumber": "42"}, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+    ]
+    res = client.get(f"/tickets/qr/{'a' * 64}", headers=_auth())
+    assert res.status_code == 200
+    data = res.get_json()["data"]
+    assert data["ticketId"] == "tkt_001"
+    assert data["event"]["name"] == "Symphony Night"
+    assert data["venue"]["name"] == "Esplanade"
+    assert data["seat"]["section"] == "ORCH-A"
+
+
+@patch("routes.call_service")
+def test_get_ticket_context_by_qr_forbidden(mock_svc, client):
+    mock_svc.return_value = ({**MOCK_TICKET, "ownerId": "usr_other"}, None)
+    res = client.get(f"/tickets/qr/{'b' * 64}", headers=_auth("usr_001"))
+    assert res.status_code == 403
+    assert res.get_json()["error"]["code"] == "AUTH_FORBIDDEN"

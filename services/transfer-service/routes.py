@@ -182,7 +182,7 @@ def create_transfer():
 @bp.get('/transfers')
 def list_transfers():
     """
-    List transfers by seller
+    List transfers by seller or buyer
     ---
     tags:
       - Transfers
@@ -206,13 +206,21 @@ def list_transfers():
               items:
                 $ref: '#/definitions/Transfer'
       400:
-        description: Missing sellerId
+        description: Missing buyerId or sellerId
     """
     seller_id = request.args.get('sellerId')
+    buyer_id = request.args.get('buyerId')
     status    = request.args.get('status')
-    if not seller_id:
-        return error_response(400, 'VALIDATION_ERROR', 'sellerId query param required')
-    query = Transfer.query.filter_by(sellerId=seller_id)
+    if not seller_id and not buyer_id:
+        return error_response(400, 'VALIDATION_ERROR', 'buyerId or sellerId query param required')
+    if seller_id and buyer_id:
+        query = Transfer.query.filter(
+            ((Transfer.sellerId == seller_id) | (Transfer.buyerId == buyer_id))
+        )
+    elif seller_id:
+        query = Transfer.query.filter_by(sellerId=seller_id)
+    else:
+        query = Transfer.query.filter_by(buyerId=buyer_id)
     if status:
         query = query.filter_by(status=status)
     transfers = query.order_by(Transfer.createdAt.desc()).all()

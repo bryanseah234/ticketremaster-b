@@ -26,6 +26,21 @@ def _error(code, message, status):
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+def _enrich_ticket_context(ticket):
+    event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
+    venue, _ = call_service("GET", f"{VENUE_SERVICE}/venues/{ticket['venueId']}")
+    return {
+        "event": {
+            "name": event["name"],
+            "date": event["date"],
+        } if event else None,
+        "venue": {
+            "name": venue["name"],
+            "address": venue.get("address"),
+        } if venue else None,
+    }
+
+
 def _generate_qr(ticket_id, user_id, event_id, venue_id):
     """
     SHA-256 hash of ticketId|userId|eventId|venueId|generatedAt|QR_SECRET.
@@ -141,21 +156,47 @@ def get_qr(ticket_id):
         return _error("INTERNAL_ERROR", "Could not update QR on ticket.", 500)
 
     expires_at = (datetime.fromisoformat(generated_at) + timedelta(seconds=QR_TTL_SECONDS)).isoformat()
-
-    event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
-    venue, _ = call_service("GET", f"{VENUE_SERVICE}/venues/{ticket['venueId']}")
+    context = _enrich_ticket_context(ticket)
 
     return jsonify({"data": {
         "ticketId":    ticket_id,
         "qrHash":      qr_hash,
         "generatedAt": generated_at,
         "expiresAt":   expires_at,
-        "event": {
-            "name": event["name"],
-            "date": event["date"],
-        } if event else None,
-        "venue": {
-            "name":    venue["name"],
-            "address": venue.get("address"),
-        } if venue else None,
+        "event":       context["event"],
+        "venue":       context["venue"],
+    }}), 200
+
+
+@bp.get("/tickets/qr/<qr_hash>")
+@require_auth
+def get_ticket_context_by_qr(qr_hash):
+    """
+    Get the authenticated owner's ticket context by QR hash.
+    """
+    user_id = request.user["userId"]
+
+    ticket, err = call_service("GET", f"{TICKET_SERVICE}/tickets/qr/{qr_hash}")
+    if err == "TICKET_NOT_FOUND":
+        return _error("TICKET_NOT_FOUND", "Ticket not found.", 404)
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve ticket.", 503)
+
+    if ticket["ownerId"] != user_id:
+        return _error("AUTH_FORBIDDEN", "You do not own this ticket.", 403)
+
+    context = _enrich_ticket_context(ticket)
+
+    return jsonify({"data": {
+        "ticketId": ticket["ticketId"],
+        "qrHash": ticket.get("qrHash") or qr_hash,
+        "status": ticket.get("status"),
+        "seat": {
+            "section": ticket.get("section"),
+            "rowNumber": ticket.get("rowNumber"),
+            "seatNumber": ticket.get("seatNumber"),
+            "gate": ticket.get("gate"),
+        },
+        "event": context["event"],
+        "venue": context["venue"],
     }}), 200
