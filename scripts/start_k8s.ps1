@@ -673,8 +673,9 @@ function Restart-Deployments {
     )
 
     foreach ($name in @($Names | Where-Object { $_ } | Select-Object -Unique)) {
-        Write-Host "    Restarting deployment/$name..."
-        Invoke-External -Command "kubectl" -Arguments @("rollout", "restart", "deployment/$name", "-n", $Namespace) -ErrorMessage "Failed to restart deployment/$name in $Namespace."
+        $deploymentName = if ($name -like "*/*") { ($name -split "/", 2)[1] } else { $name }
+        Write-Host "    Restarting deployment/$deploymentName..."
+        Invoke-External -Command "kubectl" -Arguments @("rollout", "restart", "deployment/$deploymentName", "-n", $Namespace) -ErrorMessage "Failed to restart deployment/$deploymentName in $Namespace."
     }
 }
 # ─────────────────────────────────────────────────────────────────────────────
