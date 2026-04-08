@@ -5,7 +5,7 @@ TicketRemaster is a Kubernetes-first backend for event discovery, seat inventory
 The repository currently contains:
 
 - 8 Flask orchestrators for browser-facing workflows
-- 12 internal services and wrappers
+- 13 internal services and wrappers
 - 1 Socket.IO notification service
 - 10 PostgreSQL databases, each owned by a single service
 - Redis for short-lived workflow state and locking support
