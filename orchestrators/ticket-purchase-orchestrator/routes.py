@@ -656,3 +656,67 @@ def confirm_purchase(inventory_id):
     finally:
         if stub is not None:
             _release_grpc_stub((stub, channel))
+
+
+# ── GET /purchase/hold/resume/<event_id> ─────────────────────────────────────
+
+@bp.get("/purchase/hold/resume/<event_id>")
+@require_auth
+def resume_hold(event_id):
+    """
+    Resume an existing seat hold for the authenticated user
+    ---
+    tags:
+      - Purchase
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: event_id
+        required: true
+        type: string
+        example: evt_001
+    responses:
+      200:
+        description: Active hold found - returns hold details for checkout restoration
+      404:
+        description: No active hold found for this user and event
+      503:
+        description: Seat inventory service unavailable
+    """
+    user_id = request.user["userId"]
+
+    hold_data, err = call_service(
+        "GET",
+        f"{SEAT_INV_REST}/inventory/event/{event_id}/my-hold",
+        params={"userId": user_id},
+    )
+    if err == "NOT_FOUND":
+        return _error("NOT_FOUND", "No active hold found for this event.", 404)
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not check hold status.", 503)
+
+    hold = hold_data.get("data", {})
+
+    # Fetch seat details to enrich the response
+    seat_data, _ = call_service("GET", f"{os.environ.get('SEAT_SERVICE_URL', 'http://seat-service:5000')}/seats/{hold.get('seatId')}")
+    event_data, _ = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
+
+    return jsonify({"data": {
+        "inventoryId": hold.get("inventoryId"),
+        "holdToken":   hold.get("holdToken"),
+        "heldUntil":   hold.get("heldUntil"),
+        "eventId":     event_id,
+        "seat": {
+            "seatId":     hold.get("seatId"),
+            "rowNumber":  seat_data.get("rowNumber") if seat_data else None,
+            "seatNumber": seat_data.get("seatNumber") if seat_data else None,
+            "price":      event_data.get("price") if event_data else None,
+        },
+        "event": {
+            "name":      event_data.get("name") if event_data else None,
+            "date":      event_data.get("date") if event_data else None,
+            "venueName": event_data.get("venueName") if event_data else None,
+            "image":     event_data.get("image") if event_data else None,
+        },
+    }}), 200

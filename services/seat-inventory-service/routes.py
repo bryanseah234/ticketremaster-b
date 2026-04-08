@@ -73,7 +73,45 @@ def list_inventory_by_event(event_id):
     return jsonify({'eventId': event_id, 'inventory': [item.to_dict(include_internal=False) for item in inventory]}), 200
 
 
-@bp.post('/inventory/batch')
+@bp.get('/inventory/event/<event_id>/my-hold')
+def get_my_hold(event_id):
+    """
+    Get the current user's active hold for an event
+    ---
+    tags:
+      - Inventory
+    parameters:
+      - in: path
+        name: event_id
+        type: string
+        required: true
+      - in: query
+        name: userId
+        type: string
+        required: true
+    responses:
+      200:
+        description: Active hold found
+      404:
+        description: No active hold found for this user and event
+    """
+    user_id = request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': {'code': 'VALIDATION_ERROR', 'message': 'userId is required.'}}), 400
+
+    hold = SeatInventory.query.filter_by(
+        eventId=event_id,
+        heldByUserId=user_id,
+        status='held',
+    ).first()
+
+    if not hold:
+        return jsonify({'error': {'code': 'NOT_FOUND', 'message': 'No active hold found.'}}), 404
+
+    return jsonify({'data': hold.to_dict(include_internal=True)}), 200
+
+
+
 def create_inventory_batch():
     """
     Batch-create seat inventory for an event
