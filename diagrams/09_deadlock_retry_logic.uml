@@ -1,9 +1,0 @@
-@startuml
-title Deadlock retry logic (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/09_deadlock_retry_logic.mmd
-  Rendered artifact: diagrams/09_deadlock_retry_logic.png
-end note
-
-@enduml

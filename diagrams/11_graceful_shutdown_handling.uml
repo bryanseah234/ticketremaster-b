@@ -1,9 +1,0 @@
-@startuml
-title Graceful shutdown handling (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/11_graceful_shutdown_handling.mmd
-  Rendered artifact: diagrams/11_graceful_shutdown_handling.png
-end note
-
-@enduml

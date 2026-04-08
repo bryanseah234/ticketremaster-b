@@ -1,9 +1,0 @@
-@startuml
-title Ticket purchase reservation expires (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/02_ticket_purchase_reservation_expires.mmd
-  Rendered artifact: diagrams/02_ticket_purchase_reservation_expires.png
-end note
-
-@enduml

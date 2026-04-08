@@ -1,9 +1,0 @@
-@startuml
-title Auto-cancel stuck transfers (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/08_auto_cancel_stuck_transfers.mmd
-  Rendered artifact: diagrams/08_auto_cancel_stuck_transfers.png
-end note
-
-@enduml

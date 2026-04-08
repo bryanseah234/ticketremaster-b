@@ -1,9 +1,0 @@
-@startuml
-title QR verification happy path (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/04_qr_verification_happy_path.mmd
-  Rendered artifact: diagrams/04_qr_verification_happy_path.png
-end note
-
-@enduml

@@ -1,9 +1,0 @@
-@startuml
-title Cache invalidation retry (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/10_cache_invalidation_retry.mmd
-  Rendered artifact: diagrams/10_cache_invalidation_retry.png
-end note
-
-@enduml

@@ -1,9 +1,0 @@
-@startuml
-title Distributed lock concurrent scan (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/05_distributed_lock_concurrent_scan.mmd
-  Rendered artifact: diagrams/05_distributed_lock_concurrent_scan.png
-end note
-
-@enduml

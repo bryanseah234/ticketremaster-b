@@ -1,9 +1,0 @@
-@startuml
-title P2P transfer happy path (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/03_p2p_transfer_happy_path.mmd
-  Rendered artifact: diagrams/03_p2p_transfer_happy_path.png
-end note
-
-@enduml

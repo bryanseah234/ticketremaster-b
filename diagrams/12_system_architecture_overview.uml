@@ -1,9 +1,0 @@
-@startuml
-title System architecture overview (legacy breadcrumb)
-
-note as N1
-  Canonical source: diagrams/12_system_architecture_overview.mmd
-  Rendered artifact: diagrams/12_system_architecture_overview.png
-end note
-
-@enduml
