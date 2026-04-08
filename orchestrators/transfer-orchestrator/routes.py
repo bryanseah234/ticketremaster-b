@@ -389,14 +389,18 @@ def _execute_saga(transfer_id, buyer_id, seller_id, credit_amount, ticket_id, li
         completed.append("ticket_transferred")
 
         # 6. Complete listing
-        call_service("PATCH", f"{MARKETPLACE_SERVICE}/listings/{listing_id}", json={"status": "completed"})
+        _, err = call_service("PATCH", f"{MARKETPLACE_SERVICE}/listings/{listing_id}", json={"status": "completed"})
+        if err:
+            raise RuntimeError(f"Listing completion failed: {err}")
         completed.append("listing_completed")
 
         # 7. Complete transfer
-        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
+        _, err = call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
             "status": "completed",
             "completedAt": datetime.now(timezone.utc).isoformat(),
         })
+        if err:
+            raise RuntimeError(f"Transfer record completion failed: {err}")
         completed.append("transfer_completed")
 
     except Exception as exc:
@@ -404,6 +408,20 @@ def _execute_saga(transfer_id, buyer_id, seller_id, credit_amount, ticket_id, li
         
         # Reverse compensation in reverse order
         try:
+            if "listing_completed" in completed:
+                _, err = call_service("PATCH", f"{MARKETPLACE_SERVICE}/listings/{listing_id}",
+                                     json={"status": "active"})
+                if err:
+                    compensation_errors.append(f"Failed to revert listing status: {err}")
+                    logger.error("Failed to revert listing %s status: %s", listing_id, err)
+
+            if "ticket_transferred" in completed:
+                _, err = call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}",
+                                     json={"ownerId": seller_id, "status": "sold"})
+                if err:
+                    compensation_errors.append(f"Failed to revert ticket ownership: {err}")
+                    logger.error("Failed to revert ticket %s ownership: %s", ticket_id, err)
+
             if "seller_credited" in completed:
                 _, err = call_credit_service("PATCH", f"/credits/{seller_id}",
                                             json={"creditBalance": seller_balance})
@@ -514,7 +532,7 @@ def initiate():
               example: lst_001
     responses:
       201:
-        description: Transfer created — status pending_seller_acceptance
+        description: Transfer created — status pending_buyer_otp
       400:
         description: Listing not active
       401:
@@ -963,7 +981,9 @@ def seller_verify(transfer_id):
         return _error("INSUFFICIENT_CREDITS", "Buyer no longer has sufficient credits.", 402)
 
     seller_credit, seller_err = call_credit_service("GET", f"/credits/{seller_id}")
-    seller_balance = _get_credit_balance(seller_credit) if not seller_err and seller_credit else 0.0
+    if seller_err:
+        return _error("SERVICE_UNAVAILABLE", "Could not verify seller balance.", 503)
+    seller_balance = _get_credit_balance(seller_credit)
 
     try:
         _execute_saga(
