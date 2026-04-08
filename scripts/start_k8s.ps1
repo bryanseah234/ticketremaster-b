@@ -33,7 +33,7 @@ function Get-SourceHash {
         Get-ChildItem -Path $_ -Recurse -File -Include "*.py","*.txt","Dockerfile" -ErrorAction SilentlyContinue
     } | Sort-Object FullName
     $combined = ($files | ForEach-Object { "$($_.FullName):$($_.LastWriteTimeUtc.Ticks)" }) -join "|"
-    return [System.Security.Cryptography.MD5]::Create().ComputeHash(
+    return ([System.Security.Cryptography.MD5]::Create().ComputeHash(
         [System.Text.Encoding]::UTF8.GetBytes($combined)
     ) | ForEach-Object { $_.ToString("x2") }) -join ''
 }
