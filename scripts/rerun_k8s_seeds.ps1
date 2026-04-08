@@ -9,14 +9,16 @@ $jobs = @(
     "seed-venues",
     "seed-events",
     "seed-seats",
-    "seed-seat-inventory"
+    "seed-seat-inventory",
+    "seed-users"
 )
 
 foreach ($workload in @(
     "deployment/venue-service",
     "deployment/event-service",
     "deployment/seat-service",
-    "deployment/seat-inventory-service"
+    "deployment/seat-inventory-service",
+    "deployment/user-service"
 )) {
     & kubectl rollout status $workload --namespace $namespace --timeout=10m
     if ($LASTEXITCODE -ne 0) {

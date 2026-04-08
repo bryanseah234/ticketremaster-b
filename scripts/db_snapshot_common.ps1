@@ -21,7 +21,20 @@ function Get-DefaultSnapshotDirectory {
         [string]$RepoRoot
     )
 
-    Join-Path $RepoRoot "db-snapshots\k8s\latest"
+    Join-Path (Join-Path (Join-Path $RepoRoot "db-snapshots") "k8s") "latest"
+}
+
+function Get-MissingDbSnapshotFiles {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SnapshotPath
+    )
+
+    @(
+        Get-DbSnapshotTargets |
+            Where-Object { -not (Test-Path (Join-Path $SnapshotPath $_.FileName)) } |
+            ForEach-Object { $_.FileName }
+    )
 }
 
 function Test-DbSnapshotAvailable {
@@ -30,15 +43,7 @@ function Test-DbSnapshotAvailable {
         [string]$SnapshotPath
     )
 
-    $targets = Get-DbSnapshotTargets
-    foreach ($target in $targets) {
-        $candidate = Join-Path $SnapshotPath $target.FileName
-        if (Test-Path $candidate) {
-            return $true
-        }
-    }
-
-    return $false
+    (Get-MissingDbSnapshotFiles -SnapshotPath $SnapshotPath).Count -eq 0
 }
 
 function Invoke-DbPodSql {

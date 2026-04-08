@@ -29,10 +29,22 @@ if ($SkipIfTransientState) {
 New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
 
 $targets = Get-DbSnapshotTargets
+$manifestSnapshotPath = $OutputPath
+try {
+    $repoRootPath = [System.IO.Path]::GetFullPath($repoRoot)
+    $outputPathResolved = [System.IO.Path]::GetFullPath($OutputPath)
+    $repoRootPrefix = $repoRootPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if ($outputPathResolved.StartsWith($repoRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $manifestSnapshotPath = [System.IO.Path]::GetRelativePath($repoRootPath, $outputPathResolved)
+    }
+} catch {
+    # Keep the absolute path if relative-path derivation fails for any reason.
+}
+
 $manifest = [ordered]@{
     snapshotType = "ticketremaster-k8s-postgres"
     createdAt = (Get-Date).ToUniversalTime().ToString("o")
-    snapshotPath = $OutputPath
+    snapshotPath = $manifestSnapshotPath
     databases = @()
 }
 
@@ -43,6 +55,9 @@ foreach ($target in $targets) {
     $dump = & kubectl exec -n $target.Namespace $target.Pod -c postgres -- sh -lc 'export PGPASSWORD="$POSTGRES_PASSWORD"; pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --no-privileges --encoding=UTF8'
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to back up $($target.Name)"
+    }
+    if ([string]::IsNullOrWhiteSpace((($dump | Out-String).Trim()))) {
+        throw "Backup for $($target.Name) produced an empty dump."
     }
 
     Set-Content -Path $dumpPath -Value $dump -Encoding utf8NoBOM

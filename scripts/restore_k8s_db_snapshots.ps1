@@ -15,15 +15,16 @@ if (-not (Test-Path $SnapshotPath)) {
     throw "Snapshot path not found: $SnapshotPath"
 }
 
+$missingDumpFiles = Get-MissingDbSnapshotFiles -SnapshotPath $SnapshotPath
+if ($missingDumpFiles.Count -gt 0) {
+    throw "Snapshot is incomplete. Missing dump files: $($missingDumpFiles -join ', ')"
+}
+
 $targets = Get-DbSnapshotTargets
 $restoredCount = 0
 
 foreach ($target in $targets) {
     $dumpPath = Join-Path $SnapshotPath $target.FileName
-    if (-not (Test-Path $dumpPath)) {
-        Write-Warning "Skipping $($target.Name) because $dumpPath is missing."
-        continue
-    }
 
     $remotePath = "/tmp/$($target.FileName)"
     Write-Host "Restoring $($target.Name) ($($target.Database)) from $dumpPath"
