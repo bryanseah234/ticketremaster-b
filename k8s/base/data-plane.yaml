@@ -120,7 +120,7 @@ spec:
               memory: "256Mi"
               cpu: "100m"
             limits:
-              memory: "512Mi"
+              memory: "768Mi"
               cpu: "500m"
           env:
             - name: RABBITMQ_DEFAULT_USER
@@ -144,7 +144,7 @@ spec:
                 - ping
             initialDelaySeconds: 30
             periodSeconds: 10
-            timeoutSeconds: 5
+            timeoutSeconds: 15
             failureThreshold: 12
           livenessProbe:
             exec:
@@ -154,7 +154,7 @@ spec:
                 - ping
             initialDelaySeconds: 60
             periodSeconds: 20
-            timeoutSeconds: 5
+            timeoutSeconds: 15
             failureThreshold: 6
           volumeMounts:
             - name: rabbitmq-data
