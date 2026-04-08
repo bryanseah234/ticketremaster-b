@@ -122,14 +122,3 @@ If the gateway smoke suite shows:
 - followed by `Login` and other protected routes returning `401`
 
 the usual cause is that the cluster was tested before downstream services or seed jobs were ready. The maintained startup flow now waits for the full stack before running Newman, and the gateway Postman collection now generates a fresh test email for each run.
-
-## Documentation map
-
-- [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md): local setup, Minikube flow, first-run image loading, troubleshooting
-- [TESTING.md](TESTING.md): gateway smoke tests, service tests, Kubernetes verification
-- [API.md](API.md): current gateway API reference
-- [FRONTEND.md](FRONTEND.md): frontend contract and request rules
-- [INSTRUCTION.md](INSTRUCTION.md): architecture and codebase design notes
-- [services/README.md](services/README.md): atomic-service index
-- [orchestrators/README.md](orchestrators/README.md): orchestrator index
-- [postman/README.md](postman/README.md): Postman assets and smoke-run expectations
