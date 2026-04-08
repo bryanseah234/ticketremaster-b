@@ -385,32 +385,32 @@ function Get-SeedBaselineChecks {
         [pscustomobject]@{
             Name = "venue-service-db"
             DisplayName = "venues"
-            Query = @"
-SELECT COUNT(*) FROM venues
-WHERE "venueId" IN ('ven_001', 'ven_002', 'ven_003', 'ven_004', 'ven_005', 'ven_006');
-"@
+            Query = @'
+SELECT COUNT(*) FROM venues AS v
+WHERE to_jsonb(v) ->> 'venueId' IN ('ven_001', 'ven_002', 'ven_003', 'ven_004', 'ven_005', 'ven_006');
+'@
             ExpectedCount = 6
         }
         [pscustomobject]@{
             Name = "event-service-db"
             DisplayName = "events"
-            Query = @"
-SELECT COUNT(*) FROM events
-WHERE "eventId" IN (
+            Query = @'
+SELECT COUNT(*) FROM events AS e
+WHERE to_jsonb(e) ->> 'eventId' IN (
     'evt_001', 'evt_002', 'evt_003', 'evt_004',
     'evt_005', 'evt_006', 'evt_007', 'evt_008',
     'evt_009', 'evt_010', 'evt_011', 'evt_012',
     'evt_013', 'evt_014', 'evt_015', 'evt_016'
 );
-"@
+'@
             ExpectedCount = 16
         }
         [pscustomobject]@{
             Name = "seat-service-db"
             DisplayName = "seats"
-            Query = @"
-SELECT COUNT(*) FROM seats
-WHERE ("venueId", "seatNumber") IN (
+            Query = @'
+SELECT COUNT(*) FROM seats AS s
+WHERE (to_jsonb(s) ->> 'venueId', to_jsonb(s) ->> 'seatNumber') IN (
     ('ven_001', 'A1'),
     ('ven_002', 'A1'),
     ('ven_003', 'A1'),
@@ -418,16 +418,16 @@ WHERE ("venueId", "seatNumber") IN (
     ('ven_005', 'A1'),
     ('ven_006', 'A1')
 );
-"@
+'@
             ExpectedCount = 6
         }
         [pscustomobject]@{
             Name = "seat-inventory-service-db"
             DisplayName = "seat inventory"
-            Query = @"
-SELECT COUNT(*) FROM seat_inventory
-WHERE "eventId" IN ('evt_001', 'evt_004', 'evt_007', 'evt_009', 'evt_011', 'evt_015');
-"@
+            Query = @'
+SELECT COUNT(*) FROM seat_inventory AS si
+WHERE to_jsonb(si) ->> 'eventId' IN ('evt_001', 'evt_004', 'evt_007', 'evt_009', 'evt_011', 'evt_015');
+'@
             ExpectedCount = 6
         }
         [pscustomobject]@{
