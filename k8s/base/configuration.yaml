@@ -76,6 +76,7 @@ data:
             - Content-Type
             - X-Correlation-ID
             - X-Request-ID
+            - Idempotency-Key
             - apikey
           credentials: true
           max_age: 3600
