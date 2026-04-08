@@ -10,21 +10,17 @@ echo.
 cd /d "%~dp0"
 
 set "SECRETS_FILE=k8s\base\secrets.local.yaml"
+set "START_SCRIPT=scripts\start_k8s.ps1"
 set "HAS_CF_TOKEN=0"
 set "RUN_PUBLIC_TESTS=0"
 set "SKIP_PORT_FORWARD=0"
 
-echo [1/5] Checking secrets file...
-if not exist "%SECRETS_FILE%" (
-    echo.
-    echo ERROR: %SECRETS_FILE% not found.
-    echo Ask the backend maintainer for this file and place it at:
-    echo   %~dp0%SECRETS_FILE%
-    echo.
-    pause
-    exit /b 1
-)
-echo secrets.local.yaml found.
+echo [1/5] Checking required repo files...
+call :require_file "%SECRETS_FILE%" "Kubernetes secrets file"
+if errorlevel 1 goto fail
+call :require_file "%START_SCRIPT%" "Kubernetes startup script"
+if errorlevel 1 goto fail
+echo Required repo files found.
 
 findstr /i /r /c:"CLOUDFLARE_TUNNEL_TOKEN: .*[A-Za-z0-9]" "%SECRETS_FILE%" >nul 2>&1
 if %errorlevel% equ 0 (
@@ -65,6 +61,8 @@ if "%MODE_CHOICE%"=="1" (
 echo.
 
 echo [3/5] Checking Docker Desktop...
+call :require_command docker "Docker CLI"
+if errorlevel 1 goto fail
 docker info >nul 2>&1
 if %errorlevel% neq 0 (
     echo Docker Desktop is not running. Starting it...
@@ -84,6 +82,8 @@ echo Docker Desktop is running.
 echo.
 
 echo [4/5] Checking Minikube...
+call :require_command minikube "Minikube CLI"
+if errorlevel 1 goto fail
 minikube status >nul 2>&1
 if %errorlevel% neq 0 (
     echo Starting Minikube...
@@ -99,20 +99,40 @@ if %errorlevel% neq 0 (
 echo.
 
 echo [5/5] Applying manifests, waiting for workloads, and starting selected services...
+call :require_command powershell "Windows PowerShell"
+if errorlevel 1 goto fail
 set "PS_ARGS="
 if "%RUN_PUBLIC_TESTS%"=="1" set "PS_ARGS=%PS_ARGS% -RunPublicTests"
 if "%SKIP_PORT_FORWARD%"=="1" set "PS_ARGS=%PS_ARGS% -SkipPortForward"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start_k8s.ps1"%PS_ARGS%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0%START_SCRIPT%"%PS_ARGS%
 
 if errorlevel 1 (
     echo.
     echo Backend startup failed. Review the output above.
-    pause
-    exit /b 1
+    goto fail
 )
 
 echo.
 echo Backend startup completed successfully.
 echo Press any key to close.
 pause >nul
+exit /b 0
+
+:fail
+echo.
+pause
+exit /b 1
+
+:require_file
+if exist "%~1" exit /b 0
+echo ERROR: %~2 not found.
+echo Expected path: %~dp0%~1
+exit /b 1
+
+:require_command
+where "%~1" >nul 2>&1
+if %errorlevel% equ 0 exit /b 0
+echo ERROR: %~2 was not found in PATH.
+echo Install "%~1" and try again.
+exit /b 1

@@ -157,11 +157,17 @@ def scan():
             qrHash:
               type: string
               example: a3f9d2e1b8c74f6a91e2d3b4c5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4
+            selectedVenueId:
+              type: string
+              example: ven_001
+            selectedEventId:
+              type: string
+              example: evt_001
     responses:
       200:
         description: Ticket checked in successfully
       400:
-        description: QR expired, seat not sold, ticket not active, or wrong venue
+        description: QR expired, seat not sold, ticket not active, wrong venue, or wrong event
       401:
         description: Unauthorized
       403:
@@ -175,6 +181,9 @@ def scan():
     qr_hash = body.get("qrHash")
     if not qr_hash:
         return _error("VALIDATION_ERROR", "qrHash is required.", 400)
+    
+    selected_venue_id = body.get("selectedVenueId")
+    selected_event_id = body.get("selectedEventId")
 
     staff_id       = request.user["userId"]
     staff_venue_id = request.user.get("venueId")   # from JWT only
@@ -251,6 +260,17 @@ def scan():
                 400,
                 correctVenue=correct_venue,
             )
+        
+        # 7.5 Selected event match (if provided)
+        if selected_event_id and ticket.get("eventId") != selected_event_id:
+            _log(ticket_id, staff_id, "wrong_event")
+            return _error(
+                "WRONG_EVENT",
+                "This ticket is for a different event.",
+                400,
+                ticketEventId=ticket.get("eventId"),
+                selectedEventId=selected_event_id,
+            )
 
         # 8. All checks passed
         call_service("PATCH", f"{TICKET_SERVICE}/tickets/{ticket_id}", json={"status": "used"})
@@ -296,11 +316,17 @@ def manual_verify():
             ticketId:
               type: string
               example: tkt_001
+            selectedVenueId:
+              type: string
+              example: ven_001
+            selectedEventId:
+              type: string
+              example: evt_001
     responses:
       200:
         description: Ticket checked in successfully
       400:
-        description: Ticket not active or wrong venue
+        description: Ticket not active, wrong venue, or wrong event
       401:
         description: Unauthorized
       403:
@@ -314,6 +340,9 @@ def manual_verify():
     ticket_id = body.get("ticketId")
     if not ticket_id:
         return _error("VALIDATION_ERROR", "ticketId is required.", 400)
+    
+    selected_venue_id = body.get("selectedVenueId")
+    selected_event_id = body.get("selectedEventId")
 
     staff_id       = request.user["userId"]
     staff_venue_id = request.user.get("venueId")   # from JWT only
@@ -363,6 +392,17 @@ def manual_verify():
             "This ticket is for a different venue.",
             400,
             correctVenue=correct_venue,
+        )
+    
+    # 6.5 Selected event match (if provided)
+    if selected_event_id and ticket.get("eventId") != selected_event_id:
+        _log(ticket_id, staff_id, "wrong_event")
+        return _error(
+            "WRONG_EVENT",
+            "This ticket is for a different event.",
+            400,
+            ticketEventId=ticket.get("eventId"),
+            selectedEventId=selected_event_id,
         )
 
     # 7. All checks passed

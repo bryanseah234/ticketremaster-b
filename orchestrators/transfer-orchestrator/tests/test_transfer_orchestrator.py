@@ -35,6 +35,47 @@ MOCK_TRANSFER = {
 }
 MOCK_BUYER_USER  = {"userId": BUYER,  "phoneNumber": "+6591111111"}
 MOCK_SELLER_USER = {"userId": SELLER, "phoneNumber": "+6592222222"}
+MOCK_TICKET = {
+    "ticketId": "tkt_001",
+    "inventoryId": "inv_001",
+    "eventId": "evt_001",
+    "venueId": "ven_001",
+}
+MOCK_EVENT = {
+    "eventId": "evt_001",
+    "name": "Symphony Night",
+    "date": "2026-06-01T20:00:00+00:00",
+    "image": "https://cdn.example.test/symphony.jpg",
+    "venueId": "ven_001",
+}
+MOCK_VENUE = {
+    "venueId": "ven_001",
+    "name": "Esplanade Concert Hall",
+    "address": "1 Esplanade Drive",
+}
+MOCK_INVENTORY = {
+    "inventory": [
+        {"inventoryId": "inv_001", "seatId": "seat_001"},
+    ],
+}
+MOCK_SEATS = {
+    "seats": [
+        {"seatId": "seat_001", "rowNumber": "A", "seatNumber": "12"},
+    ],
+}
+
+
+def assert_enriched_transfer(payload):
+    assert payload["sellerName"] == "Seller"
+    assert payload["ticketId"] == "tkt_001"
+    assert payload["event"]["id"] == "evt_001"
+    assert payload["event"]["name"] == "Symphony Night"
+    assert payload["event"]["image"] == "https://cdn.example.test/symphony.jpg"
+    assert payload["event"]["venue"]["name"] == "Esplanade Concert Hall"
+    assert payload["seat"]["row"] == "A"
+    assert payload["seat"]["rowNumber"] == "A"
+    assert payload["seat"]["seat"] == "12"
+    assert payload["seat"]["seatNumber"] == "12"
 
 
 def test_health(client):
@@ -43,10 +84,12 @@ def test_health(client):
 
 # ── POST /transfer/initiate ───────────────────────────────────────────────────
 
+@patch("routes._broadcast_transfer_notification")
+@patch("routes._publish_transfer_timeout")
 @patch("routes._publish_seller_notification")
 @patch("routes.call_service")
 @patch("routes.call_credit_service")
-def test_initiate_success(mock_credit, mock_svc, mock_notify, client):
+def test_initiate_success(mock_credit, mock_svc, mock_notify, mock_timeout, mock_broadcast, client):
     mock_credit.return_value = ({"creditBalance": 200.0}, None)
     mock_svc.side_effect = [
         (MOCK_LISTING, None),
@@ -56,6 +99,9 @@ def test_initiate_success(mock_credit, mock_svc, mock_notify, client):
     assert res.status_code == 201
     assert res.get_json()["data"]["status"] == "pending_seller_acceptance"
     mock_notify.assert_called_once_with("txr_001", SELLER)
+    mock_timeout.assert_called_once_with("txr_001", "lst_001", BUYER, SELLER)
+    mock_broadcast.assert_called_once()
+    assert mock_broadcast.call_args.args[0] == "transfer_initiated"
 
 
 @patch("routes.call_service")
@@ -94,8 +140,9 @@ def test_initiate_no_listing_id(client):
 
 # ── POST /transfer/<id>/buyer-verify ─────────────────────────────────────────
 
+@patch("routes._broadcast_transfer_notification")
 @patch("routes.call_service")
-def test_buyer_verify_success(mock_svc, client):
+def test_buyer_verify_success(mock_svc, mock_broadcast, client):
     mock_svc.side_effect = [
         (MOCK_TRANSFER, None),
         ({"verified": True}, None),
@@ -107,6 +154,8 @@ def test_buyer_verify_success(mock_svc, client):
                       json={"otp": "123456"}, headers=_auth(BUYER))
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "pending_seller_otp"
+    mock_broadcast.assert_called_once()
+    assert mock_broadcast.call_args.args[0] == "buyer_verified"
 
 
 @patch("routes.call_service")
@@ -139,8 +188,9 @@ def test_buyer_verify_wrong_user(mock_svc, client):
 
 # ── POST /transfer/<id>/seller-accept ────────────────────────────────────────
 
+@patch("routes._broadcast_transfer_notification")
 @patch("routes.call_service")
-def test_seller_accept_success(mock_svc, client):
+def test_seller_accept_success(mock_svc, mock_broadcast, client):
     transfer = {**MOCK_TRANSFER, "status": "pending_seller_acceptance", "buyerOtpVerified": True}
     mock_svc.side_effect = [
         (transfer, None),
@@ -151,6 +201,8 @@ def test_seller_accept_success(mock_svc, client):
     res = client.post("/transfer/txr_001/seller-accept", headers=_auth(SELLER))
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "pending_buyer_otp"
+    mock_broadcast.assert_called_once()
+    assert mock_broadcast.call_args.args[0] == "seller_accepted"
 
 
 @patch("routes.call_service")
@@ -170,9 +222,16 @@ def test_seller_accept_wrong_status(mock_svc, client):
 
 # ── POST /transfer/<id>/seller-verify — happy path ───────────────────────────
 
+@patch("routes._build_transfer_notification_payload", return_value={
+    "transferId": "txr_001",
+    "ticketId": "tkt_001",
+    "eventName": "Symphony Night",
+    "event": {"id": "evt_001", "name": "Symphony Night"},
+})
+@patch("routes._broadcast_notification")
 @patch("routes.call_credit_service")
 @patch("routes.call_service")
-def test_seller_verify_full_saga_success(mock_svc, mock_credit, client):
+def test_seller_verify_full_saga_success(mock_svc, mock_credit, mock_broadcast, _mock_payload, client):
     transfer = {
         **MOCK_TRANSFER,
         "status": "pending_seller_otp",
@@ -202,6 +261,7 @@ def test_seller_verify_full_saga_success(mock_svc, mock_credit, client):
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "completed"
     assert res.get_json()["data"]["ticket"]["newOwnerId"] == BUYER
+    assert [call.args[0] for call in mock_broadcast.call_args_list] == ["transfer_update", "ticket_update"]
 
 
 # ── POST /transfer/<id>/seller-verify — failure scenarios ────────────────────
@@ -272,15 +332,36 @@ def test_seller_verify_saga_compensation_on_failure(mock_svc, mock_credit, clien
 
 @patch("routes.call_service")
 def test_get_transfer_buyer(mock_svc, client):
-    mock_svc.return_value = (MOCK_TRANSFER, None)
+    mock_svc.side_effect = [
+        (MOCK_TRANSFER, None),
+        ({}, None),
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+        (MOCK_INVENTORY, None),
+        (MOCK_SEATS, None),
+    ]
     res = client.get("/transfer/txr_001", headers=_auth(BUYER))
     assert res.status_code == 200
+    assert_enriched_transfer(res.get_json()["data"])
 
 
 @patch("routes.call_service")
 def test_get_transfer_seller(mock_svc, client):
-    mock_svc.return_value = (MOCK_TRANSFER, None)
-    assert client.get("/transfer/txr_001", headers=_auth(SELLER)).status_code == 200
+    mock_svc.side_effect = [
+        (MOCK_TRANSFER, None),
+        ({}, None),
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+        (MOCK_INVENTORY, None),
+        (MOCK_SEATS, None),
+    ]
+    res = client.get("/transfer/txr_001", headers=_auth(SELLER))
+    assert res.status_code == 200
+    assert_enriched_transfer(res.get_json()["data"])
 
 
 @patch("routes.call_service")
@@ -292,8 +373,9 @@ def test_get_transfer_third_party_denied(mock_svc, client):
 
 # ── POST /transfer/<id>/cancel ────────────────────────────────────────────────
 
+@patch("routes._broadcast_transfer_notification")
 @patch("routes.call_service")
-def test_cancel_success(mock_svc, client):
+def test_cancel_success(mock_svc, mock_broadcast, client):
     mock_svc.side_effect = [
         (MOCK_TRANSFER, None),
         (None, None),
@@ -304,6 +386,8 @@ def test_cancel_success(mock_svc, client):
     res = client.post("/transfer/txr_001/cancel", headers=_auth(BUYER))
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "cancelled"
+    mock_broadcast.assert_called_once()
+    assert mock_broadcast.call_args.args[0] == "transfer_cancelled"
 
 
 @patch("routes.call_service")
@@ -311,3 +395,43 @@ def test_cancel_completed_transfer(mock_svc, client):
     transfer = {**MOCK_TRANSFER, "status": "completed"}
     mock_svc.return_value = (transfer, None)
     assert client.post("/transfer/txr_001/cancel", headers=_auth(BUYER)).status_code == 400
+
+
+@patch("routes.call_service")
+def test_get_pending_transfers_enriched(mock_svc, client):
+    pending = [{**MOCK_TRANSFER, "status": "pending_seller_acceptance"}]
+    mock_svc.side_effect = [
+        ({"transfers": pending}, None),
+        ({}, None),
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+        (MOCK_INVENTORY, None),
+        (MOCK_SEATS, None),
+    ]
+    res = client.get("/transfer/pending", headers=_auth(SELLER))
+    assert res.status_code == 200
+    transfers = res.get_json()["data"]["transfers"]
+    assert len(transfers) == 1
+    assert_enriched_transfer(transfers[0])
+
+
+@patch("routes.call_service")
+def test_get_my_pending_transfers_enriched(mock_svc, client):
+    pending = [{**MOCK_TRANSFER, "status": "pending_buyer_otp"}]
+    mock_svc.side_effect = [
+        ({"transfers": pending}, None),
+        ({}, None),
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+        (MOCK_INVENTORY, None),
+        (MOCK_SEATS, None),
+    ]
+    res = client.get("/transfer/my-pending", headers=_auth(BUYER))
+    assert res.status_code == 200
+    transfers = res.get_json()["data"]["transfers"]
+    assert len(transfers) == 1
+    assert_enriched_transfer(transfers[0])

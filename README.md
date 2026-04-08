@@ -116,24 +116,26 @@ wsl --shutdown
 
 **Note:** If your machine has less than 16GB RAM, reduce memory to 8192 (8GB) but expect slower performance.
 
-#### 2. Obtain the Secrets File
+#### 2. Create the Secrets File
 
 The backend requires a secrets file that contains API keys, database passwords, and other sensitive configuration.
 
-Ask your backend maintainer for `k8s/base/secrets.local.yaml` and place it at:
+Start from the example file and create your local secrets file at:
 
-```text
-ticketremaster-b/k8s/base/secrets.local.yaml
+```powershell
+Copy-Item k8s/base/secrets.local.yaml.example k8s/base/secrets.local.yaml
 ```
 
-This file is gitignored and must be obtained from the team. It typically contains:
+Then open `k8s/base/secrets.local.yaml` and fill in the required values yourself. This file is gitignored and should stay local to your machine.
+
+The file typically contains:
 
 - Cloudflare tunnel token (required for Option 2 only)
 - OutSystems API keys for credit operations
 - Database passwords
 - Stripe and OTP wrapper secrets
 
-**Troubleshooting:** If you have an outdated version, you may see `400` errors during registration or `401` errors during login.
+**Troubleshooting:** Incorrect secrets can show up as `400` errors during registration, `401` errors during login, or database connection failures during startup.
 
 #### 3. Start Minikube
 
@@ -169,6 +171,14 @@ This setup runs the backend on your machine and exposes it only on `http://local
 Navigate to the `ticketremaster-b` directory and run:
 
 ```powershell
+.\start-backend.bat
+```
+
+Choose `1` for `Localhost only`.
+
+If you prefer to bypass the batch wrapper, the direct PowerShell equivalent is:
+
+```powershell
 .\scripts\start_k8s.ps1
 ```
 
@@ -183,6 +193,8 @@ The script will:
 7. Run database seed jobs
 8. Open a port-forward to Kong on `http://localhost:8000`
 9. Run Newman smoke tests to verify everything works
+
+Seeding is part of the normal startup flow in this mode.
 
 **What to Expect:**
 
@@ -268,6 +280,74 @@ Solution: Restart it manually:
 kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
 ```
 
+#### Advanced: Manual Control for Option 1 (Localhost)
+
+Use this only if you want to bring up the localhost stack without `start-backend.bat` or `.\scripts\start_k8s.ps1`.
+
+1. Start Minikube and verify the node is ready:
+
+   ```powershell
+   minikube start
+   kubectl get nodes
+   ```
+
+2. Build the backend images and load them into Minikube:
+
+   ```powershell
+   .\scripts\build_k8s_images.ps1
+   docker images --format "{{.Repository}}:{{.Tag}}" | Select-String "^ticketremaster/.+:local-k8s-20260329$" | ForEach-Object { minikube image load $_.Line.Trim() }
+   ```
+
+3. Apply the Kubernetes manifests:
+
+   ```powershell
+   kubectl apply -k k8s/base
+   ```
+
+4. Wait for the data plane StatefulSets:
+
+   ```powershell
+   kubectl get statefulset -n ticketremaster-data -o name | ForEach-Object { kubectl rollout status $_ -n ticketremaster-data --timeout=300s }
+   ```
+
+5. Wait for the core deployments:
+
+   ```powershell
+   kubectl get deployment -n ticketremaster-core -o name | ForEach-Object { kubectl rollout status $_ -n ticketremaster-core --timeout=300s }
+   ```
+
+6. Wait for Kong:
+
+   ```powershell
+   kubectl rollout status deployment/kong -n ticketremaster-edge --timeout=300s
+   ```
+
+7. Wait for seed jobs to complete:
+
+   ```powershell
+   kubectl wait --for=condition=complete job --all -n ticketremaster-core --timeout=600s
+   ```
+
+   Both Option 1 and Option 2 use this same seed flow. Seeding happens before the localhost/public access choice matters.
+
+   If you need to reseed later:
+
+   ```powershell
+   .\scripts\rerun_k8s_seeds.ps1
+   ```
+
+8. Open the localhost gateway:
+
+   ```powershell
+   kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
+   ```
+
+9. Run the localhost smoke tests:
+
+   ```powershell
+   newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-localhost.postman_environment.json --reporters cli
+   ```
+
 ### Option 2: Public Access Setup (Cloudflare Tunnel)
 
 This setup exposes your local backend to the internet via Cloudflare Tunnel, allowing you to access it from anywhere.
@@ -330,10 +410,25 @@ You need to set up your own Cloudflare Tunnel:
 Navigate to the `ticketremaster-b` directory and run:
 
 ```powershell
-.\scripts\start_k8s.ps1 -RunPublicTests
+.\start-backend.bat
 ```
 
-This will do everything from Option 1, plus deploy the Cloudflare tunnel connector, wait for the tunnel to establish, and run Newman smoke tests against both localhost and the public URL.
+Choose:
+
+- `2` for `Cloudflare only`
+- `3` for `Both`
+
+If you prefer to bypass the batch wrapper, the direct PowerShell equivalents are:
+
+```powershell
+# Both localhost and Cloudflare
+.\scripts\start_k8s.ps1 -RunPublicTests
+
+# Cloudflare only (no localhost port-forward)
+.\scripts\start_k8s.ps1 -RunPublicTests -SkipPortForward
+```
+
+This does the same base startup and seeding as Option 1, then deploys the Cloudflare tunnel connector, waits for the tunnel to establish, and runs Newman smoke tests against the selected surfaces.
 
 **If you only want the public URL (no local port-forward):**
 
@@ -419,234 +514,43 @@ Solution: Wait 2-3 minutes for the tunnel to stabilize, then run tests again:
 newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
 ```
 
-### Manual Control (Advanced)
+#### Advanced: Manual Add-On for Option 2 (Cloudflare)
 
-If you prefer full control over the startup process instead of using the automated script, follow these steps:
+Use this if you want the public setup without the automated wrapper.
 
-#### Step 1: Start the Cluster
+1. Complete the Option 1 manual flow through the seed step. Both modes use the same seed jobs.
+2. Wait for the Cloudflare connector:
 
-```powershell
-minikube start
-```
+   ```powershell
+   kubectl rollout status deployment/cloudflared -n ticketremaster-edge --timeout=300s
+   ```
 
-This starts your local Kubernetes cluster. Verify it's running:
+3. Set the public tunnel URL in `postman/TicketRemaster.gateway-public.postman_environment.json`.
+4. If you want both localhost and public access, keep the Kong port-forward running. If you want Cloudflare only, skip the port-forward.
+5. Run the public smoke tests:
 
-```powershell
-kubectl get nodes
-```
+   ```powershell
+   newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-public.postman_environment.json --reporters cli
+   ```
 
-#### Step 2: Build Docker Images
+### Windows Helper Scripts
 
-Build all service and orchestrator images (first time or after code changes):
+If you are using the Windows wrapper scripts, these are the main entry points:
 
-```powershell
-.\scripts\build_k8s_images.ps1
-```
-
-This builds images with the tag `local-k8s-20260329` for all 20 services and orchestrators. The build process takes 10-15 minutes on first run.
-
-Load the images into Minikube:
-
-```powershell
-minikube image load ticketremaster/user-service:local-k8s-20260329
-minikube image load ticketremaster/venue-service:local-k8s-20260329
-minikube image load ticketremaster/seat-service:local-k8s-20260329
-minikube image load ticketremaster/event-service:local-k8s-20260329
-minikube image load ticketremaster/seat-inventory-service:local-k8s-20260329
-minikube image load ticketremaster/ticket-service:local-k8s-20260329
-minikube image load ticketremaster/ticket-log-service:local-k8s-20260329
-minikube image load ticketremaster/marketplace-service:local-k8s-20260329
-minikube image load ticketremaster/transfer-service:local-k8s-20260329
-minikube image load ticketremaster/credit-transaction-service:local-k8s-20260329
-minikube image load ticketremaster/stripe-wrapper:local-k8s-20260329
-minikube image load ticketremaster/otp-wrapper:local-k8s-20260329
-minikube image load ticketremaster/auth-orchestrator:local-k8s-20260329
-minikube image load ticketremaster/event-orchestrator:local-k8s-20260329
-minikube image load ticketremaster/credit-orchestrator:local-k8s-20260329
-minikube image load ticketremaster/ticket-purchase-orchestrator:local-k8s-20260329
-minikube image load ticketremaster/qr-orchestrator:local-k8s-20260329
-minikube image load ticketremaster/marketplace-orchestrator:local-k8s-20260329
-minikube image load ticketremaster/transfer-orchestrator:local-k8s-20260329
-minikube image load ticketremaster/ticket-verification-orchestrator:local-k8s-20260329
-```
-
-**Note:** The automated script handles this automatically and only loads missing images.
-
-#### Step 3: Apply Kubernetes Manifests
-
-Apply all manifests from the `k8s/base` directory:
-
-```powershell
-kubectl apply -k k8s/base
-```
-
-This creates:
-
-- 3 namespaces: `ticketremaster-data`, `ticketremaster-core`, `ticketremaster-edge`
-- 10 PostgreSQL StatefulSets (one per service database)
-- Redis and RabbitMQ StatefulSets
-- 20 service and orchestrator Deployments
-- Kong gateway Deployment
-- Cloudflared Deployment (if tunnel token is configured)
-- 5 seed Jobs for initial data population
-- ConfigMaps and Secrets
-- Services and NetworkPolicies
-
-#### Step 4: Wait for Data Plane
-
-Wait for Redis and RabbitMQ to be ready before core services start:
-
-```powershell
-kubectl rollout status statefulset/redis -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/rabbitmq -n ticketremaster-data --timeout=300s
-```
-
-Wait for all database StatefulSets:
-
-```powershell
-kubectl rollout status statefulset/user-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/venue-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/seat-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/event-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/seat-inventory-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/ticket-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/ticket-log-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/marketplace-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/transfer-service-db -n ticketremaster-data --timeout=300s
-kubectl rollout status statefulset/credit-transaction-service-db -n ticketremaster-data --timeout=300s
-```
-
-#### Step 5: Wait for Core Services
-
-Wait for all core services and orchestrators to be ready:
-
-```powershell
-kubectl rollout status deployment/user-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/venue-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/seat-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/event-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/seat-inventory-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/ticket-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/ticket-log-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/marketplace-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/transfer-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/credit-transaction-service -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/stripe-wrapper -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/otp-wrapper -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/auth-orchestrator -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/event-orchestrator -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/credit-orchestrator -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/ticket-purchase-orchestrator -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/qr-orchestrator -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/marketplace-orchestrator -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/transfer-orchestrator -n ticketremaster-core --timeout=300s
-kubectl rollout status deployment/ticket-verification-orchestrator -n ticketremaster-core --timeout=300s
-```
-
-#### Step 6: Wait for Edge Gateway
-
-Wait for Kong to be ready:
-
-```powershell
-kubectl rollout status deployment/kong -n ticketremaster-edge --timeout=300s
-```
-
-If using Cloudflare tunnel:
-
-```powershell
-kubectl rollout status deployment/cloudflared -n ticketremaster-edge --timeout=300s
-```
-
-#### Step 7: Wait for Seed Jobs to Complete
-
-The seed jobs populate initial data into the databases. Wait for all jobs to complete:
-
-```powershell
-kubectl wait --for=condition=complete job --all -n ticketremaster-core --timeout=600s
-```
-
-**What the seed jobs do:**
-
-- `seed-venues`: Creates 3 sample venues (Singapore Indoor Stadium, Esplanade Concert Hall, Marina Bay Sands)
-- `seed-events`: Creates 10 sample events across different venues with various dates and pricing
-- `seed-seats`: Creates seat layouts for each venue (sections, rows, seat numbers)
-- `seed-seat-inventory`: Links seats to events and sets initial availability
-- `seed-users`: Creates test user accounts for development
-
-Check seed job status:
-
-```powershell
-kubectl get jobs -n ticketremaster-core
-```
-
-All jobs should show "1/1" completions. If any job failed, check its logs:
-
-```powershell
-kubectl logs job/seed-venues -n ticketremaster-core
-kubectl logs job/seed-events -n ticketremaster-core
-kubectl logs job/seed-seats -n ticketremaster-core
-kubectl logs job/seed-seat-inventory -n ticketremaster-core
-kubectl logs job/seed-users -n ticketremaster-core
-```
-
-**Verify seed data was created:**
-
-Check that events were seeded:
-
-```powershell
-kubectl exec -n ticketremaster-core deployment/event-service -- curl -s http://localhost:5000/events
-```
-
-You should see JSON with multiple events.
-
-**Re-running seed jobs:**
-
-If you need to re-populate data (e.g., after database reset):
-
-```powershell
-.\scripts\rerun_k8s_seeds.ps1
-```
-
-Or manually:
-
-```powershell
-kubectl delete job seed-venues seed-events seed-seats seed-seat-inventory seed-users -n ticketremaster-core
-kubectl apply -k k8s/base
-kubectl wait --for=condition=complete job --all -n ticketremaster-core --timeout=600s
-```
-
-#### Step 8: Open Port-Forward
-
-Open a port-forward to Kong (keep this terminal open while using the backend):
-
-```powershell
-kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
-```
-
-Kong is now accessible at `http://localhost:8000`.
-
-#### Step 9: Run Smoke Tests
-
-Verify everything works with Newman:
-
-```powershell
-newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/TicketRemaster.gateway-localhost.postman_environment.json --reporters cli
-```
-
-The smoke tests verify:
-
-- User registration and login
-- Event listing and details
-- Seat availability queries
-- Credit balance checks
-- Ticket purchase flow
-- QR code generation
-- Marketplace listing
-- Transfer initiation
-
-All tests should pass with green checkmarks.
+- `.\start-backend.bat`: prompts for `Localhost only`, `Cloudflare only`, or `Both`, then runs the matching startup flow
+- `.\test-backend.bat`: reruns gateway smoke tests against public, localhost, or both
+- `.\check-status.bat`: prints pod status for `ticketremaster-core`, `ticketremaster-data`, and `ticketremaster-edge`, then checks the active localhost gateway URL and the public URL
+- `.\stop-backend.bat`: stops local `kubectl` port-forwards and stops Minikube
 
 ### Checking Cluster Status
+
+On Windows, the quickest summary is:
+
+```powershell
+.\check-status.bat
+```
+
+Or inspect things manually:
 
 View all pods:
 
@@ -703,9 +607,11 @@ Use `minikube delete` if you want a completely fresh start or if you're having p
 
 **Issue: Everything was working, now nothing works after restart**
 
-Cause: Minikube's persistent volumes were wiped but seed jobs don't re-run automatically.
+Cause: Minikube's persistent volumes were wiped and the cluster no longer has the expected seed data.
 
-Solution: Re-run seed jobs:
+If you use the automated startup flow (`.\start-backend.bat` or `.\scripts\start_k8s.ps1`), it will try to detect missing seed data and reseed automatically.
+
+If you need to reseed manually, run:
 
 ```powershell
 .\scripts\rerun_k8s_seeds.ps1
@@ -723,12 +629,14 @@ kubectl wait --for=condition=complete job --all -n ticketremaster-core --timeout
 
 Cause: Database passwords in `secrets.local.yaml` don't match what the databases expect.
 
-Solution: Get the latest `secrets.local.yaml` from your backend maintainer and reapply:
+Solution: Verify the values in `k8s/base/secrets.local.yaml` are correct. If the PostgreSQL volumes were already created with different passwords, recreate the cluster data and start again:
 
 ```powershell
-kubectl delete -k k8s/base
-kubectl apply -k k8s/base
+minikube delete
+minikube start
 ```
+
+Then rerun the normal startup flow.
 
 **Issue: Out of disk space**
 

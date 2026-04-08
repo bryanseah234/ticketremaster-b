@@ -24,6 +24,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Tag = "local-k8s-20260329"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$script:LocalGatewayStateFile = Join-Path $repoRoot ".local-gateway-url"
 $script:LocalGatewayPort = 8000
 $script:LocalGatewayUrl = "http://localhost:8000"
 
@@ -167,6 +168,21 @@ function Wait-StatefulSetsReady {
     }
 }
 
+function Restart-StatefulSets {
+    param([Parameter(Mandatory)][string]$Namespace)
+
+    $names = Get-KubernetesNames -Kind statefulset -Namespace $Namespace
+    if ($names.Count -eq 0) {
+        Write-OK "No StatefulSets found in $Namespace"
+        return
+    }
+
+    foreach ($name in $names) {
+        Write-Host "    Restarting statefulset/$name..."
+        Invoke-External -Command "kubectl" -Arguments @("rollout", "restart", "statefulset/$name", "-n", $Namespace) -ErrorMessage "Failed to restart StatefulSet $name in $Namespace."
+    }
+}
+
 function Wait-DeploymentsReady {
     param(
         [Parameter(Mandatory)][string]$Namespace,
@@ -293,6 +309,9 @@ function Get-FreeTcpPort {
 
 function Ensure-PortForward {
     if ($SkipPortForward -or $PublicOnly) {
+        if (Test-Path $script:LocalGatewayStateFile) {
+            Remove-Item $script:LocalGatewayStateFile -Force -ErrorAction SilentlyContinue
+        }
         return
     }
 
@@ -302,6 +321,7 @@ function Ensure-PortForward {
     if (Test-KongGateway -Url "http://localhost:$preferredPort") {
         $script:LocalGatewayPort = $preferredPort
         $script:LocalGatewayUrl = "http://localhost:$preferredPort"
+        Set-Content -Path $script:LocalGatewayStateFile -Value $script:LocalGatewayUrl
         Write-OK "Existing Kong listener detected on $script:LocalGatewayUrl"
         return
     }
@@ -332,6 +352,7 @@ function Ensure-PortForward {
         }
     }
 
+    Set-Content -Path $script:LocalGatewayStateFile -Value $script:LocalGatewayUrl
     Write-OK "Kong is available at $script:LocalGatewayUrl"
 }
 
@@ -386,8 +407,8 @@ Write-Step "Applying k8s manifests"
 Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed."
 Write-OK "Manifests applied"
 
-Write-Step "Restarting all deployments"
-& kubectl rollout restart deployment -n ticketremaster-data 2>&1 | Out-Null
+Write-Step "Restarting all workloads"
+Restart-StatefulSets -Namespace "ticketremaster-data"
 & kubectl rollout restart deployment -n ticketremaster-core 2>&1 | Out-Null
 & kubectl rollout restart deployment -n ticketremaster-edge 2>&1 | Out-Null
 Write-OK "Restart triggered"

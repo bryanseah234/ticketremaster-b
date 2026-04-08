@@ -40,6 +40,9 @@ CREDIT_TXN_SERVICE  = os.environ.get("CREDIT_TRANSACTION_SERVICE_URL", "http://c
 TICKET_SERVICE      = os.environ.get("TICKET_SERVICE_URL",             "http://ticket-service:5000")
 USER_SERVICE        = os.environ.get("USER_SERVICE_URL",               "http://user-service:5000")
 EVENT_SERVICE       = os.environ.get("EVENT_SERVICE_URL",              "http://event-service:5000")
+SEAT_INV_SERVICE    = os.environ.get("SEAT_INVENTORY_SERVICE_URL",     "http://seat-inventory-service:5000")
+SEAT_SERVICE        = os.environ.get("SEAT_SERVICE_URL",               "http://seat-service:5000")
+NOTIFICATION_SERVICE = os.environ.get("NOTIFICATION_SERVICE_URL",      "http://notification-service:8109")
 
 
 def _error(code, message, status):
@@ -58,6 +61,174 @@ def _get_credit_balance(credit_data):
         else 0.0
     )
     return float(raw)
+
+
+def _safe_get(url, **kwargs):
+    """Return service data or None without failing the caller."""
+    data, err = call_service("GET", url, **kwargs)
+    if err:
+        logger.warning("Downstream enrichment lookup failed for %s: %s", url, err)
+        return None
+    return data
+
+
+def _first_present(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _build_transfer_context(transfer):
+    """Load related transfer resources while tolerating partial failures."""
+    listing = _safe_get(f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}") if transfer.get("listingId") else None
+
+    ticket_id = _first_present(
+        transfer.get("ticketId"),
+        (listing or {}).get("ticketId"),
+    )
+    ticket = _safe_get(f"{TICKET_SERVICE}/tickets/{ticket_id}") if ticket_id else None
+
+    event_id = _first_present(
+        transfer.get("eventId"),
+        (ticket or {}).get("eventId"),
+    )
+    event = _safe_get(f"{EVENT_SERVICE}/events/{event_id}") if event_id else None
+
+    venue_id = _first_present(
+        (event or {}).get("venueId"),
+        (ticket or {}).get("venueId"),
+        transfer.get("venueId"),
+    )
+    venue = _safe_get(f"{VENUE_SERVICE}/venues/{venue_id}") if venue_id else None
+
+    seller = _safe_get(f"{USER_SERVICE}/users/{transfer['sellerId']}") if transfer.get("sellerId") else None
+
+    seat = None
+    inventory_id = _first_present(
+        (ticket or {}).get("inventoryId"),
+        transfer.get("inventoryId"),
+    )
+    if event_id and inventory_id:
+        inv_data = _safe_get(f"{SEAT_INV_SERVICE}/inventory/event/{event_id}")
+        inventory_item = next(
+            (
+                item
+                for item in (inv_data or {}).get("inventory", [])
+                if item.get("inventoryId") == inventory_id
+            ),
+            None,
+        )
+        seat_id = (inventory_item or {}).get("seatId")
+        if venue_id and seat_id:
+            seats_data = _safe_get(f"{SEAT_SERVICE}/seats/venue/{venue_id}")
+            seat = next(
+                (
+                    item
+                    for item in (seats_data or {}).get("seats", [])
+                    if item.get("seatId") == seat_id
+                ),
+                None,
+            )
+
+    return {
+        "seller": seller,
+        "listing": listing,
+        "ticket": ticket,
+        "ticketId": ticket_id,
+        "event": event,
+        "eventId": event_id,
+        "venue": venue,
+        "seat": seat,
+    }
+
+
+def _build_event_payload(context):
+    event = context["event"] or {}
+    venue = context["venue"]
+    event_id = _first_present(event.get("eventId"), context["eventId"])
+
+    if not any((event_id, event.get("name"), event.get("date"), venue)):
+        return None
+
+    return {
+        "id": event_id,
+        "eventId": event_id,
+        "name": event.get("name"),
+        "date": event.get("date"),
+        "image": _first_present(event.get("image"), event.get("imageUrl")),
+        "venue": venue,
+    }
+
+
+def _build_seat_payload(context):
+    seat = context["seat"] or {}
+    row_number = _first_present(seat.get("rowNumber"), seat.get("row"))
+    seat_number = _first_present(seat.get("seatNumber"), seat.get("seat"))
+    gate = _first_present(seat.get("gate"), seat.get("entryGate"))
+    section = seat.get("section")
+
+    if not any((seat.get("seatId"), row_number, seat_number, gate, section)):
+        return None
+
+    return {
+        "seatId": seat.get("seatId"),
+        "section": section,
+        "row": row_number,
+        "rowNumber": row_number,
+        "seat": seat_number,
+        "seatNumber": seat_number,
+        "gate": gate,
+    }
+
+
+def _build_transfer_notification_payload(event_type, transfer_data):
+    enriched = _enrich_transfer(transfer_data)
+    payload = {
+        "eventType": event_type,
+        "transferId": enriched.get("transferId"),
+        "listingId": enriched.get("listingId"),
+        "ticketId": enriched.get("ticketId"),
+        "buyerId": enriched.get("buyerId"),
+        "sellerId": enriched.get("sellerId"),
+        "sellerName": enriched.get("sellerName"),
+        "status": enriched.get("status"),
+        "creditAmount": enriched.get("creditAmount"),
+        "completedAt": enriched.get("completedAt"),
+        "event": enriched.get("event"),
+        "seat": enriched.get("seat"),
+    }
+    if payload["event"]:
+        payload["eventName"] = payload["event"].get("name")
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+def _broadcast_notification(notification_type, payload):
+    """Broadcast notification payload without breaking the transfer flow."""
+    try:
+        _, err = call_service("POST", f"{NOTIFICATION_SERVICE}/broadcast", json={
+            "type": notification_type,
+            "payload": payload,
+        })
+        if err:
+            logger.warning("Failed to broadcast %s notification: %s", notification_type, err)
+            return
+        logger.info(
+            "Broadcasted %s notification for transfer %s",
+            notification_type,
+            payload.get("transferId"),
+        )
+    except Exception as exc:
+        logger.warning("Failed to broadcast %s notification: %s", notification_type, exc)
+
+
+def _broadcast_transfer_notification(event_type, transfer_data):
+    """
+    Broadcast transfer state change to notification service.
+    Non-blocking — failures are logged but do not affect transfer flow.
+    """
+    payload = _build_transfer_notification_payload(event_type, transfer_data)
+    _broadcast_notification("transfer_update", payload)
 
 
 def _publish_seller_notification(transfer_id, seller_id):
@@ -390,6 +561,14 @@ def initiate():
         buyer_id,
         seller_id,
     )
+    
+    # Broadcast transfer initiation
+    _broadcast_transfer_notification("transfer_initiated", {
+        "transferId": transfer["transferId"],
+        "buyerId": buyer_id,
+        "sellerId": seller_id,
+        "status": "pending_seller_acceptance",
+    })
 
     return jsonify({"data": {
         "transferId": transfer["transferId"],
@@ -471,6 +650,14 @@ def buyer_verify(transfer_id):
         "sellerVerificationSid": seller_otp["sid"],
         "status":                "pending_seller_otp",
     })
+    
+    # Broadcast buyer verification
+    _broadcast_transfer_notification("buyer_verified", {
+        "transferId": transfer_id,
+        "buyerId": buyer_id,
+        "sellerId": transfer["sellerId"],
+        "status": "pending_seller_otp",
+    })
 
     return jsonify({"data": {
         "transferId": transfer_id,
@@ -529,6 +716,14 @@ def seller_accept(transfer_id):
     call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
         "buyerVerificationSid": otp_result["sid"],
         "status":               "pending_buyer_otp",
+    })
+    
+    # Broadcast seller acceptance
+    _broadcast_transfer_notification("seller_accepted", {
+        "transferId": transfer_id,
+        "buyerId": transfer["buyerId"],
+        "sellerId": seller_id,
+        "status": "pending_buyer_otp",
     })
 
     return jsonify({"data": {
@@ -600,6 +795,14 @@ def seller_reject(transfer_id):
                      json={"status": "active"})
         call_service("PATCH", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}",
                      json={"status": "listed"})
+    
+    # Broadcast seller rejection
+    _broadcast_transfer_notification("seller_rejected", {
+        "transferId": transfer_id,
+        "buyerId": transfer["buyerId"],
+        "sellerId": seller_id,
+        "status": "cancelled",
+    })
 
     return jsonify({"data": {"transferId": transfer_id, "status": "cancelled",
                              "message": "Transfer rejected."}}), 200
@@ -700,6 +903,32 @@ def seller_verify(transfer_id):
             buyer_balance=buyer_balance,
             seller_balance=seller_balance,
         )
+
+        completed_transfer = {
+            "transferId": transfer_id,
+            "listingId": transfer["listingId"],
+            "buyerId": buyer_id,
+            "sellerId": seller_id,
+            "ticketId": ticket_id,
+            "status": "completed",
+        }
+
+        transfer_payload = _build_transfer_notification_payload("transfer_completed", completed_transfer)
+        _broadcast_notification("transfer_update", transfer_payload)
+
+        ticket_payload = {
+            "eventType": "ticket_transferred",
+            "ticketId": ticket_id,
+            "ownerId": buyer_id,
+            "previousOwnerId": seller_id,
+            "transferId": transfer_id,
+            "event": transfer_payload.get("event"),
+            "eventName": transfer_payload.get("eventName"),
+        }
+        _broadcast_notification(
+            "ticket_update",
+            {key: value for key, value in ticket_payload.items() if value is not None},
+        )
     except Exception:
         return _error("INTERNAL_ERROR", "Transfer failed — no credits were charged.", 500)
 
@@ -709,6 +938,50 @@ def seller_verify(transfer_id):
         "completedAt": datetime.now(timezone.utc).isoformat(),
         "ticket": {"ticketId": ticket_id, "newOwnerId": buyer_id, "status": "active"},
     }}), 200
+
+
+# ── Helper: Enrich Transfer ──────────────────────────────────────────────────
+
+def _enrich_transfer(transfer):
+    """
+    Enrich a transfer record with seller name, ticket, event, and seat details.
+    Tolerates partial downstream failures without collapsing the full response.
+    """
+    enriched = transfer.copy()
+
+    context = _build_transfer_context(transfer)
+    seller = context["seller"] or {}
+    event_payload = _build_event_payload(context)
+    seat_payload = _build_seat_payload(context)
+    venue = context["venue"]
+
+    enriched["sellerName"] = _first_present(
+        seller.get("name"),
+        seller.get("fullName"),
+        seller.get("email"),
+        "Seller",
+    )
+    enriched["ticketId"] = context["ticketId"]
+    if context["listing"]:
+        enriched["listing"] = context["listing"]
+    if context["ticket"]:
+        enriched["ticket"] = context["ticket"]
+    if venue:
+        enriched["venue"] = venue
+        enriched["venueName"] = venue.get("name")
+    if event_payload:
+        enriched["event"] = event_payload
+        enriched["eventName"] = event_payload.get("name")
+        enriched["eventDate"] = event_payload.get("date")
+        enriched["eventImage"] = event_payload.get("image")
+    if seat_payload:
+        enriched["seat"] = seat_payload
+        enriched["seatSection"] = seat_payload.get("section")
+        enriched["seatRow"] = seat_payload.get("row")
+        enriched["seatNumber"] = seat_payload.get("seat")
+        enriched["seatGate"] = seat_payload.get("gate")
+
+    return enriched
 
 
 # ── GET /transfer/pending ─────────────────────────────────────────────────────
@@ -725,7 +998,7 @@ def get_pending_transfers():
       - BearerAuth: []
     responses:
       200:
-        description: List of transfers with status pending_seller_acceptance
+        description: List of enriched transfers with status pending_seller_acceptance
         schema:
           type: object
           properties:
@@ -746,12 +1019,19 @@ def get_pending_transfers():
                       sellerId:
                         type: string
                         example: usr_002
+                      sellerName:
+                        type: string
+                        example: John Doe
                       creditAmount:
                         type: number
                         example: 80.0
                       status:
                         type: string
                         example: pending_seller_acceptance
+                      event:
+                        type: object
+                      seat:
+                        type: object
       401:
         description: Unauthorized
       503:
@@ -762,7 +1042,78 @@ def get_pending_transfers():
                                params={"sellerId": seller_id, "status": "pending_seller_acceptance"})
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not retrieve transfers.", 503)
-    return jsonify({"data": {"transfers": result.get("transfers", [])}}), 200
+    
+    # Enrich each transfer
+    transfers = result.get("transfers", [])
+    enriched_transfers = [_enrich_transfer(t) for t in transfers]
+    
+    return jsonify({"data": {"transfers": enriched_transfers}}), 200
+
+
+# ── GET /transfer/my-pending ──────────────────────────────────────────────────
+
+@bp.get("/transfer/my-pending")
+@require_auth
+def get_my_pending_transfers():
+    """
+    Get all transfers where the authenticated buyer has a pending OTP to enter
+    ---
+    tags:
+      - Transfer
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of enriched transfers with status pending_buyer_otp
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transfers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      transferId:
+                        type: string
+                        example: txr_001
+                      buyerId:
+                        type: string
+                        example: usr_001
+                      sellerId:
+                        type: string
+                        example: usr_002
+                      sellerName:
+                        type: string
+                        example: John Doe
+                      creditAmount:
+                        type: number
+                        example: 80.0
+                      status:
+                        type: string
+                        example: pending_buyer_otp
+                      event:
+                        type: object
+                      seat:
+                        type: object
+      401:
+        description: Unauthorized
+      503:
+        description: Transfer service unavailable
+    """
+    buyer_id = request.user["userId"]
+    result, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers",
+                               params={"buyerId": buyer_id, "status": "pending_buyer_otp"})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve transfers.", 503)
+    
+    # Enrich each transfer
+    transfers = result.get("transfers", [])
+    enriched_transfers = [_enrich_transfer(t) for t in transfers]
+    
+    return jsonify({"data": {"transfers": enriched_transfers}}), 200
 
 
 # ── GET /transfer/<id> ────────────────────────────────────────────────────────
@@ -799,24 +1150,8 @@ def get_transfer(transfer_id):
     if user_id not in (transfer["buyerId"], transfer["sellerId"]):
         return _error("AUTH_FORBIDDEN", "Access denied.", 403)
     
-    # Enrich transfer with listing, ticket, and event details
-    enriched_transfer = transfer.copy()
-    
-    # Fetch listing to get ticket details
-    listing, _ = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}")
-    if listing:
-        enriched_transfer["listing"] = listing
-        
-        # Fetch ticket details
-        ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}")
-        if ticket:
-            enriched_transfer["ticket"] = ticket
-            
-            # Fetch event details
-            if ticket.get("eventId"):
-                event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
-                if event:
-                    enriched_transfer["event"] = event
+    # Enrich transfer using shared enrichment adapter
+    enriched_transfer = _enrich_transfer(transfer)
     
     return jsonify({"data": enriched_transfer}), 200
 
@@ -945,5 +1280,13 @@ def cancel_transfer(transfer_id):
                      json={"status": "active"})
         call_service("PATCH", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}",
                      json={"status": "listed"})
+    
+    # Broadcast transfer cancellation
+    _broadcast_transfer_notification("transfer_cancelled", {
+        "transferId": transfer_id,
+        "buyerId": transfer["buyerId"],
+        "sellerId": transfer["sellerId"],
+        "status": "cancelled",
+    })
 
     return jsonify({"data": {"transferId": transfer_id, "status": "cancelled"}}), 200

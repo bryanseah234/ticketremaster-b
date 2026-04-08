@@ -242,6 +242,46 @@ def test_scan_success(mock_svc, client):
     assert log_call[1]["json"]["status"] == "checked_in"
 
 
+@patch("routes.call_service")
+def test_scan_success_with_selected_event(mock_svc, client):
+    mock_svc.side_effect = [
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_INV_LIST, None),
+        ({"logs": []}, None),
+        (None, None),   # PATCH ticket → used
+        (None, None),   # POST log checked_in
+    ]
+    res = client.post(
+        "/verify/scan",
+        json={"qrHash": "valid", "selectedEventId": "evt_001"},
+        headers=_staff_headers(),
+    )
+    assert res.status_code == 200
+    assert res.get_json()["data"]["result"] == "SUCCESS"
+
+
+@patch("routes.call_service")
+def test_scan_wrong_event(mock_svc, client):
+    mock_svc.side_effect = [
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_INV_LIST, None),
+        ({"logs": []}, None),
+        (None, None),   # log wrong_event
+    ]
+    res = client.post(
+        "/verify/scan",
+        json={"qrHash": "valid", "selectedEventId": "evt_999"},
+        headers=_staff_headers(),
+    )
+    assert res.status_code == 400
+    body = res.get_json()
+    assert body["error"]["code"] == "WRONG_EVENT"
+    assert body["error"]["ticketEventId"] == "evt_001"
+    assert body["error"]["selectedEventId"] == "evt_999"
+
+
 # ── Security: venueId from JWT only ──────────────────────────────────────────
 
 @patch("routes.call_service")
@@ -257,7 +297,7 @@ def test_scan_venue_id_from_jwt_not_body(mock_svc, client):
     # Staff at ven_002 passes venueId=ven_001 in body to try to spoof — must still fail
     res = client.post(
         "/verify/scan",
-        json={"qrHash": "h", "venueId": "ven_001"},
+        json={"qrHash": "h", "selectedVenueId": "ven_001"},
         headers={"Authorization": f"Bearer {_staff_token(venue_id='ven_002')}"},
     )
     assert res.status_code == 400
@@ -425,6 +465,46 @@ def test_manual_success(mock_svc, client):
     assert log_call[1]["json"]["status"] == "checked_in"
 
 
+@patch("routes.call_service")
+def test_manual_success_with_selected_event(mock_svc, client):
+    mock_svc.side_effect = [
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_INV_LIST, None),
+        ({"logs": []}, None),
+        (None, None),   # PATCH ticket → used
+        (None, None),   # POST log checked_in
+    ]
+    res = client.post(
+        "/verify/manual",
+        json={"ticketId": "tkt_001", "selectedEventId": "evt_001"},
+        headers=_staff_headers(),
+    )
+    assert res.status_code == 200
+    assert res.get_json()["data"]["result"] == "SUCCESS"
+
+
+@patch("routes.call_service")
+def test_manual_wrong_event(mock_svc, client):
+    mock_svc.side_effect = [
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_INV_LIST, None),
+        ({"logs": []}, None),
+        (None, None),   # log wrong_event
+    ]
+    res = client.post(
+        "/verify/manual",
+        json={"ticketId": "tkt_001", "selectedEventId": "evt_999"},
+        headers=_staff_headers(),
+    )
+    assert res.status_code == 400
+    body = res.get_json()
+    assert body["error"]["code"] == "WRONG_EVENT"
+    assert body["error"]["ticketEventId"] == "evt_001"
+    assert body["error"]["selectedEventId"] == "evt_999"
+
+
 # ── Security: venueId from JWT only ──────────────────────────────────────────
 
 @patch("routes.call_service")
@@ -440,7 +520,7 @@ def test_manual_venue_id_from_jwt_not_body(mock_svc, client):
     ]
     res = client.post(
         "/verify/manual",
-        json={"ticketId": "tkt_001", "venueId": "ven_001"},
+        json={"ticketId": "tkt_001", "selectedVenueId": "ven_001"},
         headers={"Authorization": f"Bearer {_staff_token(venue_id='ven_002')}"},
     )
     assert res.status_code == 400
