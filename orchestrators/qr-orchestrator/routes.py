@@ -82,6 +82,8 @@ def list_tickets():
         venue, _ = call_service("GET", f"{VENUE_SERVICE}/venues/{t['venueId']}")
         enriched.append({
             "ticketId":    t["ticketId"],
+            "eventId":     t.get("eventId"),
+            "venueId":     t.get("venueId"),
             "status":      t["status"],
             "price":       t["price"],
             "createdAt":   t["createdAt"],

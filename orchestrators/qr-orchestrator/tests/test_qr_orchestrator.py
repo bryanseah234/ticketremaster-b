@@ -50,7 +50,27 @@ def test_list_tickets_success(mock_svc, client):
     assert res.status_code == 200
     tickets = res.get_json()["data"]["tickets"]
     assert len(tickets) == 1
+    assert tickets[0]["eventId"] == "evt_001"
+    assert tickets[0]["venueId"] == "ven_001"
     assert tickets[0]["event"]["name"] == "Symphony Night"
+    assert tickets[0]["venue"]["name"] == "Esplanade"
+
+
+@patch("routes.call_service")
+def test_list_tickets_keeps_top_level_ids_when_enrichment_unavailable(mock_svc, client):
+    mock_svc.side_effect = [
+        ({"tickets": [MOCK_TICKET]}, None),
+        (None, "SERVICE_UNAVAILABLE"),
+        (None, "SERVICE_UNAVAILABLE"),
+    ]
+    res = client.get("/tickets", headers=_auth())
+    assert res.status_code == 200
+    tickets = res.get_json()["data"]["tickets"]
+    assert len(tickets) == 1
+    assert tickets[0]["eventId"] == "evt_001"
+    assert tickets[0]["venueId"] == "ven_001"
+    assert tickets[0]["event"] is None
+    assert tickets[0]["venue"] is None
 
 
 def test_list_tickets_no_auth(client):

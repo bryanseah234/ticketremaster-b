@@ -14,8 +14,8 @@
     "ticketremaster/otp-wrapper":  "7478efafdcef26dc009a3b4a59477814",
     "ticketremaster/stripe-wrapper":  "62c91949f1066f2f7fcd24df5cb4a87e",
     "ticketremaster/credit-transaction-service":  "1568ae2f19650363046f3fe8f09099bd",
-    "ticketremaster/qr-orchestrator":  "8638f5ee46618deefd3baf1acfb79f75",
-    "ticketremaster/transfer-orchestrator":  "6236a9a324526b5eb438b25e86010f86",
+    "ticketremaster/qr-orchestrator":  "c8fa30a497743b833f9a7444af680e2f",
+    "ticketremaster/transfer-orchestrator":  "ebb8b01c1d8fcb204ffa7036ab5ecdfc",
     "ticketremaster/event-service":  "4f40572a0f94aab5a9fd0013c7d30005",
     "ticketremaster/venue-service":  "d6b3deb207e7fd145bc57d7a718e73d7",
     "ticketremaster/seat-inventory-service":  "e3ffcc2ea63ae99608252b1695f440b8"
