@@ -35,7 +35,7 @@ function Get-SourceHash {
     $combined = ($files | ForEach-Object { "$($_.FullName):$($_.LastWriteTimeUtc.Ticks)" }) -join "|"
     return [System.Security.Cryptography.MD5]::Create().ComputeHash(
         [System.Text.Encoding]::UTF8.GetBytes($combined)
-    ) | ForEach-Object { $_.ToString("x2") } | Join-String
+    ) | ForEach-Object { $_.ToString("x2") }) -join ''
 }
 
 $hashFile = Join-Path $repoRoot ".build-hash"
@@ -411,9 +411,14 @@ Write-OK "Seed jobs completed"
 # Verify seed data is actually present - if DBs were wiped (e.g. PVC reset after minikube restart),
 # completed jobs won't rerun automatically. Delete and reapply them if data is missing.
 Write-Step "Verifying seed data"
-$eventsRaw = & kubectl exec -n ticketremaster-core deployment/event-service -- `
-    python -c "import urllib.request,json; d=json.loads(urllib.request.urlopen('http://localhost:5000/events').read()); print(d['pagination']['total'])" 2>$null
-$eventsCount = ($eventsRaw | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1) -as [int]
+$eventsCount = 0
+try {
+    $eventsRaw = $( & kubectl exec -n ticketremaster-core deployment/event-service -- `
+        python -c "import urllib.request,json; d=json.loads(urllib.request.urlopen('http://localhost:5000/events').read()); print(d['pagination']['total'])" 2>$null )
+    $eventsCount = ($eventsRaw | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1) -as [int]
+} catch {
+    Write-Warn "Could not query event-service for seed verification - skipping check."
+}
 
 if ($eventsCount -eq 0) {
     Write-Warn "Event data missing (DB was likely wiped on restart). Re-running seed jobs..."
