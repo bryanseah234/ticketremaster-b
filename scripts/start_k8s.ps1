@@ -380,6 +380,118 @@ function Wait-JobsComplete {
     }
 }
 
+function Get-SeedBaselineChecks {
+    @(
+        [pscustomobject]@{
+            Name = "venue-service-db"
+            DisplayName = "venues"
+            Query = @"
+SELECT COUNT(*) FROM venues
+WHERE "venueId" IN ('ven_001', 'ven_002', 'ven_003', 'ven_004', 'ven_005', 'ven_006');
+"@
+            ExpectedCount = 6
+        }
+        [pscustomobject]@{
+            Name = "event-service-db"
+            DisplayName = "events"
+            Query = @"
+SELECT COUNT(*) FROM events
+WHERE "eventId" IN (
+    'evt_001', 'evt_002', 'evt_003', 'evt_004',
+    'evt_005', 'evt_006', 'evt_007', 'evt_008',
+    'evt_009', 'evt_010', 'evt_011', 'evt_012',
+    'evt_013', 'evt_014', 'evt_015', 'evt_016'
+);
+"@
+            ExpectedCount = 16
+        }
+        [pscustomobject]@{
+            Name = "seat-service-db"
+            DisplayName = "seats"
+            Query = @"
+SELECT COUNT(*) FROM seats
+WHERE ("venueId", "seatNumber") IN (
+    ('ven_001', 'A1'),
+    ('ven_002', 'A1'),
+    ('ven_003', 'A1'),
+    ('ven_004', 'A1'),
+    ('ven_005', 'A1'),
+    ('ven_006', 'A1')
+);
+"@
+            ExpectedCount = 6
+        }
+        [pscustomobject]@{
+            Name = "seat-inventory-service-db"
+            DisplayName = "seat inventory"
+            Query = @"
+SELECT COUNT(*) FROM seat_inventory
+WHERE "eventId" IN ('evt_001', 'evt_004', 'evt_007', 'evt_009', 'evt_011', 'evt_015');
+"@
+            ExpectedCount = 6
+        }
+        [pscustomobject]@{
+            Name = "user-service-db"
+            DisplayName = "demo users"
+            Query = @"
+SELECT COUNT(*) FROM users
+WHERE email IN ('admin@ticketremaster.local', 'staff@ticketremaster.local', 'user@ticketremaster.local');
+"@
+            ExpectedCount = 3
+        }
+    )
+}
+
+function Get-MissingSeedBaselineChecks {
+    $issues = @()
+
+    foreach ($check in Get-SeedBaselineChecks) {
+        $target = Get-DbSnapshotTargetByName -Name $check.Name
+        if (-not $target) {
+            $issues += [pscustomobject]@{
+                Name = $check.Name
+                DisplayName = $check.DisplayName
+                ActualCount = $null
+                ExpectedCount = $check.ExpectedCount
+                Reason = "No snapshot target metadata found."
+            }
+            continue
+        }
+
+        try {
+            $actualCount = [int](Invoke-DbPodSql -Target $target -Sql $check.Query)
+            if ($actualCount -lt $check.ExpectedCount) {
+                $issues += [pscustomobject]@{
+                    Name = $check.Name
+                    DisplayName = $check.DisplayName
+                    ActualCount = $actualCount
+                    ExpectedCount = $check.ExpectedCount
+                    Reason = "Baseline rows missing."
+                }
+            }
+        } catch {
+            $issues += [pscustomobject]@{
+                Name = $check.Name
+                DisplayName = $check.DisplayName
+                ActualCount = $null
+                ExpectedCount = $check.ExpectedCount
+                Reason = $_.Exception.Message
+            }
+        }
+    }
+
+    $issues
+}
+
+function Format-SeedBaselineIssues {
+    param([Parameter(Mandatory)]$Issues)
+
+    ($Issues | ForEach-Object {
+        $actual = if ($null -eq $_.ActualCount) { "unknown" } else { "$($_.ActualCount)" }
+        "$($_.DisplayName) [$actual/$($_.ExpectedCount)]"
+    }) -join ", "
+}
+
 function Wait-HttpEndpoint {
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -615,35 +727,37 @@ Wait-JobsComplete -Namespace "ticketremaster-core"
 Write-OK "Seed jobs completed"
 
 # Verify seed data is actually present - if DBs were wiped (e.g. PVC reset after minikube restart),
-# completed jobs won't rerun automatically. Delete and reapply them if data is missing.
+# completed jobs won't rerun automatically. Verify each seeded database directly and recover if baseline rows are missing.
 Write-Step "Verifying seed data"
-$eventsCount = 0
-try {
-    $eventsRaw = $( & kubectl exec -n ticketremaster-core deployment/event-service -- `
-        python -c "import urllib.request,json; d=json.loads(urllib.request.urlopen('http://localhost:5000/events').read()); print(d['pagination']['total'])" 2>$null )
-    $eventsCount = ($eventsRaw | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1) -as [int]
-} catch {
-    Write-Warn "Could not query event-service for seed verification - skipping check."
-}
+$baselineIssues = Get-MissingSeedBaselineChecks
 
-if ($eventsCount -eq 0) {
+if ($baselineIssues.Count -gt 0) {
+    $issueSummary = Format-SeedBaselineIssues -Issues $baselineIssues
     $snapshotPath = Get-DefaultSnapshotDirectory -RepoRoot $repoRoot
     if (Test-DbSnapshotAvailable -SnapshotPath $snapshotPath) {
-        Write-Warn "Event data missing (DB was likely wiped on restart). Restoring repo snapshot from $snapshotPath..."
+        Write-Warn "Baseline data missing in one or more service databases ($issueSummary). Restoring repo snapshot from $snapshotPath..."
         & (Join-Path $PSScriptRoot "restore_k8s_db_snapshots.ps1") -SnapshotPath $snapshotPath
         if ($LASTEXITCODE -ne 0) {
             throw "Snapshot restore failed."
         }
+        $remainingIssues = Get-MissingSeedBaselineChecks
+        if ($remainingIssues.Count -gt 0) {
+            throw "Snapshot restore completed, but baseline data is still missing in: $(Format-SeedBaselineIssues -Issues $remainingIssues)"
+        }
         Write-OK "Snapshot restored and seed jobs replayed"
     } else {
-        Write-Warn "Event data missing (DB was likely wiped on restart). Re-running seed jobs..."
+        Write-Warn "Baseline data missing in one or more service databases ($issueSummary). Re-running seed jobs..."
         & kubectl delete job seed-venues seed-events seed-seats seed-seat-inventory seed-users -n ticketremaster-core 2>&1 | Out-Null
         Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed during reseed."
         Wait-JobsComplete -Namespace "ticketremaster-core"
+        $remainingIssues = Get-MissingSeedBaselineChecks
+        if ($remainingIssues.Count -gt 0) {
+            throw "Reseed completed, but baseline data is still missing in: $(Format-SeedBaselineIssues -Issues $remainingIssues)"
+        }
         Write-OK "Reseed completed"
     }
 } else {
-    Write-OK "Seed data verified ($eventsCount events present)"
+    Write-OK "Seed data verified across venue, event, seat, seat inventory, and user databases"
 }
 
 Ensure-PortForward

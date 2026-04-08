@@ -176,6 +176,25 @@ def test_buyer_verify_success(mock_svc, mock_credit, mock_broadcast, _mock_paylo
         (None, None),                       # PATCH transfer completed
         (None, None),                       # POST buyer txn
         (None, None),                       # POST seller txn
+        (
+            {
+                **transfer,
+                "ticketId": "tkt_001",
+                "status": "completed",
+                "buyerOtpVerified": True,
+                "sellerOtpVerified": True,
+                "completedAt": "2026-04-08T11:00:00+00:00",
+            },
+            None,
+        ),                                  # GET transfer after completion
+        (MOCK_SELLER_USER, None),           # GET seller
+        (MOCK_BUYER_USER, None),            # GET buyer
+        (MOCK_LISTING, None),               # GET listing (enrich)
+        (MOCK_TICKET, None),                # GET ticket
+        (MOCK_EVENT, None),                 # GET event
+        (MOCK_VENUE, None),                 # GET venue
+        (MOCK_INVENTORY, None),             # GET inventory
+        (MOCK_SEATS, None),                 # GET seats
     ]
     mock_credit.side_effect = [
         ({"creditBalance": 200.0}, None),   # GET buyer balance
@@ -188,6 +207,8 @@ def test_buyer_verify_success(mock_svc, mock_credit, mock_broadcast, _mock_paylo
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "completed"
     assert res.get_json()["data"]["ticket"]["newOwnerId"] == BUYER
+    assert res.get_json()["data"]["sellerOtpVerified"] is True
+    assert res.get_json()["data"]["buyerOtpVerified"] is True
     assert [call.args[0] for call in mock_broadcast.call_args_list] == ["transfer_update", "ticket_update"]
 
 
@@ -244,10 +265,27 @@ def test_seller_accept_success(mock_svc, mock_broadcast, client):
         (MOCK_SELLER_USER, None),
         ({"sid": "VE_seller"}, None),
         (None, None),
+        (
+            {
+                **transfer,
+                "status": "pending_seller_otp",
+                "sellerVerificationSid": "VE_seller",
+            },
+            None,
+        ),
+        (MOCK_SELLER_USER, None),
+        (MOCK_BUYER_USER, None),
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+        (MOCK_INVENTORY, None),
+        (MOCK_SEATS, None),
     ]
     res = client.post("/transfer/txr_001/seller-accept", headers=_auth(SELLER))
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "pending_seller_otp"
+    assert res.get_json()["data"]["sellerVerificationSid"] == "VE_seller"
     mock_broadcast.assert_called_once()
     assert mock_broadcast.call_args.args[0] == "seller_accepted"
 
@@ -285,11 +323,30 @@ def test_seller_verify_success(mock_svc, mock_broadcast, client):
         (MOCK_BUYER_USER, None),
         ({"sid": "VE_buyer"}, None),
         (None, None),
+        (
+            {
+                **transfer,
+                "status": "pending_buyer_otp",
+                "sellerOtpVerified": True,
+                "buyerVerificationSid": "VE_buyer",
+            },
+            None,
+        ),
+        (MOCK_SELLER_USER, None),
+        (MOCK_BUYER_USER, None),
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_VENUE, None),
+        (MOCK_INVENTORY, None),
+        (MOCK_SEATS, None),
     ]
     res = client.post("/transfer/txr_001/seller-verify",
                       json={"otp": "654321"}, headers=_auth(SELLER))
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "pending_buyer_otp"
+    assert res.get_json()["data"]["sellerOtpVerified"] is True
+    assert res.get_json()["data"]["buyerVerificationSid"] == "VE_buyer"
     mock_broadcast.assert_called_once()
     assert mock_broadcast.call_args.args[0] == "seller_verified"
 
@@ -381,6 +438,7 @@ def test_get_transfer_buyer(mock_svc, client):
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
         ({}, None),
+        ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
     ]
@@ -397,6 +455,7 @@ def test_get_transfer_seller(mock_svc, client):
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
+        ({}, None),
         ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
@@ -449,6 +508,7 @@ def test_get_pending_transfers_enriched(mock_svc, client):
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
         ({}, None),
+        ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
     ]
@@ -469,6 +529,7 @@ def test_get_my_pending_transfers_enriched(mock_svc, client):
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
         ({}, None),
+        ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
     ]
@@ -488,6 +549,7 @@ def test_get_transfer_history_enriched(mock_svc, client):
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
+        ({}, None),
         ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),

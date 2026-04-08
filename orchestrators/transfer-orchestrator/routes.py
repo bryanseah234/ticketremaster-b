@@ -104,6 +104,7 @@ def _build_transfer_context(transfer):
     venue = _safe_get(f"{VENUE_SERVICE}/venues/{venue_id}") if venue_id else None
 
     seller = _safe_get(f"{USER_SERVICE}/users/{transfer['sellerId']}") if transfer.get("sellerId") else None
+    buyer = _safe_get(f"{USER_SERVICE}/users/{transfer['buyerId']}") if transfer.get("buyerId") else None
 
     seat = None
     inventory_id = _first_present(
@@ -133,6 +134,7 @@ def _build_transfer_context(transfer):
             )
 
     return {
+        "buyer": buyer,
         "seller": seller,
         "listing": listing,
         "ticket": ticket,
@@ -191,6 +193,7 @@ def _build_transfer_notification_payload(event_type, transfer_data):
         "listingId": enriched.get("listingId"),
         "ticketId": enriched.get("ticketId"),
         "buyerId": enriched.get("buyerId"),
+        "buyerName": enriched.get("buyerName"),
         "sellerId": enriched.get("sellerId"),
         "sellerName": enriched.get("sellerName"),
         "status": enriched.get("status"),
@@ -202,6 +205,15 @@ def _build_transfer_notification_payload(event_type, transfer_data):
     if payload["event"]:
         payload["eventName"] = payload["event"].get("name")
     return {key: value for key, value in payload.items() if value is not None}
+
+
+def _load_enriched_transfer(transfer_id, fallback=None):
+    """Reload the latest transfer state and enrich it for UI responses."""
+    transfer, err = call_service("GET", f"{TRANSFER_SERVICE}/transfers/{transfer_id}")
+    if err:
+        logger.warning("Failed to reload transfer %s after update: %s", transfer_id, err)
+        return _enrich_transfer(fallback) if fallback else None
+    return _enrich_transfer(transfer)
 
 
 def _broadcast_notification(notification_type, payload):
@@ -714,10 +726,23 @@ def buyer_verify(transfer_id):
     except Exception:
         return _error("INTERNAL_ERROR", "Transfer failed — no credits were charged.", 500)
 
+    completed_at = datetime.now(timezone.utc).isoformat()
+    updated_transfer = _load_enriched_transfer(transfer_id, {
+        **transfer,
+        "buyerId": buyer_id,
+        "sellerId": seller_id,
+        "ticketId": ticket_id,
+        "buyerOtpVerified": True,
+        "sellerOtpVerified": True,
+        "status": "completed",
+        "completedAt": completed_at,
+    })
+
     return jsonify({"data": {
+        **(updated_transfer or {}),
         "transferId":  transfer_id,
         "status":      "completed",
-        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "completedAt": (updated_transfer or {}).get("completedAt", completed_at),
         "ticket": {"ticketId": ticket_id, "newOwnerId": buyer_id, "status": "active"},
     }}), 200
 
@@ -772,6 +797,11 @@ def seller_accept(transfer_id):
         "sellerVerificationSid": otp_result["sid"],
         "status":                "pending_seller_otp",
     })
+    updated_transfer = _load_enriched_transfer(transfer_id, {
+        **transfer,
+        "sellerVerificationSid": otp_result["sid"],
+        "status": "pending_seller_otp",
+    })
     
     # Broadcast seller acceptance
     _broadcast_transfer_notification("seller_accepted", {
@@ -782,6 +812,7 @@ def seller_accept(transfer_id):
     })
 
     return jsonify({"data": {
+        **(updated_transfer or {}),
         "transferId": transfer_id,
         "status":     "pending_seller_otp",
         "message":    "Request accepted. OTP sent to seller.",
@@ -937,6 +968,12 @@ def seller_verify(transfer_id):
         "buyerVerificationSid":  buyer_otp["sid"],
         "status":                "pending_buyer_otp",
     })
+    updated_transfer = _load_enriched_transfer(transfer_id, {
+        **transfer,
+        "sellerOtpVerified": True,
+        "buyerVerificationSid": buyer_otp["sid"],
+        "status": "pending_buyer_otp",
+    })
 
     _broadcast_transfer_notification("seller_verified", {
         "transferId": transfer_id,
@@ -946,6 +983,7 @@ def seller_verify(transfer_id):
     })
 
     return jsonify({"data": {
+        **(updated_transfer or {}),
         "transferId": transfer_id,
         "status":     "pending_buyer_otp",
         "message":    "Seller verified. OTP sent to buyer.",
@@ -962,11 +1000,18 @@ def _enrich_transfer(transfer):
     enriched = transfer.copy()
 
     context = _build_transfer_context(transfer)
+    buyer = context["buyer"] or {}
     seller = context["seller"] or {}
     event_payload = _build_event_payload(context)
     seat_payload = _build_seat_payload(context)
     venue = context["venue"]
 
+    enriched["buyerName"] = _first_present(
+        buyer.get("name"),
+        buyer.get("fullName"),
+        buyer.get("email"),
+        "Buyer",
+    )
     enriched["sellerName"] = _first_present(
         seller.get("name"),
         seller.get("fullName"),
