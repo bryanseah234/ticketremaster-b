@@ -174,12 +174,16 @@ Navigate to the `ticketremaster-b` directory and run:
 .\start-backend.bat
 ```
 
-Choose `1` for `Localhost only`.
+Choose your access mode (`Localhost only`, `Cloudflare only`, or `Both`), then choose how to handle data:
+
+- `Continue current cluster data`: keep existing PVC-backed state when it still looks healthy
+- `Restore repo DB snapshot`: replace the cluster databases from `db-snapshots/k8s/latest`
+- `Fresh rebuild`: delete the Minikube cluster and recreate everything from scratch
 
 If you prefer to bypass the batch wrapper, the direct PowerShell equivalent is:
 
 ```powershell
-.\scripts\start_k8s.ps1
+.\scripts\start_k8s.ps1 -DataMode Continue
 ```
 
 The script will:
@@ -295,7 +299,7 @@ Use this only if you want to bring up the localhost stack without `start-backend
 
    ```powershell
    .\scripts\build_k8s_images.ps1
-   docker images --format "{{.Repository}}:{{.Tag}}" | Select-String "^ticketremaster/.+:local-k8s-20260329$" | ForEach-Object { minikube image load $_.Line.Trim() }
+   docker images --format "{{.Repository}}:{{.Tag}}" | Select-String "^ticketremaster/.+:local-k8s-20260329$" | ForEach-Object { minikube image load $_.Line.Trim() --overwrite=true }
    ```
 
 3. Apply the Kubernetes manifests:
@@ -580,7 +584,7 @@ Use this if you want the public setup without the automated wrapper.
 
 If you are using the Windows wrapper scripts, these are the main entry points:
 
-- `.\start-backend.bat`: prompts for `Localhost only`, `Cloudflare only`, or `Both`, then runs the matching startup flow
+- `.\start-backend.bat`: prompts for `Localhost only`, `Cloudflare only`, or `Both`, then asks whether to continue existing data, restore the repo snapshot, or rebuild fresh
 - `.\test-backend.bat`: reruns gateway smoke tests against public, localhost, or both
 - `.\check-status.bat`: prints pod status for `ticketremaster-core`, `ticketremaster-data`, and `ticketremaster-edge`, then checks the active localhost gateway URL and the public URL
 - `.\stop-backend.bat`: stops local `kubectl` port-forwards and stops Minikube

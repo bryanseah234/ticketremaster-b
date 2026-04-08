@@ -14,8 +14,9 @@ set "START_SCRIPT=scripts\start_k8s.ps1"
 set "HAS_CF_TOKEN=0"
 set "RUN_PUBLIC_TESTS=0"
 set "SKIP_PORT_FORWARD=0"
+set "DATA_MODE=Continue"
 
-echo [1/5] Checking required repo files...
+echo [1/6] Checking required repo files...
 call :require_file "%SECRETS_FILE%" "Kubernetes secrets file"
 if errorlevel 1 goto fail
 call :require_file "%START_SCRIPT%" "Kubernetes startup script"
@@ -28,7 +29,7 @@ if %errorlevel% equ 0 (
 )
 echo.
 
-echo [2/5] Startup mode selection
+echo [2/6] Startup mode selection
 echo ----------------------------------------
 echo   1. Localhost only   (port-forward, no Cloudflare tunnel)
 echo   2. Cloudflare only  (tunnel to internet, no local port-forward)
@@ -60,7 +61,37 @@ if "%MODE_CHOICE%"=="1" (
 )
 echo.
 
-echo [3/5] Checking Docker Desktop...
+echo [3/6] Data handling
+echo ----------------------------------------
+echo   1. Continue current cluster data  (keep existing PVC data if it looks healthy)
+echo   2. Restore repo DB snapshot      (replace cluster DB state from db-snapshots\k8s\latest)
+echo   3. Fresh rebuild                 (delete Minikube cluster and recreate from scratch)
+echo ----------------------------------------
+if exist "db-snapshots\k8s\latest\manifest.json" (
+    echo   Snapshot: db-snapshots\k8s\latest is available.
+) else (
+    echo   Snapshot: db-snapshots\k8s\latest is missing or incomplete.
+)
+echo.
+set /p "DATA_CHOICE=Enter choice [1/2/3] (default: 1): "
+if "%DATA_CHOICE%"=="" set "DATA_CHOICE=1"
+
+if "%DATA_CHOICE%"=="1" (
+    echo Data mode: Continue current cluster data
+    set "DATA_MODE=Continue"
+) else if "%DATA_CHOICE%"=="2" (
+    echo Data mode: Restore repo DB snapshot
+    set "DATA_MODE=RestoreSnapshot"
+) else if "%DATA_CHOICE%"=="3" (
+    echo Data mode: Fresh rebuild
+    set "DATA_MODE=Fresh"
+) else (
+    echo Invalid choice. Defaulting to continue current cluster data.
+    set "DATA_MODE=Continue"
+)
+echo.
+
+echo [4/6] Checking Docker Desktop...
 call :require_command docker "Docker CLI"
 if errorlevel 1 goto fail
 docker info >nul 2>&1
@@ -81,29 +112,34 @@ if errorlevel 1 (
 echo Docker Desktop is running.
 echo.
 
-echo [4/5] Checking Minikube...
+echo [5/6] Checking Minikube...
 call :require_command minikube "Minikube CLI"
 if errorlevel 1 goto fail
-minikube status >nul 2>&1
-if errorlevel 1 (
-    echo Starting Minikube...
-    minikube start
-    if errorlevel 1 (
-        echo ERROR: Minikube failed to start.
-        pause
-        exit /b 1
-    )
+if /i "%DATA_MODE%"=="Fresh" (
+    echo Fresh rebuild selected. Minikube will be recreated by the PowerShell startup script.
 ) else (
-    echo Minikube is already running.
+    minikube status >nul 2>&1
+    if errorlevel 1 (
+        echo Starting Minikube...
+        minikube start
+        if errorlevel 1 (
+            echo ERROR: Minikube failed to start.
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo Minikube is already running.
+    )
 )
 echo.
 
-echo [5/5] Applying manifests, waiting for workloads, and starting selected services...
+echo [6/6] Applying manifests, waiting for workloads, and starting selected services...
 call :require_command powershell "Windows PowerShell"
 if errorlevel 1 goto fail
 set "PS_ARGS="
 if "%RUN_PUBLIC_TESTS%"=="1" set "PS_ARGS=%PS_ARGS% -RunPublicTests"
 if "%SKIP_PORT_FORWARD%"=="1" set "PS_ARGS=%PS_ARGS% -SkipPortForward"
+if not "%DATA_MODE%"=="" set "PS_ARGS=%PS_ARGS% -DataMode %DATA_MODE%"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0%START_SCRIPT%"%PS_ARGS%
 

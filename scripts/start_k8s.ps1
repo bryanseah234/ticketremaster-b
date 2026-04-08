@@ -13,12 +13,15 @@
     -SkipPortForward Skip opening a new localhost:8000 port-forward window
     -PublicOnly      Skip localhost tests and run only the Cloudflare smoke suite
     -RunPublicTests  Run the Cloudflare smoke suite after localhost checks
+    -DataMode        Auto, Continue, RestoreSnapshot, or Fresh
 #>
 param(
     [switch]$SkipImageLoad,
     [switch]$SkipPortForward,
     [switch]$PublicOnly,
-    [switch]$RunPublicTests
+    [switch]$RunPublicTests,
+    [ValidateSet("Auto", "Continue", "RestoreSnapshot", "Fresh")]
+    [string]$DataMode = "Auto"
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +57,27 @@ function Invoke-External {
     if ($LASTEXITCODE -ne 0) {
         throw $ErrorMessage
     }
+}
+
+function Refresh-MinikubeImage {
+    param([Parameter(Mandatory)][string]$ImageTag)
+
+    # Minikube can keep serving an older cached image for the same tag unless we
+    # drop the node-side tag first and then force the reload.
+    & minikube ssh -- docker rmi -f $ImageTag 2>$null | Out-Null
+    Invoke-External -Command "minikube" -Arguments @("image", "load", $ImageTag, "--overwrite=true") -ErrorMessage "Failed to load $ImageTag into Minikube."
+}
+
+function Reset-MinikubeCluster {
+    Write-Step "Fresh rebuild requested - recreating the Minikube cluster"
+
+    & minikube delete | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to delete the existing Minikube cluster."
+    }
+
+    Invoke-External -Command "minikube" -Arguments @("start") -ErrorMessage "Failed to start Minikube after deleting the cluster."
+    Write-OK "Minikube cluster recreated from scratch"
 }
 
 function Get-ImageDefinitions {
@@ -267,10 +291,47 @@ function Ensure-ImagesLoaded {
 
     foreach ($image in $missingImages) {
         Write-Host "    Loading $image"
-        Invoke-External -Command "minikube" -Arguments @("image", "load", $image) -ErrorMessage "Failed to load $image into Minikube."
+        Refresh-MinikubeImage -ImageTag $image
     }
 
     Write-OK "Required images are loaded"
+}
+
+function Test-DataPersistentVolumeClaimsPresent {
+    $result = & kubectl get persistentvolumeclaim -n $script:TicketRemasterDataNamespace -o name 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    @(
+        $result -split "`r?`n" |
+        Where-Object { $_ -and $_.Trim() }
+    ).Count -gt 0
+}
+
+function Build-And-LoadChangedImages {
+    param(
+        [Parameter(Mandatory)][string[]]$ImageNames,
+        [Parameter(Mandatory)][hashtable]$CurrentHashes,
+        [Parameter(Mandatory)][string]$ImageHashFilePath
+    )
+
+    Write-Step "Source changes detected - rebuilding changed Docker images ($($ImageNames.Count))"
+    foreach ($imageName in $ImageNames) {
+        Write-Host "    $($imageName):$Tag"
+    }
+
+    & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag -Images $ImageNames
+    if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
+
+    foreach ($imageName in $ImageNames) {
+        $imageTag = "$($imageName):$Tag"
+        Write-Host "    Loading $imageTag"
+        Refresh-MinikubeImage -ImageTag $imageTag
+    }
+
+    Write-ImageHashState -Path $ImageHashFilePath -Hashes $CurrentHashes
+    Write-OK "Rebuild complete"
 }
 
 function Get-KubernetesNames {
@@ -640,23 +701,8 @@ if ($hasImageHashState) {
 
 $needsRebuild = $changedImageNames.Count -gt 0
 
-if ($needsRebuild -and -not $SkipImageLoad) {
-    Write-Step "Source changes detected - rebuilding changed Docker images ($($changedImageNames.Count))"
-    foreach ($imageName in $changedImageNames) {
-        Write-Host "    $($imageName):$Tag"
-    }
-
-    & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag -Images $changedImageNames
-    if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
-
-    foreach ($imageName in $changedImageNames) {
-        $imageTag = "$($imageName):$Tag"
-        Write-Host "    Loading $imageTag"
-        Invoke-External -Command "minikube" -Arguments @("image", "load", $imageTag) -ErrorMessage "Failed to load $imageTag into Minikube."
-    }
-
-    Write-ImageHashState -Path $imageHashFile -Hashes $currentImageHashes
-    Write-OK "Rebuild complete"
+if ($needsRebuild -and -not $SkipImageLoad -and $DataMode -ne "Fresh") {
+    Build-And-LoadChangedImages -ImageNames $changedImageNames -CurrentHashes $currentImageHashes -ImageHashFilePath $imageHashFile
 } elseif (-not $needsRebuild) {
     Write-OK "No source changes detected - skipping rebuild"
 
@@ -688,15 +734,30 @@ foreach ($cmd in @("docker", "kubectl", "minikube", "newman")) {
     Write-OK "$cmd found"
 }
 
+if ($DataMode -eq "Fresh") {
+    Reset-MinikubeCluster
+}
+
 Write-Step "Checking Minikube"
 & kubectl get nodes --request-timeout=10s | Out-Null
 if ($LASTEXITCODE -ne 0) {
+    if ($DataMode -eq "Fresh") {
+        throw "Minikube did not become reachable after the fresh rebuild."
+    }
     throw "Minikube is not running or the API server is unreachable. Run: minikube start"
 }
 Write-OK "Minikube is up"
 
-if (-not $SkipImageLoad -and -not $needsRebuild) {
-    Ensure-ImagesLoaded
+if (-not $SkipImageLoad) {
+    if ($DataMode -eq "Fresh") {
+        if ($needsRebuild) {
+            Build-And-LoadChangedImages -ImageNames $changedImageNames -CurrentHashes $currentImageHashes -ImageHashFilePath $imageHashFile
+        } else {
+            Ensure-ImagesLoaded
+        }
+    } elseif (-not $needsRebuild) {
+        Ensure-ImagesLoaded
+    }
 }
 
 Write-Step "Applying k8s manifests"
@@ -730,12 +791,37 @@ Write-OK "Seed jobs completed"
 # Verify seed data is actually present - if DBs were wiped (e.g. PVC reset after minikube restart),
 # completed jobs won't rerun automatically. Verify each seeded database directly and recover if baseline rows are missing.
 Write-Step "Verifying seed data"
+$snapshotPath = Get-DefaultSnapshotDirectory -RepoRoot $repoRoot
+$hasSnapshot = Test-DbSnapshotAvailable -SnapshotPath $snapshotPath
+$hasDataPvcs = Test-DataPersistentVolumeClaimsPresent
 $baselineIssues = Get-MissingSeedBaselineChecks
 
-if ($baselineIssues.Count -gt 0) {
+if ($DataMode -eq "RestoreSnapshot") {
+    if (-not $hasSnapshot) {
+        throw "Restore snapshot was selected, but no complete repo snapshot was found at $snapshotPath. Re-run startup and choose Fresh rebuild instead."
+    }
+
+    Write-Warn "Replacing cluster database state with the repo snapshot from $snapshotPath..."
+    & (Join-Path $PSScriptRoot "restore_k8s_db_snapshots.ps1") -SnapshotPath $snapshotPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Snapshot restore failed."
+    }
+
+    $remainingIssues = Get-MissingSeedBaselineChecks
+    if ($remainingIssues.Count -gt 0) {
+        throw "Snapshot restore completed, but baseline data is still missing in: $(Format-SeedBaselineIssues -Issues $remainingIssues)"
+    }
+
+    Write-OK "Snapshot restored and baseline data verified"
+} elseif ($baselineIssues.Count -gt 0) {
     $issueSummary = Format-SeedBaselineIssues -Issues $baselineIssues
-    $snapshotPath = Get-DefaultSnapshotDirectory -RepoRoot $repoRoot
-    if (Test-DbSnapshotAvailable -SnapshotPath $snapshotPath) {
+    if ($DataMode -eq "Continue") {
+        if ($hasDataPvcs) {
+            throw "Continue was selected, but the existing PVC-backed data is incomplete or drifted: $issueSummary. Re-run startup and choose Restore snapshot or Fresh rebuild."
+        }
+
+        throw "Continue was selected, but the freshly seeded cluster is still missing baseline data: $issueSummary. Re-run startup and choose Fresh rebuild."
+    } elseif ($hasSnapshot -and $DataMode -eq "Auto") {
         Write-Warn "Baseline data missing in one or more service databases ($issueSummary). Restoring repo snapshot from $snapshotPath..."
         & (Join-Path $PSScriptRoot "restore_k8s_db_snapshots.ps1") -SnapshotPath $snapshotPath
         if ($LASTEXITCODE -ne 0) {
@@ -747,7 +833,8 @@ if ($baselineIssues.Count -gt 0) {
         }
         Write-OK "Snapshot restored and seed jobs replayed"
     } else {
-        Write-Warn "Baseline data missing in one or more service databases ($issueSummary). Re-running seed jobs..."
+        $reseedReason = if ($DataMode -eq "Fresh") { "Fresh rebuild still needs baseline seed data" } else { "Baseline data missing in one or more service databases" }
+        Write-Warn "$reseedReason ($issueSummary). Re-running seed jobs..."
         & kubectl delete job seed-venues seed-events seed-seats seed-seat-inventory seed-users -n ticketremaster-core 2>&1 | Out-Null
         Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed during reseed."
         Wait-JobsComplete -Namespace "ticketremaster-core"
@@ -758,7 +845,11 @@ if ($baselineIssues.Count -gt 0) {
         Write-OK "Reseed completed"
     }
 } else {
-    Write-OK "Seed data verified across venue, event, seat, seat inventory, and user databases"
+    if ($DataMode -eq "Continue" -and $hasDataPvcs) {
+        Write-OK "Existing PVC-backed data looks healthy - continuing without replacing it"
+    } else {
+        Write-OK "Seed data verified across venue, event, seat, seat inventory, and user databases"
+    }
 }
 
 Ensure-PortForward

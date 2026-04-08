@@ -18,5 +18,5 @@
     "ticketremaster/transfer-orchestrator":  "6236a9a324526b5eb438b25e86010f86",
     "ticketremaster/event-service":  "4f40572a0f94aab5a9fd0013c7d30005",
     "ticketremaster/venue-service":  "d6b3deb207e7fd145bc57d7a718e73d7",
-    "ticketremaster/seat-inventory-service":  "a24dc1dca249949e0e3a2da34b0c7cd5"
+    "ticketremaster/seat-inventory-service":  "e3ffcc2ea63ae99608252b1695f440b8"
 }
