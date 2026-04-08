@@ -1,0 +1,641 @@
+{
+  "info": {
+    "_postman_id": "6a0f25a1-6dd1-4f11-9d7a-8f85c4c6c001",
+    "name": "TicketRemaster Phase 0-5",
+    "description": "Importable Postman collection for implemented backend scope through Phase 5 (atomic services, wrappers, RabbitMQ management checks).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 Health",
+      "item": [
+        {
+          "name": "User Service",
+          "request": { "method": "GET", "url": "{{user_service_url}}/health" }
+        },
+        {
+          "name": "Event Service",
+          "request": { "method": "GET", "url": "{{event_service_url}}/health" }
+        },
+        {
+          "name": "Seat Inventory Service",
+          "request": { "method": "GET", "url": "{{seat_inventory_service_url}}/health" }
+        },
+        {
+          "name": "Ticket Service",
+          "request": { "method": "GET", "url": "{{ticket_service_url}}/health" }
+        },
+        {
+          "name": "Ticket Log Service",
+          "request": { "method": "GET", "url": "{{ticket_log_service_url}}/health" }
+        },
+        {
+          "name": "Marketplace Service",
+          "request": { "method": "GET", "url": "{{marketplace_service_url}}/health" }
+        },
+        {
+          "name": "Transfer Service",
+          "request": { "method": "GET", "url": "{{transfer_service_url}}/health" }
+        },
+        {
+          "name": "Venue Service",
+          "request": { "method": "GET", "url": "{{venue_service_url}}/health" }
+        },
+        {
+          "name": "Seat Service",
+          "request": { "method": "GET", "url": "{{seat_service_url}}/health" }
+        },
+        {
+          "name": "Credit Transaction Service",
+          "request": { "method": "GET", "url": "{{credit_transaction_service_url}}/health" }
+        },
+        {
+          "name": "Stripe Wrapper",
+          "request": { "method": "GET", "url": "{{stripe_wrapper_url}}/health" }
+        },
+        {
+          "name": "OTP Wrapper",
+          "request": { "method": "GET", "url": "{{otp_wrapper_url}}/health" }
+        }
+      ]
+    },
+    {
+      "name": "01 User Service",
+      "item": [
+        {
+          "name": "Create User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.userId) { pm.environment.set('user_id', body.userId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"prehashed-password\",\n  \"salt\": \"salt-001\",\n  \"phoneNumber\": \"+6591234567\",\n  \"role\": \"user\",\n  \"isFlagged\": false\n}"
+            },
+            "url": "{{user_service_url}}/users"
+          }
+        },
+        {
+          "name": "List Users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const users = pm.response.json();",
+                  "  if (Array.isArray(users)) {",
+                  "    const targetEmail = pm.environment.get('user_email');",
+                  "    const matched = users.find((u) => u.email === targetEmail) || users[0];",
+                  "    if (matched && matched.userId) { pm.environment.set('user_id', matched.userId); }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{user_service_url}}/users" }
+        },
+        { "name": "Get User By ID", "request": { "method": "GET", "url": "{{user_service_url}}/users/{{user_id}}" } },
+        {
+          "name": "Get User By Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.userId) { pm.environment.set('user_id', body.userId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{user_service_url}}/users/by-email/{{user_email}}" }
+        },
+        {
+          "name": "Patch User",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"isFlagged\": true\n}" },
+            "url": "{{user_service_url}}/users/{{user_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Venue Service",
+      "item": [
+        {
+          "name": "List Venues",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  const venues = Array.isArray(body.venues) ? body.venues : [];",
+                  "  const seededVenue = venues.find((v) => v.venueId === 'ven_001');",
+                  "  const venueId = (seededVenue || venues[0] || {}).venueId;",
+                  "  if (venueId) { pm.environment.set('venue_id', venueId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{venue_service_url}}/venues" }
+        },
+        { "name": "Get Venue By ID", "request": { "method": "GET", "url": "{{venue_service_url}}/venues/{{venue_id}}" } }
+      ]
+    },
+    {
+      "name": "03 Seat Service",
+      "item": [
+        { "name": "Seats By Venue", "request": { "method": "GET", "url": "{{seat_service_url}}/seats/venue/{{venue_id}}" } }
+      ]
+    },
+    {
+      "name": "04 Event Service",
+      "item": [
+        {
+          "name": "List Events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  const events = Array.isArray(body.events) ? body.events : [];",
+                  "  const seededEvent = events.find((e) => e.eventId === 'evt_001');",
+                  "  const eventId = (seededEvent || events[0] || {}).eventId;",
+                  "  if (eventId) { pm.environment.set('event_id', eventId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{event_service_url}}/events" }
+        },
+        {
+          "name": "Create Event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.eventId) { pm.environment.set('event_id', body.eventId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"venueId\": \"{{venue_id}}\",\n  \"name\": \"Phase5 Demo Concert\",\n  \"date\": \"2026-12-31T20:00:00Z\",\n  \"description\": \"Demo\",\n  \"type\": \"concert\",\n  \"price\": 120.0\n}"
+            },
+            "url": "{{event_service_url}}/events"
+          }
+        },
+        { "name": "Get Event By ID", "request": { "method": "GET", "url": "{{event_service_url}}/events/{{event_id}}" } }
+      ]
+    },
+    {
+      "name": "05 Seat Inventory Service",
+      "item": [
+        {
+          "name": "Inventory By Event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  const inventory = Array.isArray(body.inventory) ? body.inventory : [];",
+                  "  const inventoryId = (inventory[0] || {}).inventoryId;",
+                  "  if (inventoryId) { pm.environment.set('inventory_id', inventoryId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{seat_inventory_service_url}}/inventory/event/{{event_id}}" }
+        }
+      ]
+    },
+    {
+      "name": "06 Ticket Service",
+      "item": [
+        {
+          "name": "Create Ticket",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.ticketId) { pm.environment.set('ticket_id', body.ticketId); }",
+                  "  if (body.qrHash) { pm.environment.set('ticket_qr_hash', body.qrHash); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventoryId\": \"{{inventory_id}}\",\n  \"ownerId\": \"{{user_id}}\",\n  \"venueId\": \"{{venue_id}}\",\n  \"eventId\": \"{{event_id}}\",\n  \"price\": 120.0,\n  \"status\": \"active\"\n}"
+            },
+            "url": "{{ticket_service_url}}/tickets"
+          }
+        },
+        { "name": "Get Ticket By ID", "request": { "method": "GET", "url": "{{ticket_service_url}}/tickets/{{ticket_id}}" } },
+        { "name": "Get Tickets By Owner", "request": { "method": "GET", "url": "{{ticket_service_url}}/tickets/owner/{{user_id}}" } },
+        { "name": "Get Ticket By QR", "request": { "method": "GET", "url": "{{ticket_service_url}}/tickets/qr/{{ticket_qr_hash}}" } },
+        {
+          "name": "Patch Ticket",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"listed\"\n}" },
+            "url": "{{ticket_service_url}}/tickets/{{ticket_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Ticket Log Service",
+      "item": [
+        {
+          "name": "Create Ticket Log",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticket_id}}\",\n  \"staffId\": \"staff_001\",\n  \"status\": \"checked_in\"\n}"
+            },
+            "url": "{{ticket_log_service_url}}/ticket-logs"
+          }
+        },
+        { "name": "Logs By Ticket", "request": { "method": "GET", "url": "{{ticket_log_service_url}}/ticket-logs/ticket/{{ticket_id}}" } }
+      ]
+    },
+    {
+      "name": "08 Marketplace Service",
+      "item": [
+        {
+          "name": "Create Listing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.listingId) { pm.environment.set('listing_id', body.listingId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticket_id}}\",\n  \"sellerId\": \"{{user_id}}\",\n  \"price\": 150.0,\n  \"status\": \"active\"\n}"
+            },
+            "url": "{{marketplace_service_url}}/listings"
+          }
+        },
+        { "name": "List Active Listings", "request": { "method": "GET", "url": "{{marketplace_service_url}}/listings" } },
+        { "name": "Get Listing By ID", "request": { "method": "GET", "url": "{{marketplace_service_url}}/listings/{{listing_id}}" } },
+        {
+          "name": "Patch Listing",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"completed\"\n}" },
+            "url": "{{marketplace_service_url}}/listings/{{listing_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Transfer Service",
+      "item": [
+        {
+          "name": "Create Transfer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.transferId) { pm.environment.set('transfer_id', body.transferId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"listingId\": \"{{listing_id}}\",\n  \"buyerId\": \"buyer_001\",\n  \"sellerId\": \"{{user_id}}\",\n  \"creditAmount\": 120.0\n}"
+            },
+            "url": "{{transfer_service_url}}/transfers"
+          }
+        },
+        { "name": "Get Transfer", "request": { "method": "GET", "url": "{{transfer_service_url}}/transfers/{{transfer_id}}" } },
+        {
+          "name": "Patch Transfer",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"completed\",\n  \"buyerOtpVerified\": true,\n  \"sellerOtpVerified\": true,\n  \"completedAt\": \"2026-03-21T10:00:00Z\"\n}" },
+            "url": "{{transfer_service_url}}/transfers/{{transfer_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Credit Transaction Service",
+      "item": [
+        {
+          "name": "Create Credit Transaction",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"delta\": 100.0,\n  \"reason\": \"topup\",\n  \"referenceId\": \"pi_demo_001\"\n}"
+            },
+            "url": "{{credit_transaction_service_url}}/credit-transactions"
+          }
+        },
+        { "name": "Transactions By User", "request": { "method": "GET", "url": "{{credit_transaction_service_url}}/credit-transactions/user/{{user_id}}?page=1&limit=20" } },
+        { "name": "Transaction By Reference", "request": { "method": "GET", "url": "{{credit_transaction_service_url}}/credit-transactions/reference/pi_demo_001" } }
+      ]
+    },
+    {
+      "name": "11 Stripe Wrapper",
+      "item": [
+        {
+          "name": "Create Payment Intent",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"amount\": 50\n}" },
+            "url": "{{stripe_wrapper_url}}/stripe/create-payment-intent"
+          }
+        },
+        {
+          "name": "Webhook Invalid Signature Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Stripe-Signature", "value": "invalid" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"payment_intent.succeeded\"\n}" },
+            "url": "{{stripe_wrapper_url}}/stripe/webhook"
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 OTP Wrapper",
+      "item": [
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phoneNumber\": \"+6591234567\"\n}" },
+            "url": "{{otp_wrapper_url}}/otp/send"
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"sid\": \"{{otp_sid}}\",\n  \"otp\": \"123456\"\n}" },
+            "url": "{{otp_wrapper_url}}/otp/verify"
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 RabbitMQ (Phase 5 Checks)",
+      "item": [
+        {
+          "name": "Management Overview",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmq_user}}" },
+                { "key": "password", "value": "{{rabbitmq_pass}}" }
+              ]
+            },
+            "url": "{{rabbitmq_mgmt_url}}/api/overview"
+          }
+        },
+        {
+          "name": "Queue seat_hold_ttl_queue",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmq_user}}" },
+                { "key": "password", "value": "{{rabbitmq_pass}}" }
+              ]
+            },
+            "url": "{{rabbitmq_mgmt_url}}/api/queues/%2F/seat_hold_ttl_queue"
+          }
+        },
+        {
+          "name": "Queue seat_hold_expired_queue",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmq_user}}" },
+                { "key": "password", "value": "{{rabbitmq_pass}}" }
+              ]
+            },
+            "url": "{{rabbitmq_mgmt_url}}/api/queues/%2F/seat_hold_expired_queue"
+          }
+        },
+        {
+          "name": "Queue seller_notification_queue",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmq_user}}" },
+                { "key": "password", "value": "{{rabbitmq_pass}}" }
+              ]
+            },
+            "url": "{{rabbitmq_mgmt_url}}/api/queues/%2F/seller_notification_queue"
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 OutSystems Credit Service (Phase 1.4 External)",
+      "item": [
+        {
+          "name": "Create Credit Record",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const contentType = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                  "if (contentType.includes('application/json')) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.userId) { pm.environment.set('outsystems_test_user_id', body.userId); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-KEY", "value": "{{outsystems_api_key}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{outsystems_test_user_id}}\"\n}"
+            },
+            "url": "{{credit_service_url}}/credits"
+          }
+        },
+        {
+          "name": "Get Credit Balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-KEY", "value": "{{outsystems_api_key}}" }
+            ],
+            "url": "{{credit_service_url}}/credits/{{outsystems_test_user_id}}"
+          }
+        },
+        {
+          "name": "Patch Credit Balance",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-KEY", "value": "{{outsystems_api_key}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"creditBalance\": 120\n}"
+            },
+            "url": "{{credit_service_url}}/credits/{{outsystems_test_user_id}}"
+          }
+        },
+        {
+          "name": "Invalid API Key Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-KEY", "value": "invalid-key" }
+            ],
+            "url": "{{credit_service_url}}/credits/{{outsystems_test_user_id}}"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "user_service_url", "value": "http://localhost:5000" },
+    { "key": "event_service_url", "value": "http://localhost:5002" },
+    { "key": "seat_inventory_service_url", "value": "http://localhost:5003" },
+    { "key": "ticket_service_url", "value": "http://localhost:5004" },
+    { "key": "ticket_log_service_url", "value": "http://localhost:5005" },
+    { "key": "marketplace_service_url", "value": "http://localhost:5006" },
+    { "key": "transfer_service_url", "value": "http://localhost:5007" },
+    { "key": "venue_service_url", "value": "http://localhost:5008" },
+    { "key": "seat_service_url", "value": "http://localhost:5009" },
+    { "key": "credit_transaction_service_url", "value": "http://localhost:5010" },
+    { "key": "stripe_wrapper_url", "value": "http://localhost:5011" },
+    { "key": "otp_wrapper_url", "value": "http://localhost:5012" },
+    { "key": "credit_service_url", "value": "https://your-outsystems-credit-service.example.com" },
+    { "key": "outsystems_api_key", "value": "" },
+    { "key": "rabbitmq_mgmt_url", "value": "http://localhost:15672" },
+    { "key": "rabbitmq_user", "value": "guest" },
+    { "key": "rabbitmq_pass", "value": "guest" },
+    { "key": "user_email", "value": "phase5_user@example.com" },
+    { "key": "user_id", "value": "" },
+    { "key": "venue_id", "value": "" },
+    { "key": "event_id", "value": "" },
+    { "key": "inventory_id", "value": "" },
+    { "key": "ticket_id", "value": "" },
+    { "key": "ticket_qr_hash", "value": "" },
+    { "key": "listing_id", "value": "" },
+    { "key": "transfer_id", "value": "" },
+    { "key": "otp_sid", "value": "" },
+    { "key": "outsystems_test_user_id", "value": "outsys_test_user_001" }
+  ]
+}

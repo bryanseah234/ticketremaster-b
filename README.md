@@ -270,19 +270,60 @@ kubectl port-forward -n ticketremaster-edge service/kong-proxy 8000:80
 
 ### Option 2: Public Access Setup (Cloudflare Tunnel)
 
-This setup exposes your local backend to the internet via Cloudflare Tunnel at `https://ticketremasterapi.hong-yi.me`.
+This setup exposes your local backend to the internet via Cloudflare Tunnel, allowing you to access it from anywhere.
 
 Useful for:
 
 - Remote testing
 - Sharing with frontend developers who don't want to run the backend
 - Mobile device testing
+- Accessing your backend from mobile devices
 
 #### Additional Prerequisites
 
-In addition to the standard prerequisites, you need a `secrets.local.yaml` file that contains a valid `CLOUDFLARE_TUNNEL_TOKEN`. The token must be configured to route to the Kong service.
+You need to set up your own Cloudflare Tunnel:
 
-Ask your backend maintainer for the Cloudflare tunnel token if you don't have it.
+1. **Create a Cloudflare account** at <https://dash.cloudflare.com/sign-up> (free tier is sufficient)
+
+2. **Add a domain to Cloudflare** (you can use a free domain from services like Freenom, or use your own domain)
+
+3. **Create a Cloudflare Tunnel:**
+   - Go to Zero Trust dashboard: <https://one.dash.cloudflare.com/>
+   - Navigate to Networks → Tunnels
+   - Click "Create a tunnel"
+   - Choose "Cloudflared" as the connector type
+   - Name your tunnel (e.g., "ticketremaster-backend")
+   - Copy the tunnel token (starts with `eyJ...`)
+
+4. **Configure the tunnel route:**
+   - In the tunnel configuration, add a Public Hostname
+   - Subdomain: Choose a subdomain (e.g., `api` or `ticketremaster-api`)
+   - Domain: Select your domain
+   - Service Type: `HTTP`
+   - URL: `kong-proxy.ticketremaster-edge.svc.cluster.local:80`
+
+5. **Add the tunnel token to your secrets file:**
+
+   Edit `k8s/base/secrets.local.yaml` and add:
+
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: cloudflare-tunnel
+     namespace: ticketremaster-edge
+   type: Opaque
+   stringData:
+     CLOUDFLARE_TUNNEL_TOKEN: "your-tunnel-token-here"
+   ```
+
+6. **Update the Newman public environment file:**
+
+   Edit `postman/TicketRemaster.gateway-public.postman_environment.json` and change the `gateway_url` value to your Cloudflare tunnel URL:
+
+   ```json
+   { "key": "gateway_url", "value": "https://your-subdomain.your-domain.com", "type": "default", "enabled": true }
+   ```
 
 #### Start the Backend with Public Access
 
@@ -309,22 +350,22 @@ Subsequent runs: 4-6 minutes
 **Success indicators:**
 
 - Newman tests pass for both localhost and public URL
-- Public gateway is accessible at `https://ticketremasterapi.hong-yi.me`
+- Public gateway is accessible at your configured Cloudflare tunnel URL
 
 #### Verify It's Working
 
-Test the public gateway:
+Test the public gateway (replace with your actual tunnel URL):
 
 ```powershell
-Invoke-WebRequest https://ticketremasterapi.hong-yi.me/events
+Invoke-WebRequest https://your-subdomain.your-domain.com/events
 ```
 
 You should see JSON with event data.
 
-Configure your frontend for public access:
+Configure your frontend for public access (replace with your actual tunnel URL):
 
 ```env
-VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
+VITE_API_BASE_URL=https://your-subdomain.your-domain.com
 VITE_KONG_API_KEY=tk_front_123456789
 ```
 
@@ -730,7 +771,7 @@ newman run postman/TicketRemaster.gateway.postman_collection.json -e postman/Tic
 ## Public and Local Surfaces
 
 - **Local gateway:** `http://localhost:8000` (when port-forward is active)
-- **Public gateway:** `https://ticketremasterapi.hong-yi.me` (when Cloudflare tunnel is configured)
+- **Public gateway:** Your configured Cloudflare tunnel URL (e.g., `https://api.yourdomain.com`)
 - **RabbitMQ management:** `http://localhost:15672` (after port-forwarding `svc/rabbitmq`)
 
 Frontends should use the no-prefix routes such as `/auth/login` and `/events`. Kong also supports `/api/...` compatibility aliases, but new frontend code should use the no-prefix form.
@@ -811,13 +852,19 @@ Open `http://localhost:5000/apidocs` in your browser.
 
 ## For Frontend Developers
 
-If you only need to consume the backend and don't want to run it locally, use the shared public backend:
+If you only need to consume the backend and don't want to run it locally, you have two options:
+
+**Option A: Use a shared backend instance**
+
+If your team has a shared backend instance running with a Cloudflare tunnel, use that URL:
 
 ```env
-VITE_API_BASE_URL=https://ticketremasterapi.hong-yi.me
+VITE_API_BASE_URL=https://your-team-backend-url.com
 VITE_KONG_API_KEY=tk_front_123456789
 ```
 
-No installation required. The backend maintainer keeps this instance running and up-to-date.
+**Option B: Set up your own Cloudflare tunnel**
 
-**Note:** The public backend is shared among the team. Don't use it for destructive testing or load testing.
+Follow the instructions in "Option 2: Public Access Setup" above to expose your local backend to the internet.
+
+**Note:** Shared backend instances should not be used for destructive testing or load testing.
