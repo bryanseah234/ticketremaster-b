@@ -39,6 +39,7 @@ OTP_WRAPPER         = os.environ.get("OTP_WRAPPER_URL",                "http://o
 CREDIT_TXN_SERVICE  = os.environ.get("CREDIT_TRANSACTION_SERVICE_URL", "http://credit-transaction-service:5000")
 TICKET_SERVICE      = os.environ.get("TICKET_SERVICE_URL",             "http://ticket-service:5000")
 USER_SERVICE        = os.environ.get("USER_SERVICE_URL",               "http://user-service:5000")
+EVENT_SERVICE       = os.environ.get("EVENT_SERVICE_URL",              "http://event-service:5000")
 
 
 def _error(code, message, status):
@@ -783,7 +784,7 @@ def get_transfer(transfer_id):
         type: string
     responses:
       200:
-        description: Transfer record
+        description: Transfer record enriched with ticket and event details
       401:
         description: Unauthorized
       403:
@@ -797,7 +798,27 @@ def get_transfer(transfer_id):
         return _error("TRANSFER_NOT_FOUND", "Transfer not found.", 404)
     if user_id not in (transfer["buyerId"], transfer["sellerId"]):
         return _error("AUTH_FORBIDDEN", "Access denied.", 403)
-    return jsonify({"data": transfer}), 200
+    
+    # Enrich transfer with listing, ticket, and event details
+    enriched_transfer = transfer.copy()
+    
+    # Fetch listing to get ticket details
+    listing, _ = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}")
+    if listing:
+        enriched_transfer["listing"] = listing
+        
+        # Fetch ticket details
+        ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing['ticketId']}")
+        if ticket:
+            enriched_transfer["ticket"] = ticket
+            
+            # Fetch event details
+            if ticket.get("eventId"):
+                event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
+                if event:
+                    enriched_transfer["event"] = event
+    
+    return jsonify({"data": enriched_transfer}), 200
 
 
 # ── POST /transfer/<id>/resend-otp ───────────────────────────────────────────

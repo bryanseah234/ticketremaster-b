@@ -249,6 +249,9 @@ def update_listing(listing_id):
     if not listing:
         return error_response(404, 'LISTING_NOT_FOUND', 'Listing not found')
 
+    if 'status' not in data:
+        return error_response(400, 'VALIDATION_ERROR', 'status field is required')
+
     if data['status'] not in ALLOWED_STATUSES:
         return error_response(400, 'VALIDATION_ERROR', 'Invalid status value')
 
