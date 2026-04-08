@@ -33,6 +33,31 @@ def _parse_pagination_args():
     return page, min(limit, 100), None
 
 
+def _enrich_listing(listing):
+    ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing.get('ticketId')}")
+    event = None
+    if isinstance(ticket, dict) and ticket.get("eventId"):
+        event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
+    seller, _ = call_service("GET", f"{USER_SERVICE}/users/{listing.get('sellerId')}")
+    seller_email = seller.get("email") if seller else None
+    seller_display = seller_email.split("@")[0] if seller_email else None
+
+    return {
+        "listingId": listing["listingId"],
+        "ticketId": listing["ticketId"],
+        "sellerId": listing["sellerId"],
+        "sellerName": seller_display,
+        "price": listing["price"],
+        "status": listing["status"],
+        "createdAt": listing["createdAt"],
+        "event": {
+            "eventId": event["eventId"],
+            "name": event["name"],
+            "date": event["date"],
+        } if event else None,
+    }
+
+
 # ── GET /marketplace ──────────────────────────────────────────────────────────
 
 @bp.get("/marketplace")
@@ -69,32 +94,14 @@ def browse():
         listings_list = [l for l in listings_list if isinstance(l, dict)]
         enriched = []
         for listing in listings_list:
-            ticket, _ = call_service("GET", f"{TICKET_SERVICE}/tickets/{listing.get('ticketId')}")
-            event = None
-            if isinstance(ticket, dict) and ticket.get("eventId"):
-                event, _ = call_service("GET", f"{EVENT_SERVICE}/events/{ticket['eventId']}")
-            seller, _ = call_service("GET", f"{USER_SERVICE}/users/{listing.get('sellerId')}")
-            seller_email = seller.get("email") if seller else None
-            seller_display = seller_email.split("@")[0] if seller_email else None
+            enriched_listing = _enrich_listing(listing)
             
             # Apply eventId filter if specified
+            event = enriched_listing.get("event")
             if requested_event_id and (not event or str(event.get("eventId")) != str(requested_event_id)):
                 continue
             
-            enriched.append({
-                "listingId":   listing["listingId"],
-                "ticketId":    listing["ticketId"],
-                "sellerId":    listing["sellerId"],
-                "sellerName":  seller_display,
-                "price":       listing["price"],
-                "status":      listing["status"],
-                "createdAt":   listing["createdAt"],
-                "event": {
-                    "eventId": event["eventId"],
-                    "name":    event["name"],
-                    "date":    event["date"],
-                } if event else None,
-            })
+            enriched.append(enriched_listing)
     else:
         enriched = []
 
@@ -118,6 +125,37 @@ def browse():
         "listings":   enriched,
         "pagination": pagination,
     }}), 200
+
+
+# ── GET /marketplace/<listing_id> ────────────────────────────────────────────
+
+@bp.get("/marketplace/<listing_id>")
+def get_listing(listing_id):
+    """
+    Get a marketplace listing enriched with ticket and event details
+    ---
+    tags:
+      - Marketplace
+    parameters:
+      - in: path
+        name: listing_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Marketplace listing
+      404:
+        description: Listing not found
+      503:
+        description: Listing service unavailable
+    """
+    listing, err = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{listing_id}")
+    if err == "LISTING_NOT_FOUND":
+        return _error("LISTING_NOT_FOUND", "Listing not found.", 404)
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve listing.", 503)
+
+    return jsonify({"data": _enrich_listing(listing)}), 200
 
 
 # ── POST /marketplace/list ────────────────────────────────────────────────────

@@ -168,6 +168,7 @@ def test_buyer_verify_success(mock_svc, mock_credit, mock_broadcast, _mock_paylo
     }
     mock_svc.side_effect = [
         (transfer, None),                   # GET transfer
+        (MOCK_BUYER_USER, None),           # GET buyer
         ({"verified": True}, None),         # POST otp/verify
         (None, None),                       # PATCH buyerOtpVerified
         (MOCK_LISTING, None),               # GET listing
@@ -216,6 +217,7 @@ def test_buyer_verify_success(mock_svc, mock_credit, mock_broadcast, _mock_paylo
 def test_buyer_verify_wrong_otp(mock_svc, client):
     mock_svc.side_effect = [
         (MOCK_TRANSFER, None),
+        (MOCK_BUYER_USER, None),
         ({"verified": False}, None),
     ]
     res = client.post("/transfer/txr_001/buyer-verify",
@@ -319,6 +321,7 @@ def test_seller_verify_success(mock_svc, mock_broadcast, client):
     }
     mock_svc.side_effect = [
         (transfer, None),
+        (MOCK_SELLER_USER, None),
         ({"verified": True}, None),
         (MOCK_BUYER_USER, None),
         ({"sid": "VE_buyer"}, None),
@@ -359,6 +362,7 @@ def test_seller_verify_wrong_otp(mock_svc, client):
                 "sellerOtpVerified": False, "sellerVerificationSid": "VE_seller"}
     mock_svc.side_effect = [
         (transfer, None),
+        (MOCK_SELLER_USER, None),
         ({"verified": False}, None),
     ]
     res = client.post("/transfer/txr_001/seller-verify",
@@ -380,6 +384,7 @@ def test_buyer_verify_insufficient_credits_at_execution(mock_svc, mock_credit, c
     }
     mock_svc.side_effect = [
         (transfer, None),           # GET transfer
+        (MOCK_BUYER_USER, None),    # GET buyer
         ({"verified": True}, None), # POST otp/verify
         (None, None),               # PATCH buyerOtpVerified
         (MOCK_LISTING, None),       # GET listing
@@ -406,6 +411,7 @@ def test_buyer_verify_saga_compensation_on_failure(mock_svc, mock_credit, client
     }
     mock_svc.side_effect = [
         (transfer, None),
+        (MOCK_BUYER_USER, None),
         ({"verified": True}, None),
         (None, None),           # PATCH buyerOtpVerified
         (MOCK_LISTING, None),   # GET listing

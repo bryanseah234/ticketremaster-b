@@ -88,7 +88,7 @@ def handle_subscribe(data: Dict[str, Any]):
     """Subscribe to a specific channel."""
     channel = data.get('channel')
     if channel and channel in EVENT_CHANNELS:
-        join_room(channel)
+        join_room(EVENT_CHANNELS[channel])
         print(f'[WebSocket] Client {request.sid} subscribed to {channel}')
         emit('subscribed', {'channel': channel})
 
@@ -98,7 +98,7 @@ def handle_unsubscribe(data: Dict[str, Any]):
     """Unsubscribe from a specific channel."""
     channel = data.get('channel')
     if channel and channel in EVENT_CHANNELS:
-        leave_room(channel)
+        leave_room(EVENT_CHANNELS[channel])
         print(f'[WebSocket] Client {request.sid} unsubscribed from {channel}')
 
 

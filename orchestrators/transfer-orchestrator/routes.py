@@ -656,9 +656,14 @@ def buyer_verify(transfer_id):
     ):
         return _error("VALIDATION_ERROR", "Transfer is not awaiting buyer OTP.", 400)
 
+    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve buyer details.", 503)
+
     verify, err = call_service("POST", f"{OTP_WRAPPER}/otp/verify", json={
         "sid": transfer["buyerVerificationSid"],
         "otp": body["otp"],
+        "phoneNumber": buyer["phoneNumber"],
     })
     if err or not verify.get("verified"):
         return _error("VALIDATION_ERROR", "OTP is incorrect or has expired.", 400)
@@ -947,9 +952,14 @@ def seller_verify(transfer_id):
     if transfer["status"] != "pending_seller_otp" or transfer.get("sellerOtpVerified"):
         return _error("VALIDATION_ERROR", "Transfer is not awaiting seller OTP.", 400)
 
+    seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve seller details.", 503)
+
     verify, err = call_service("POST", f"{OTP_WRAPPER}/otp/verify", json={
         "sid": transfer["sellerVerificationSid"],
         "otp": body["otp"],
+        "phoneNumber": seller["phoneNumber"],
     })
     if err or not verify.get("verified"):
         return _error("VALIDATION_ERROR", "OTP is incorrect or has expired.", 400)

@@ -99,6 +99,34 @@ def test_browse_rejects_invalid_limit(mock_svc, client):
     assert res.get_json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+@patch("routes.call_service")
+def test_get_listing_success(mock_svc, client):
+    mock_svc.side_effect = [
+        (MOCK_LISTING, None),
+        (MOCK_TICKET, None),
+        (MOCK_EVENT, None),
+        (MOCK_SELLER, None),
+    ]
+
+    res = client.get("/marketplace/lst_001")
+
+    assert res.status_code == 200
+    payload = res.get_json()["data"]
+    assert payload["listingId"] == "lst_001"
+    assert payload["event"]["name"] == "Symphony Night"
+    assert payload["sellerName"] == "usr_001"
+
+
+@patch("routes.call_service")
+def test_get_listing_not_found(mock_svc, client):
+    mock_svc.return_value = (None, "LISTING_NOT_FOUND")
+
+    res = client.get("/marketplace/lst_missing")
+
+    assert res.status_code == 404
+    assert res.get_json()["error"]["code"] == "LISTING_NOT_FOUND"
+
+
 # ── POST /marketplace/list ────────────────────────────────────────────────────
 
 @patch("routes.call_service")
