@@ -49,7 +49,12 @@ function Invoke-DbPodSql {
         [string]$Sql
     )
 
-    $command = "export PGPASSWORD=`"`$POSTGRES_PASSWORD`"; psql -X -A -t -v ON_ERROR_STOP=1 -U `"`$POSTGRES_USER`" -d `"`$POSTGRES_DB`" -c '$Sql'"
+    $command = @"
+export PGPASSWORD="`$POSTGRES_PASSWORD"
+cat <<'SQL' | psql -X -A -t -v ON_ERROR_STOP=1 -U "`$POSTGRES_USER" -d "`$POSTGRES_DB"
+$Sql
+SQL
+"@
     $result = & kubectl exec -n $Target.Namespace $Target.Pod -c postgres -- sh -lc $command
     if ($LASTEXITCODE -ne 0) {
         throw "Failed SQL query against $($Target.Name)"

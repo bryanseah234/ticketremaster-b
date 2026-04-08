@@ -348,13 +348,32 @@ Create or refresh the snapshot:
 
 That writes SQL dumps to `db-snapshots/k8s/latest/`. Those files live inside the repo, so you can keep them locally or commit them if this is demo-only data that you intentionally want to recover later.
 
+If you want scheduled backups, register the built-in Windows task:
+
+```powershell
+.\scripts\register_k8s_db_snapshot_task.ps1
+```
+
+By default it runs every 60 minutes and calls:
+
+```powershell
+.\scripts\backup_k8s_db_snapshots.ps1 -SkipIfTransientState
+```
+
+That `-SkipIfTransientState` guard avoids taking a snapshot while there are still live short-lived workflows such as:
+
+- seat holds still in `held` state
+- transfers still pending seller or buyer OTP before their 24-hour expiry
+
+That way your regular snapshots favor stable states instead of freezing half-finished flows.
+
 Restore the snapshot into a rebuilt cluster:
 
 ```powershell
 .\scripts\restore_k8s_db_snapshots.ps1
 ```
 
-The restore script reloads every Postgres database dump, then reruns the existing seed jobs so only baseline rows that are still missing get added back.
+The restore script reloads every Postgres database dump, clears any expired transient state that should no longer be alive, then reruns the existing seed jobs so only baseline rows that are still missing get added back.
 
 The automated startup flow now also checks `db-snapshots/k8s/latest/` when it detects wiped database state. If a snapshot exists, it restores that first and only falls back to plain reseeding when no snapshot is available.
 
