@@ -49,28 +49,65 @@ The current backend contains **eight BTL-worthy items**:
 ## BTL #1: gRPC and Protocol Buffers
 
 **Simple explanation:**
-If normal REST is like sending a letter with a lot of words, gRPC is like using a very short, fixed form over a direct hotline. It is faster and stricter.
+If normal REST is like sending a letter with a lot of words, gRPC is like using a short fixed form over a direct hotline. It is stricter, more explicit, and better suited to fast internal service-to-service calls.
 
 **Why this is beyond the labs:**
 The lab path used REST APIs everywhere. This repo adds an internal RPC contract for the most timing-sensitive part of the system: seat state changes during checkout.
 
+**How it works in this repo:**
+
+- `proto/seat_inventory.proto` defines a strict service contract for `HoldSeat`, `ReleaseSeat`, `SellSeat`, and `GetSeatStatus`
+- generated stubs in `shared/grpc/` give both server and client code the same message definitions
+- `seat-inventory-service` runs a gRPC server alongside its Flask app
+- `ticket-purchase-orchestrator` calls that gRPC service for hold, release, sell, and status checks during checkout
+- the seat-hold expiry consumer also reuses the same gRPC contract to release seats automatically when TTL messages expire
+
+**Why we chose gRPC here:**
+
+- seat reservation is the most concurrency-sensitive path in the backend
+- the seat inventory flow benefits from a strict typed contract rather than loosely shaped JSON
+- gRPC reduces protocol overhead on a hot internal path without forcing the whole platform away from REST
+- it lets the repo keep browser-facing APIs simple while optimizing only the part that most needs it
+
+**What benefits it gives us compared to other options:**
+
+- compared to using REST everywhere:
+  - gRPC gives a more rigid contract for the seat lifecycle calls
+  - it is a better fit for low-latency internal RPC than repeatedly exchanging JSON over HTTP on the same hot path
+  - it makes the seat operations feel like a dedicated internal capability rather than just another public-style REST endpoint
+- compared to moving everything to gRPC:
+  - the repo keeps gRPC limited to one high-value internal path instead of adding protocol complexity to every service
+  - browser-facing workflows can remain ordinary Flask REST APIs behind Kong
+- compared to direct database sharing between orchestrator and service:
+  - the orchestrator does not need to bypass service boundaries just to reserve a seat
+  - seat state remains owned by `seat-inventory-service`
+
 **Where it exists in this repo:**
 
-- contract: `proto/seat_inventory.proto`
-- generated shared stubs: `shared/grpc/seat_inventory_pb2.py`, `shared/grpc/seat_inventory_pb2_grpc.py`
-- gRPC server: `services/seat-inventory-service/server.py`
-- gRPC business logic: `services/seat-inventory-service/grpc_server.py`
-- gRPC client usage: `orchestrators/ticket-purchase-orchestrator/routes.py`
-- expiry consumer using the same RPC contract: `orchestrators/ticket-purchase-orchestrator/dlx_consumer.py`
+- contract and generated code:
+  - `proto/seat_inventory.proto`
+  - `shared/grpc/seat_inventory_pb2.py`
+  - `shared/grpc/seat_inventory_pb2_grpc.py`
+  - `shared/grpc/README.md`
+- server side:
+  - `services/seat-inventory-service/server.py`
+  - `services/seat-inventory-service/grpc_server.py`
+  - `services/seat-inventory-service/README.md`
+- client side:
+  - `orchestrators/ticket-purchase-orchestrator/routes.py`
+  - `orchestrators/ticket-purchase-orchestrator/dlx_consumer.py`
 
-**Role in the codebase:**
+**Limitations and tradeoffs:**
 
-- `ticket-purchase-orchestrator` uses gRPC to call `HoldSeat`, `ReleaseSeat`, `SellSeat`, and `GetSeatStatus`
-- the purchase flow uses this because seat availability is the part most likely to break under concurrency
-- the orchestrator also keeps a small gRPC channel pool so it does not create a fresh connection every time
+- it adds another protocol to the backend, so the team has to maintain both REST and gRPC understanding
+- the protobuf stubs have to stay in sync with the proto contract
+- this is an internal optimization, not something the browser uses directly
 
-**Why the design makes sense:**
-Seat reservation is where double-booking risk lives. gRPC gives the repo a strict contract and lower overhead for that hot path, while the rest of the platform can stay on ordinary HTTP.
+**Presentation talking points:**
+
+- "We did not replace REST everywhere. We used gRPC only for the seat inventory path, because that is where concurrency and double-booking risk are highest."
+- "The main benefit is a stricter internal contract for hold, release, sell, and status checks."
+- "This is beyond the labs because the class stack was REST-first, while this repo introduces a mixed-protocol design for performance-sensitive internal calls."
 
 **Read more:**
 
@@ -87,31 +124,65 @@ Redis is like a very fast sticky-note board. We use it for things that should be
 **Why this is beyond the labs:**
 The lab material did not cover Redis, distributed locks, token blacklists, or TTL-backed workflow helpers.
 
+**How it works in this repo:**
+
+- `shared/token_blacklist.py` stores revoked JWT identifiers in Redis until they expire naturally
+- `services/otp-wrapper/routes.py` uses Redis TTL keys for OTP attempt counting and temporary lockouts
+- `orchestrators/ticket-verification-orchestrator/routes.py` uses Redis distributed locks to reduce double-scan races at verification time
+- `services/seat-inventory-service/grpc_server.py` uses Redis for short-lived hold caching and idempotency caching
+- `orchestrators/ticket-purchase-orchestrator/routes.py` reads cached hold state and includes a Redis circuit-breaker path so Redis failures do not automatically collapse the whole purchase flow
+
+**Why we chose Redis here:**
+
+- these use cases all need fast temporary state, not permanent business storage
+- Redis TTL support makes it a natural fit for expiring tokens, lock windows, cooldowns, and short workflow memory
+- it helps coordinate behavior across multiple services and pods in a way in-process memory cannot
+- it improves responsiveness for hot workflow checks without turning Redis into the system of record
+
+**What benefits it gives us compared to other options:**
+
+- compared to using only PostgreSQL for everything:
+  - Redis is better suited to expiring keys, lightweight locks, and short-lived counters
+  - it avoids turning workflow helpers into heavier database reads and writes
+- compared to keeping this state only in local process memory:
+  - local memory would not work properly across multiple containers or pods
+  - Redis gives a shared coordination point for lock ownership, revocation state, and temporary workflow data
+- compared to making everything permanent:
+  - these values are supposed to disappear automatically after a short period
+  - TTL-backed storage reduces cleanup burden and matches the temporary nature of the data
+
 **Where it exists in this repo:**
 
-- JWT revocation blacklist: `shared/token_blacklist.py`
-- OTP rate limiting: `services/otp-wrapper/routes.py`
-- distributed scan lock: `orchestrators/ticket-verification-orchestrator/routes.py`
-- seat hold cache and idempotency cache: `services/seat-inventory-service/grpc_server.py`
-- purchase confirmation cache read and Redis circuit breaker: `orchestrators/ticket-purchase-orchestrator/routes.py`
+- token revocation:
+  - `shared/token_blacklist.py`
+- OTP rate limiting and lockout:
+  - `services/otp-wrapper/routes.py`
+  - `services/otp-wrapper/README.md`
+- distributed verification lock:
+  - `orchestrators/ticket-verification-orchestrator/routes.py`
+  - `orchestrators/ticket-verification-orchestrator/README.md`
+- hold cache and idempotency:
+  - `services/seat-inventory-service/grpc_server.py`
+- purchase-side Redis integration:
+  - `orchestrators/ticket-purchase-orchestrator/routes.py`
 
-**Role in the codebase:**
+**What we do not claim:**
 
-- stores revoked JWTs until they expire naturally
-- stores OTP attempt counters and temporary account lockouts
-- prevents two staff devices from checking in the same ticket at the same moment
-- caches short-lived seat hold state so purchase confirmation does not always need to re-fetch from the database
-- stores idempotency results for release operations
+- Redis is not the primary business database in this repo
+- Redis is not used for long-term records such as tickets, transfers, or credits
+- the durable source of truth still lives in the service-owned databases and external systems
 
-**Why the design makes sense:**
-This repo does **not** use Redis as the main database. It uses Redis only for "fast temporary memory" jobs:
+**Limitations and tradeoffs:**
 
-- short timers
-- retry protection
-- lock ownership
-- quick state checks
+- if Redis is unavailable, some convenience and coordination features degrade
+- temporary state is only as good as the TTL and key design choices
+- Redis adds operational complexity, so it should be reserved for problems that actually benefit from shared fast memory
 
-That is exactly the kind of problem Redis is good at.
+**Presentation talking points:**
+
+- "The key point is that we use Redis for temporary coordination, not permanent business records."
+- "This is beyond the labs because it is not just caching; it includes token revocation, lock ownership, OTP lockouts, and idempotency helpers."
+- "The best justification is that these are exactly the kinds of expiring, shared state problems Redis was designed for."
 
 **Read more:**
 
@@ -129,24 +200,52 @@ A WebSocket is like leaving the phone call open so the server can say, "News jus
 **Why this is beyond the labs:**
 The labs did not cover realtime browser push, WebSockets, or cross-instance event broadcasting.
 
+**How it works in this repo:**
+
+- clients connect to the notification service over Socket.IO
+- clients subscribe to channels such as `seat_update`, `ticket_update`, and `transfer_update`
+- internal backend components can call `POST /broadcast`
+- the notification service republishes those events through Redis Pub/Sub
+- connected clients receive the update immediately without polling
+
+**Why we chose this approach here:**
+
+- ticketing and marketplace-style workflows benefit from immediate frontend updates
+- Socket.IO is easier for browser clients than hand-rolled raw WebSocket handling
+- Redis Pub/Sub gives the notification layer a shared event bus instead of tying updates to only one process instance
+- it cleanly separates "business event happened" from "frontend needs to know now"
+
+**What benefits it gives us compared to other options:**
+
+- compared to frontend polling:
+  - clients do not need to keep asking for updates every few seconds
+  - updates can appear immediately when state changes
+- compared to using only RabbitMQ for notifications:
+  - RabbitMQ is aimed at backend job coordination, not direct browser push
+  - WebSockets are a better fit for user-facing "something changed right now" feedback
+- compared to a single-process WebSocket service with no shared bus:
+  - Redis Pub/Sub gives a clearer fan-out mechanism for notification events
+  - it is a better foundation for scaling than purely in-memory event routing
+
 **Where it exists in this repo:**
 
-- implementation: `services/notification-service/app.py`
-- usage notes: `services/notification-service/NOTIFICATIONS.md`
-- service README: `services/notification-service/README.md`
+- implementation:
+  - `services/notification-service/app.py`
+- docs and usage examples:
+  - `services/notification-service/README.md`
+  - `services/notification-service/NOTIFICATIONS.md`
 
-**Role in the codebase:**
+**Limitations and tradeoffs:**
 
-- clients connect through Socket.IO
-- clients subscribe to event channels such as `seat_update`, `ticket_update`, and `transfer_update`
-- services can push an internal HTTP request to the notification service
-- the notification service republishes the event to Redis Pub/Sub
-- connected clients get the update immediately
+- realtime connections add more moving parts than plain request-response APIs
+- the team has to manage connection lifecycle, subscriptions, and event naming
+- WebSockets complement the REST APIs; they do not replace the need for normal HTTP endpoints
 
-**Why the design makes sense:**
-RabbitMQ is good for background work between backend components.
-WebSockets are good for telling the frontend "something changed right now".
-This repo uses both, because they solve different problems.
+**Presentation talking points:**
+
+- "RabbitMQ and WebSockets solve different problems. RabbitMQ is for backend work, while WebSockets are for pushing state changes to the frontend."
+- "The beyond-lab part is not just using Socket.IO, but combining it with Redis Pub/Sub so the notification path can fan out events cleanly."
+- "This matters for ticketing because seat, ticket, and transfer state changes are time-sensitive from the user's point of view."
 
 **Read more:**
 
@@ -168,26 +267,58 @@ This repo goes further and says things like:
 **Why this is beyond the labs:**
 RabbitMQ itself was learned in class, but this repo uses more advanced broker behavior than a normal producer-consumer example.
 
+**How it works in this repo:**
+
+- `shared/queue_setup.py` declares the queue topology for seat-hold expiry, dead-letter routing, seller notifications, and transfer timeout handling
+- the purchase flow publishes a hold message to `seat_hold_ttl_queue`
+- when that message expires, RabbitMQ dead-letters it into `seat_hold_expired_queue`
+- a background consumer then releases the seat via gRPC
+- the transfer flow also uses RabbitMQ to notify sellers asynchronously and to auto-cancel stalled transfers after the timeout window
+
+**Why we chose these RabbitMQ patterns here:**
+
+- purchase and transfer flows both have "do something later if the user does nothing" behavior
+- RabbitMQ lets the repo treat timeout handling as infrastructure-backed workflow memory instead of relying on a browser staying open
+- DLX and TTL queues model expiry explicitly, which is cleaner than scattered timer logic in the app layer
+- asynchronous seller notifications keep the live user request shorter and less fragile
+
+**What benefits it gives us compared to other options:**
+
+- compared to basic fire-and-forget queues:
+  - TTL queues and dead-letter exchanges let the broker enforce timeout behavior
+  - the system can react to expiry rather than hoping application code checks time correctly everywhere
+- compared to in-process timers:
+  - timers in one process are brittle if that process restarts or scales
+  - the broker is a better place to remember delayed workflow actions
+- compared to doing everything synchronously:
+  - user-facing requests stay shorter
+  - background tasks like notifications and timeout cleanup do not block the main interaction path
+
 **Where it exists in this repo:**
 
-- queue topology: `shared/queue_setup.py`
-- hold expiry publisher: `orchestrators/ticket-purchase-orchestrator/routes.py`
-- hold expiry consumer: `orchestrators/ticket-purchase-orchestrator/dlx_consumer.py`
-- seller notification publisher: `orchestrators/transfer-orchestrator/routes.py`
-- transfer timeout publisher: `orchestrators/transfer-orchestrator/routes.py`
-- seller notification consumer: `orchestrators/transfer-orchestrator/seller_consumer.py`
-- transfer timeout consumer: `orchestrators/transfer-orchestrator/timeout_consumer.py`
+- queue topology:
+  - `shared/queue_setup.py`
+- purchase hold expiry:
+  - `orchestrators/ticket-purchase-orchestrator/routes.py`
+  - `orchestrators/ticket-purchase-orchestrator/dlx_consumer.py`
+  - `orchestrators/ticket-purchase-orchestrator/app.py`
+- transfer notifications and timeout:
+  - `orchestrators/transfer-orchestrator/routes.py`
+  - `orchestrators/transfer-orchestrator/seller_consumer.py`
+  - `orchestrators/transfer-orchestrator/timeout_consumer.py`
+  - `orchestrators/transfer-orchestrator/app.py`
 
-**Role in the codebase:**
+**Limitations and tradeoffs:**
 
-- `seat_hold_ttl_queue` holds seat-expiry messages for the purchase flow
-- when the message expires, it is routed into `seat_hold_expired_queue` through a dead-letter exchange
-- a consumer then releases the seat automatically
-- `seller_notification_queue` decouples seller notification work from the live buyer request
-- `transfer_timeout_queue` auto-cancels incomplete transfers after the configured timeout
+- advanced queue topology is more complex to explain and debug than simple publish-consume examples
+- delayed workflows need careful observability because the action happens later in another consumer
+- message-driven recovery logic has to be designed carefully so duplicate or expired messages are handled safely
 
-**Why the design makes sense:**
-It stops long-running workflows from depending on a single user keeping a browser tab open. The queue system remembers what must happen later even if the original request is already over.
+**Presentation talking points:**
+
+- "The beyond-lab part is not RabbitMQ by itself, but the use of TTL queues, dead-letter routing, and timeout consumers for real workflow control."
+- "This matters because seat holds and ticket transfers should still resolve correctly even after the original HTTP request is over."
+- "RabbitMQ is acting like workflow memory here, not just a message pipe."
 
 **Read more:**
 
@@ -204,33 +335,63 @@ If Docker containers are like packed lunchboxes, Kubernetes is the school system
 **Why this is beyond the labs:**
 The labs covered Docker and Docker Compose. This repo is maintained primarily as a Kubernetes system.
 
+**How it works in this repo:**
+
+- the backend is split into three namespaces: `ticketremaster-edge`, `ticketremaster-core`, and `ticketremaster-data`
+- data services such as PostgreSQL, Redis, and RabbitMQ run as Kubernetes-managed data-plane workloads
+- orchestrators and services run in the core namespace with readiness and liveness probes
+- Kong and Cloudflare-facing edge components run separately in the edge namespace
+- Kustomize ties the manifests together into one maintained base deployment
+
+**Why we chose this Kubernetes design:**
+
+- the repo is not just "many containers"; it has distinct edge, core, and data responsibilities
+- StatefulSets fit the persistent databases better than stateless deployment patterns
+- NetworkPolicies make the runtime layout closer to a real platform than an open flat network
+- probes and seed jobs make startup and health behavior part of the deployment design instead of afterthought scripts
+- Kustomize gives a single composition point for the stack
+
+**What benefits it gives us compared to other options:**
+
+- compared to Docker Compose only:
+  - Kubernetes gives stronger separation of concerns for edge, core, and data
+  - it provides probes, StatefulSets, jobs, policies, and declarative rollout behavior that Compose does not model the same way
+- compared to a flat cluster with minimal structure:
+  - namespaces and network policies make service boundaries more explicit
+  - the runtime architecture mirrors the logical architecture of the backend
+- compared to treating deployment as a secondary concern:
+  - this repo makes deployment topology part of the system design itself
+  - health checks, seed jobs, and configuration mounting are first-class design choices
+
 **Where it exists in this repo:**
 
-- entrypoint manifests: `k8s/base/`
-- namespaces: `k8s/base/namespaces.yaml`
-- network isolation: `k8s/base/network-policies.yaml`
-- data workloads: `k8s/base/data-plane.yaml`
-- core workloads: `k8s/base/core-workloads.yaml`
-- edge workloads: `k8s/base/edge-workloads.yaml`
-- kustomization: `k8s/base/kustomization.yaml`
+- entrypoint and composition:
+  - `k8s/base/kustomization.yaml`
+  - `k8s/base/`
+- namespace structure:
+  - `k8s/base/namespaces.yaml`
+- data plane:
+  - `k8s/base/data-plane.yaml`
+- core workloads:
+  - `k8s/base/core-workloads.yaml`
+- edge workloads:
+  - `k8s/base/edge-workloads.yaml`
+- network isolation:
+  - `k8s/base/network-policies.yaml`
+- startup data seeding:
+  - `k8s/base/seed-jobs.yaml`
 
-**Role in the codebase:**
+**Limitations and tradeoffs:**
 
-- separates the system into `ticketremaster-edge`, `ticketremaster-core`, and `ticketremaster-data`
-- runs PostgreSQL as StatefulSets because database pods need stable identity and storage
-- uses NetworkPolicies so not every pod can talk to every other pod
-- mounts Kong's declarative config through a ConfigMap
-- uses readiness/liveness probes so unhealthy workloads can be detected
-- includes seed jobs as part of normal environment bring-up
+- Kubernetes is more complex than Compose, especially for local development and troubleshooting
+- the manifest set is larger and requires more operational understanding
+- this design adds real structure, but that also means more files and more moving pieces to maintain
 
-**Why the design makes sense:**
-This layout turns the repo from "a bunch of containers" into a structured platform:
+**Presentation talking points:**
 
-- edge handles ingress
-- core handles business logic
-- data handles stateful infrastructure
-
-That layering is a real architecture decision, not just a deployment detail.
+- "The BTL part is not just that we use containers. It is that we treat the backend as a structured Kubernetes platform with edge, core, and data layers."
+- "StatefulSets, NetworkPolicies, readiness probes, and seed jobs show that deployment design here is architectural, not incidental."
+- "This is a strong presentation section because it shows system design maturity, not just a different way to start containers."
 
 **Read more:**
 
@@ -245,26 +406,82 @@ That layering is a real architecture decision, not just a deployment detail.
 ## BTL #6: Cloudflare Tunnel
 
 **Simple explanation:**
-Instead of opening your house to the whole street, Cloudflare Tunnel is like having the house call Cloudflare first and say, "If anyone needs me, send them through you."
+Instead of opening the laptop or Minikube cluster directly to the internet, Cloudflare Tunnel lets the cluster make an outbound connection to Cloudflare first. Public users then reach the backend through that tunnel, rather than by connecting straight to the machine running Minikube.
 
 **Why this is beyond the labs:**
 Cloudflare Tunnel and zero-trust exposure were not part of the lab stack.
 
+**How it works in this repo:**
+
+- the client hits `https://ticketremasterapi.hong-yi.me`
+- Cloudflare routes that request through the configured tunnel
+- the `cloudflared` pod in the `ticketremaster-edge` namespace receives the tunnel traffic
+- `cloudflared` forwards traffic to Kong inside the cluster
+- Kong remains the only browser-facing gateway before requests reach the orchestrators and services
+
+**Why we chose Cloudflare Tunnel here:**
+
+- it gives the project a real public HTTPS URL for demos, frontend integration, and shared smoke testing
+- it avoids directly exposing Minikube or the host machine with inbound networking
+- it keeps the cluster on an outbound-only connection model, which is a cleaner fit for a laptop-hosted backend
+- it fits the repo's existing automation, because the startup flow can bring up the cluster and then verify both the local and public paths
+- it preserves the intended edge design where Kong is still the single browser-facing gateway
+
+**What benefits it gives us compared to other options:**
+
+- compared to local-only backend testing:
+  - local testing is still supported and is still useful for developer debugging
+  - local-only checks prove that `localhost` works, but they do not prove that the shared public URL works
+  - the public smoke path helps validate demo access, frontend integration, and the browser-facing route that teammates actually consume
+- compared to directly exposing Minikube, opening ports, or using a public IP:
+  - Cloudflare Tunnel avoids turning the laptop into a traditionally exposed server
+  - it reduces manual networking setup and avoids relying on direct inbound access to the machine
+  - it matches the repo's architecture better because Kong stays the controlled ingress point inside Kubernetes
+- compared to ad-hoc tunnel tools:
+  - this repo is wired around a named public domain, `https://ticketremasterapi.hong-yi.me`, rather than a temporary developer-only address
+  - the tunnel is part of the Kubernetes edge deployment, token secret flow, and readiness checks, not a one-off manual step outside the repo
+
+**Why this is useful even though localhost testing already exists:**
+
+- localhost-only testing is enough for isolated developer debugging
+- this project also needs to prove that a shared public endpoint works for frontend usage, demos, and team smoke testing
+- that is why `start-backend.bat` supports `Localhost only`, `Cloudflare only`, and `Both`, and why `scripts/start_k8s.ps1` can run public smoke checks when the tunnel is configured
+
 **Where it exists in this repo:**
 
-- deployment: `k8s/base/edge-workloads.yaml`
-- edge restrictions: `k8s/base/network-policies.yaml`
-- startup support: `start-backend.bat`, `scripts/start_k8s.ps1`
+- deployment and runtime:
+  - `k8s/base/edge-workloads.yaml` defines the `cloudflared` deployment and the Kong edge service
+  - `k8s/base/kustomization.yaml` includes the Cloudflare image pin used by the base stack
+- security restrictions:
+  - `k8s/base/network-policies.yaml` limits edge traffic so `cloudflared` is the allowed path into Kong and has restricted egress
+- secret and token wiring:
+  - `scripts/sync_k8s_env.ps1` copies `CLOUDFLARE_TUNNEL_TOKEN` into the `edge-secrets` secret
+  - `k8s/base/secrets.local.yaml` is the local secret source that the maintainer fills in
+- startup and smoke testing:
+  - `start-backend.bat` exposes the startup modes for localhost, Cloudflare, or both
+  - `scripts/start_k8s.ps1` waits for `cloudflared`, checks the public gateway, and can run the public smoke flow
+- architecture and supporting docs:
+  - `README.md` documents Cloudflare Tunnel as part of the edge layer
+  - `LOCAL_DEV_SETUP.md` explains the public route and troubleshooting steps
+  - `diagrams/12_system_architecture_overview.mmd` shows Cloudflare Tunnel in the system flow
 
-**Role in the codebase:**
+**What we do not claim:**
 
-- exposes the local Kubernetes-backed gateway through `https://ticketremasterapi.hong-yi.me`
-- avoids needing a public IP on Minikube
-- keeps the cluster on an outbound-only connection model
-- lets the backend maintainer share a live environment for smoke testing
+- this repo clearly uses Cloudflare Tunnel
+- this repo does not visibly configure advanced Cloudflare products such as Access policies, WAF rules, or custom DDoS settings
+- if asked, those can be described as possible Cloudflare platform capabilities, but not as features currently implemented in this repo
 
-**Why the design makes sense:**
-This is a very practical team-maintenance choice. It gives the repo a public URL without turning the local machine into a traditionally exposed server.
+**Limitations and tradeoffs:**
+
+- the repo docs already note that this is still a single-connector public edge, so the public URL can be less stable than a fully hosted production deployment
+- Cloudflare Tunnel improves safe exposure, but it does not replace the need for Kong configuration, Kubernetes policies, or application-level security
+
+**Presentation talking points:**
+
+- "We did not choose Cloudflare because localhost testing was impossible. We chose it because localhost only proves the backend works on one machine, while Cloudflare lets us validate the shared public path too."
+- "The main architecture benefit is that the cluster stays on an outbound-only model instead of exposing Minikube directly to the internet."
+- "In this repo, Cloudflare Tunnel complements Kong. It does not replace Kong. Cloudflare gets traffic safely into the cluster, and Kong remains the actual API gateway."
+- "The strongest evidence in the codebase is the `cloudflared` deployment, the edge network policies, and the startup scripts that can check the public URL."
 
 **Read more:**
 
@@ -280,21 +497,53 @@ Kong is the front desk of the system. But in this repo it is not just forwarding
 **Why this is only partly beyond the labs:**
 Kong itself was taught in class. What makes it BTL here is the **deeper production-style usage**, not the fact that Kong exists.
 
+**How it works in this repo:**
+
+- Kong runs in DB-less declarative mode from Kubernetes-managed configuration
+- global plugins apply cross-cutting edge behavior such as rate limiting and CORS
+- route-level plugins apply `key-auth` only where the route actually needs protection
+- the config supports both current no-prefix routes and `/api/...` compatibility routes
+- Kong stays the only supported browser-facing gateway into the orchestrators
+
+**Why we chose this Kong design here:**
+
+- it centralizes edge policy instead of duplicating CORS, rate limiting, and gateway concerns in many Flask services
+- DB-less declarative config is easier to version with the repo than manual gateway clicks or mutable runtime state
+- route-level policy keeps the gateway precise instead of applying one blunt rule to every endpoint
+- compatibility routes help the repo support old and new path conventions at the edge layer
+
+**What benefits it gives us compared to other options:**
+
+- compared to pushing all edge behavior into each orchestrator:
+  - shared concerns stay in one place
+  - route policy is easier to audit and keep consistent
+- compared to using Kong only as a simple proxy:
+  - this repo uses it as a true API gateway with plugin composition and path policy
+  - the gateway is part of the application architecture, not just an HTTP forwarder
+- compared to ad-hoc manual gateway setup:
+  - the declarative config is versioned in the repo
+  - the Kubernetes source of truth matches the deployed environment directly
+
 **Where it exists in this repo:**
 
-- local template: `api-gateway/kong.yml.template`
-- Kubernetes source of truth: `k8s/base/configuration.yaml`
+- local template and reference:
+  - `api-gateway/kong.yml.template`
+- Kubernetes source of truth:
+  - `k8s/base/configuration.yaml`
+- runtime deployment:
+  - `k8s/base/edge-workloads.yaml`
 
-**Role in the codebase:**
+**Limitations and tradeoffs:**
 
-- runs in DB-less declarative mode
-- applies global plugins like CORS and rate limiting
-- adds route-level `key-auth` only where needed
-- supports both current no-prefix routes and `/api/...` compatibility routes
-- protects browser-facing microservices from being called directly
+- the gateway config is powerful, but it is also another layer developers must understand while debugging
+- policy mistakes at the gateway can affect many routes at once
+- Kong improves edge consistency, but business authorization still belongs in the services and orchestrators where appropriate
 
-**Why the design makes sense:**
-It keeps authentication and edge policy consistent in one place. That way each orchestrator can focus on business logic instead of repeating gateway concerns.
+**Presentation talking points:**
+
+- "Kong was taught in class, but here it is used more deeply: DB-less declarative config, global plugins, route-level plugins, and compatibility path handling."
+- "The core design idea is that edge policy belongs at the edge, not copied into every Flask service."
+- "This is beyond the labs because the repo uses Kong as a managed policy layer, not just as a basic reverse proxy."
 
 **Read more:**
 
@@ -314,22 +563,55 @@ That protection is **idempotency**.
 **Why this is beyond the labs:**
 The lab summary did not cover saga orchestration, compensation, replay protection, or idempotent distributed workflow design.
 
+**How it works in this repo:**
+
+- the purchase confirm flow runs through multiple external and internal steps, including credit checks, seat sale, ticket creation, and credit deduction
+- when later steps fail, the purchase flow includes compensating actions such as releasing the seat and marking the ticket appropriately
+- the transfer flow uses a multi-step saga across buyer credits, seller credits, transaction logging, ticket ownership change, listing completion, and transfer completion
+- the credit top-up flow uses idempotency checks so repeated Stripe confirmations or webhook deliveries do not double-credit the user
+- the seat inventory service caches release results so duplicate release requests do not repeat side effects unnecessarily
+
+**Why we chose these patterns here:**
+
+- this backend has workflows that cross multiple services and external systems, so a single database transaction cannot cover the whole path
+- ticket purchase and transfer both have real business consequences if the system fails halfway through
+- idempotency matters because retries, webhook redelivery, and duplicate requests are normal in distributed systems
+- compensation logic is the practical way to keep the system recoverable when atomic all-or-nothing commits are impossible
+
+**What benefits it gives us compared to other options:**
+
+- compared to naive sequential service calls:
+  - the repo explicitly handles mid-workflow failure instead of assuming every step will succeed
+  - partial success can be cleaned up rather than silently leaving the system inconsistent
+- compared to pretending a cross-service workflow is one transaction:
+  - this design acknowledges distributed reality
+  - it uses compensation and replay protection rather than impossible global atomicity
+- compared to having no idempotency guards:
+  - duplicate payment events or repeated requests could apply credits or releases multiple times
+  - the repo protects several of those replay-prone paths explicitly
+
 **Where it exists in this repo:**
 
-- purchase compensation: `orchestrators/ticket-purchase-orchestrator/routes.py`
-- transfer saga: `orchestrators/transfer-orchestrator/routes.py`
-- Stripe webhook idempotency: `orchestrators/credit-orchestrator/routes.py`
-- seat release idempotency: `services/seat-inventory-service/grpc_server.py`
+- purchase compensation:
+  - `orchestrators/ticket-purchase-orchestrator/routes.py`
+- transfer saga:
+  - `orchestrators/transfer-orchestrator/routes.py`
+- Stripe and top-up idempotency:
+  - `orchestrators/credit-orchestrator/routes.py`
+- seat release idempotency:
+  - `services/seat-inventory-service/grpc_server.py`
 
-**Role in the codebase:**
+**Limitations and tradeoffs:**
 
-- purchase confirmation can compensate when seat sale succeeds but ticketing or credit deduction fails
-- transfer completion uses a multi-step saga across OutSystems, credit ledger, ticket ownership, and listing state
-- Stripe webhook processing checks existing references before applying balance changes again
-- seat release caches a previous result to prevent duplicate release side effects
+- saga logic is harder to reason about than a single local transaction
+- compensation is not the same as perfect rollback; it is a recovery strategy
+- the team has to think carefully about failure order, duplicate delivery, and what "safe retry" means for each workflow
 
-**Why the design makes sense:**
-In a distributed system, failures happen halfway through. The codebase already assumes this and includes recovery logic, instead of pretending every multi-step workflow is one perfectly atomic action.
+**Presentation talking points:**
+
+- "This is one of the strongest BTL sections because it shows the backend was designed for failure, not only for happy-path success."
+- "The core point is that purchase and transfer are multi-step distributed workflows, so compensation and idempotency are necessary engineering patterns."
+- "A good way to explain it is: if a workflow spans services, you cannot rely on one database transaction, so you need recovery logic and replay protection."
 
 **Read more:**
 
