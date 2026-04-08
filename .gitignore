@@ -160,3 +160,4 @@ desktop.ini
 .bzr/
 .bzrignore
 .fossil-ignore
+.build-hash

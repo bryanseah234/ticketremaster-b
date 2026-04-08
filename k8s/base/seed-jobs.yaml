@@ -236,3 +236,57 @@ spec:
                   key: SEAT_INVENTORY_SERVICE_DB_PASSWORD
             - name: SEAT_INVENTORY_SERVICE_DATABASE_URL
               value: postgresql://$(SEAT_INVENTORY_SERVICE_DB_USER):$(SEAT_INVENTORY_SERVICE_DB_PASSWORD)@$(SEAT_INVENTORY_SERVICE_DB_HOST):$(SEAT_INVENTORY_SERVICE_DB_PORT)/$(SEAT_INVENTORY_SERVICE_DB_NAME)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-users
+  namespace: ticketremaster-core
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: seed-users
+    spec:
+      restartPolicy: Never
+      priorityClassName: ticketremaster-standard
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z user-service-db.ticketremaster-data.svc.cluster.local 5432; do sleep 5; done
+              until wget -qO- http://user-service.ticketremaster-core.svc.cluster.local:5000/health; do sleep 5; done
+      containers:
+        - name: seed-users
+          image: ticketremaster/user-service:local-k8s-20260329
+          imagePullPolicy: IfNotPresent
+          command: ["python", "user_seed.py"]
+          envFrom:
+            - configMapRef:
+                name: core-runtime
+          env:
+            - name: USER_SERVICE_DB_HOST
+              value: user-service-db.ticketremaster-data.svc.cluster.local
+            - name: USER_SERVICE_DB_PORT
+              value: "5432"
+            - name: USER_SERVICE_DB_NAME
+              value: user_service
+            - name: USER_SERVICE_DB_USER
+              value: ticketremaster
+            - name: USER_SERVICE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: core-data-secrets
+                  key: USER_SERVICE_DB_PASSWORD
+            - name: USER_SERVICE_DATABASE_URL
+              value: postgresql://$(USER_SERVICE_DB_USER):$(USER_SERVICE_DB_PASSWORD)@$(USER_SERVICE_DB_HOST):$(USER_SERVICE_DB_PORT)/$(USER_SERVICE_DB_NAME)
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: core-secrets
+                  key: JWT_SECRET

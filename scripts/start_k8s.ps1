@@ -24,6 +24,47 @@ param(
 $ErrorActionPreference = "Stop"
 $Tag = "local-k8s-20260329"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# ── Auto-rebuild if source files have changed since last build ───────────────
+function Get-SourceHash {
+    # Hash the contents of all service/orchestrator source files
+    $paths = @("services", "orchestrators") | ForEach-Object { Join-Path $repoRoot $_ }
+    $files = $paths | ForEach-Object {
+        Get-ChildItem -Path $_ -Recurse -File -Include "*.py","*.txt","Dockerfile" -ErrorAction SilentlyContinue
+    } | Sort-Object FullName
+    $combined = ($files | ForEach-Object { "$($_.FullName):$($_.LastWriteTimeUtc.Ticks)" }) -join "|"
+    return [System.Security.Cryptography.MD5]::Create().ComputeHash(
+        [System.Text.Encoding]::UTF8.GetBytes($combined)
+    ) | ForEach-Object { $_.ToString("x2") } | Join-String
+}
+
+$hashFile = Join-Path $repoRoot ".build-hash"
+$currentHash = Get-SourceHash
+
+$needsRebuild = $true
+if (Test-Path $hashFile) {
+    $lastHash = Get-Content $hashFile -Raw
+    if ($lastHash.Trim() -eq $currentHash) {
+        $needsRebuild = $false
+    }
+}
+
+if ($needsRebuild -and -not $SkipImageLoad) {
+    Write-Step "Source changes detected - rebuilding Docker images"
+    & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag
+    if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
+    # Reload all images into minikube
+    $desiredImages = Get-DesiredImages
+    foreach ($image in $desiredImages) {
+        Write-Host "    Loading $image"
+        & minikube image load $image
+    }
+    $currentHash | Set-Content $hashFile
+    Write-OK "Rebuild complete"
+} elseif (-not $needsRebuild) {
+    Write-OK "No source changes detected - skipping rebuild"
+}
+# ─────────────────────────────────────────────────────────────────────────────
 $script:LocalGatewayPort = 8000
 $script:LocalGatewayUrl = "http://localhost:8000"
 
@@ -261,17 +302,23 @@ function Test-KongGateway {
 
 function Get-FreeTcpPort {
     param(
-        [int[]]$Candidates = @(8000, 18000, 18080, 28000)
+        [int[]]$Candidates = @(8000, 18000, 18080, 28000, 38000, 48000)
     )
 
     foreach ($candidate in $Candidates) {
-        $listener = Get-NetTCPConnection -LocalPort $candidate -State Listen -ErrorAction SilentlyContinue
-        if (-not $listener) {
+        # Try actually binding to the port - catches Windows reserved ranges that
+        # Get-NetTCPConnection misses (e.g. Hyper-V / WinNAT exclusions)
+        try {
+            $tcp = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $candidate)
+            $tcp.Start()
+            $tcp.Stop()
             return $candidate
+        } catch {
+            Write-Warn "Port $candidate is not bindable ($($_.Exception.Message -replace '\r?\n.*','')). Trying next..."
         }
     }
 
-    throw "Could not find a free local port for the Kong port-forward."
+    throw "Could not find a bindable local port for the Kong port-forward."
 }
 
 function Ensure-PortForward {
@@ -289,9 +336,16 @@ function Ensure-PortForward {
         return
     }
 
-    $portInUse = Get-NetTCPConnection -LocalPort $preferredPort -State Listen -ErrorAction SilentlyContinue
-    if ($portInUse) {
-        Write-Warn "Port $preferredPort is already in use by a non-Kong service. Selecting a fallback port."
+    # Test if the preferred port is actually bindable (catches Windows reserved ranges)
+    $preferredBindable = $false
+    try {
+        $tcp = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $preferredPort)
+        $tcp.Start(); $tcp.Stop()
+        $preferredBindable = $true
+    } catch { }
+
+    if (-not $preferredBindable) {
+        Write-Warn "Port $preferredPort is not bindable (Windows access restriction or in use). Selecting a fallback port."
         $script:LocalGatewayPort = Get-FreeTcpPort
     } else {
         $script:LocalGatewayPort = $preferredPort
@@ -330,7 +384,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "Minikube is up"
 
-if (-not $SkipImageLoad) {
+if (-not $SkipImageLoad -and -not $needsRebuild) {
     Ensure-ImagesLoaded
 }
 
@@ -354,18 +408,53 @@ Write-Step "Waiting for seed jobs"
 Wait-JobsComplete -Namespace "ticketremaster-core"
 Write-OK "Seed jobs completed"
 
+# Verify seed data is actually present - if DBs were wiped (e.g. PVC reset after minikube restart),
+# completed jobs won't rerun automatically. Delete and reapply them if data is missing.
+Write-Step "Verifying seed data"
+$eventsRaw = & kubectl exec -n ticketremaster-core deployment/event-service -- `
+    python -c "import urllib.request,json; d=json.loads(urllib.request.urlopen('http://localhost:5000/events').read()); print(d['pagination']['total'])" 2>$null
+$eventsCount = ($eventsRaw | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1) -as [int]
+
+if ($eventsCount -eq 0) {
+    Write-Warn "Event data missing (DB was likely wiped on restart). Re-running seed jobs..."
+    & kubectl delete job seed-venues seed-events seed-seats seed-seat-inventory seed-users -n ticketremaster-core 2>&1 | Out-Null
+    Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed during reseed."
+    Wait-JobsComplete -Namespace "ticketremaster-core"
+    Write-OK "Reseed completed"
+} else {
+    Write-OK "Seed data verified ($eventsCount events present)"
+}
+
 Ensure-PortForward
 
 $canRunPublicTests = $RunPublicTests
 if ($RunPublicTests) {
     Write-Step "Checking Cloudflare tunnel readiness"
-    $cloudflaredReady = Try-WaitDeploymentReady -Namespace "ticketremaster-edge" -Name "cloudflared" -TimeoutSeconds 180
+
+    # Pull the cloudflared image into minikube if not already present
+    $cfImage = "cloudflare/cloudflared"
+    $loadedImagesText = (& minikube image list 2>&1) | Out-String
+    if ($loadedImagesText -notmatch [regex]::Escape($cfImage)) {
+        Write-Host "    Pulling cloudflared image into Minikube (first run may take a minute)..."
+        & minikube image pull cloudflare/cloudflared:latest 2>&1 | Out-Null
+    }
+
+    $cloudflaredReady = Try-WaitDeploymentReady -Namespace "ticketremaster-edge" -Name "cloudflared" -TimeoutSeconds 300
     if (-not $cloudflaredReady) {
-        Write-Warn "Cloudflared rollout did not report ready. Checking the public URL directly before skipping public tests."
+        Write-Warn "Cloudflared did not become ready. Restarting the deployment and retrying..."
+        & kubectl rollout restart deployment/cloudflared -n ticketremaster-edge | Out-Null
+        $cloudflaredReady = Try-WaitDeploymentReady -Namespace "ticketremaster-edge" -Name "cloudflared" -TimeoutSeconds 300
+        if (-not $cloudflaredReady) {
+            Write-Warn "Cloudflared rollout still not ready after restart. Checking the public URL directly."
+        }
+    }
+
+    if ($cloudflaredReady) {
+        Write-OK "Cloudflared is ready"
     }
 
     try {
-        Wait-HttpEndpoint -Name "Public gateway" -Url "https://ticketremasterapi.hong-yi.me/events" -ExpectedStatusCodes @(200) -TimeoutSeconds 180
+        Wait-HttpEndpoint -Name "Public gateway" -Url "https://ticketremasterapi.hong-yi.me/events" -ExpectedStatusCodes @(200) -TimeoutSeconds 240
     } catch {
         Write-Warn $_.Exception.Message
         Write-Warn "Public URL is not reachable yet. Continuing with localhost only."
@@ -374,7 +463,9 @@ if ($RunPublicTests) {
 }
 
 Write-Step "Running gateway smoke tests"
-if (-not $PublicOnly) {
+
+# Run localhost Newman only if port-forward is active (options 1 and 3)
+if (-not $SkipPortForward -and -not $PublicOnly) {
     Write-Host "`n--- Localhost via Kong ---" -ForegroundColor White
     Invoke-External -Command "newman" -Arguments @(
         "run",
@@ -383,8 +474,11 @@ if (-not $PublicOnly) {
         "--env-var", "gateway_url=$script:LocalGatewayUrl",
         "--reporters", "cli"
     ) -ErrorMessage "Localhost Newman smoke tests failed."
+} else {
+    Write-Warn "Localhost smoke tests skipped (no port-forward)."
 }
 
+# Run public Newman only if cloudflare tunnel is up (options 2 and 3)
 if ($canRunPublicTests) {
     Write-Host "`n--- Public URL via Cloudflare ---" -ForegroundColor White
     Invoke-External -Command "newman" -Arguments @(
@@ -393,16 +487,16 @@ if ($canRunPublicTests) {
         "-e", "postman/TicketRemaster.gateway-public.postman_environment.json",
         "--reporters", "cli"
     ) -ErrorMessage "Public Newman smoke tests failed."
-} elseif ($PublicOnly) {
-    throw "PublicOnly was requested but RunPublicTests was not enabled."
 } else {
-    Write-Warn "Public smoke tests skipped because no Cloudflare tunnel token was requested."
+    Write-Warn "Public smoke tests skipped (Cloudflare tunnel not requested or not reachable)."
 }
 
 Write-Step "Done"
-Write-Host "    Local gateway: $script:LocalGatewayUrl" -ForegroundColor Green
+if (-not $SkipPortForward -and -not $PublicOnly) {
+    Write-Host "    Local gateway:  $script:LocalGatewayUrl" -ForegroundColor Green
+}
 if ($canRunPublicTests) {
     Write-Host "    Public gateway: https://ticketremasterapi.hong-yi.me" -ForegroundColor Green
 } elseif ($RunPublicTests) {
-    Write-Host "    Public gateway: not ready yet (cloudflared or public endpoint still reconnecting)" -ForegroundColor Yellow
+    Write-Host "    Public gateway: not ready yet (cloudflared still reconnecting)" -ForegroundColor Yellow
 }
