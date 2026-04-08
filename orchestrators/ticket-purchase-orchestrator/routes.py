@@ -55,6 +55,12 @@ def _error(code, message, status):
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+def _unwrap_data(payload):
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        return payload["data"]
+    return payload or {}
+
+
 def _get_grpc_channel():
     """Get a gRPC channel from the pool or create a new one.
     
@@ -696,11 +702,14 @@ def resume_hold(event_id):
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not check hold status.", 503)
 
-    hold = hold_data.get("data", {})
+    hold = _unwrap_data(hold_data)
 
     # Fetch seat details to enrich the response
     seat_data, _ = call_service("GET", f"{os.environ.get('SEAT_SERVICE_URL', 'http://seat-service:5000')}/seats/{hold.get('seatId')}")
     event_data, _ = call_service("GET", f"{EVENT_SERVICE}/events/{event_id}")
+    seat_payload = _unwrap_data(seat_data)
+    event_payload = _unwrap_data(event_data)
+    venue_payload = _unwrap_data(event_payload.get("venue")) if isinstance(event_payload, dict) else {}
 
     return jsonify({"data": {
         "inventoryId": hold.get("inventoryId"),
@@ -709,14 +718,15 @@ def resume_hold(event_id):
         "eventId":     event_id,
         "seat": {
             "seatId":     hold.get("seatId"),
-            "rowNumber":  seat_data.get("rowNumber") if seat_data else None,
-            "seatNumber": seat_data.get("seatNumber") if seat_data else None,
-            "price":      event_data.get("price") if event_data else None,
+            "rowNumber":  seat_payload.get("rowNumber"),
+            "seatNumber": seat_payload.get("seatNumber"),
+            "section":    seat_payload.get("section"),
+            "price":      event_payload.get("price"),
         },
         "event": {
-            "name":      event_data.get("name") if event_data else None,
-            "date":      event_data.get("date") if event_data else None,
-            "venueName": event_data.get("venueName") if event_data else None,
-            "image":     event_data.get("image") if event_data else None,
+            "name":      event_payload.get("name"),
+            "date":      event_payload.get("date"),
+            "venueName": event_payload.get("venueName") or venue_payload.get("name"),
+            "image":     event_payload.get("image"),
         },
     }}), 200

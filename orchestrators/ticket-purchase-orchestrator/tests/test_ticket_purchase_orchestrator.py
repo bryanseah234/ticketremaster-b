@@ -221,3 +221,45 @@ def test_confirm_ticket_failure_releases_seat(mock_stub, mock_cached_hold, mock_
     res = client.post("/purchase/confirm/inv_001", json={"eventId": "evt_001"}, headers=_auth())
     assert res.status_code == 500
     stub.ReleaseSeat.assert_called_once()
+
+
+@patch("routes.call_service")
+def test_resume_hold_unwraps_enriched_event_and_seat_payloads(mock_svc, client):
+    mock_svc.side_effect = [
+        ({
+            "data": {
+                "inventoryId": "inv_001",
+                "holdToken": "tok_abc",
+                "heldUntil": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+                "seatId": "seat_001",
+            }
+        }, None),
+        ({
+            "data": {
+                "seatId": "seat_001",
+                "rowNumber": "A",
+                "seatNumber": "12",
+                "section": "VIP",
+            }
+        }, None),
+        ({
+            "data": {
+                "eventId": "evt_001",
+                "name": "Taylor Swift | The Eras Tour",
+                "date": "2026-06-15T19:30:00",
+                "price": 248.0,
+                "image": "https://cdn.example.test/eras.jpg",
+                "venue": {"name": "National Stadium"},
+            }
+        }, None),
+    ]
+
+    res = client.get("/purchase/hold/resume/evt_001", headers=_auth())
+    assert res.status_code == 200
+    payload = res.get_json()["data"]
+    assert payload["seat"]["rowNumber"] == "A"
+    assert payload["seat"]["seatNumber"] == "12"
+    assert payload["seat"]["section"] == "VIP"
+    assert payload["seat"]["price"] == 248.0
+    assert payload["event"]["name"] == "Taylor Swift | The Eras Tour"
+    assert payload["event"]["venueName"] == "National Stadium"

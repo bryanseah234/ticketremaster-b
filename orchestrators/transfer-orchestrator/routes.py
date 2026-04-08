@@ -854,7 +854,7 @@ def seller_reject(transfer_id):
 @require_auth
 def seller_verify(transfer_id):
     """
-    Seller submits OTP — executes the full transfer saga
+    Seller submits OTP — unlocks buyer OTP verification
     ---
     tags:
       - Transfer
@@ -877,7 +877,7 @@ def seller_verify(transfer_id):
               example: "654321"
     responses:
       200:
-        description: Transfer completed — ticket ownership transferred
+        description: Seller verified — status moves to pending_buyer_otp
       400:
         description: Invalid OTP or wrong transfer status
       401:
@@ -908,75 +908,32 @@ def seller_verify(transfer_id):
     if err or not verify.get("verified"):
         return _error("VALIDATION_ERROR", "OTP is incorrect or has expired.", 400)
 
-    call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}",
-                 json={"sellerOtpVerified": True})
-
-    buyer_id      = transfer["buyerId"]
-    credit_amount = transfer["creditAmount"]
-
-    # Fetch listing to get ticket_id
-    listing, _ = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}")
-    ticket_id  = listing["ticketId"] if listing else None
-
-    # Re-check buyer balance immediately before executing
-    buyer_credit, err = call_credit_service("GET", f"/credits/{buyer_id}")
+    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
     if err:
-        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
-        return _error("SERVICE_UNAVAILABLE", "Could not verify buyer balance.", 503)
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve buyer details.", 503)
 
-    buyer_balance = _get_credit_balance(buyer_credit)
-    if buyer_balance < credit_amount:
-        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
-        return _error("INSUFFICIENT_CREDITS", "Buyer no longer has sufficient credits.", 402)
+    buyer_otp, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
+                                  json={"phoneNumber": buyer["phoneNumber"]})
+    if err:
+        return _error("SERVICE_UNAVAILABLE", "Could not send OTP to buyer.", 503)
 
-    seller_credit, seller_err = call_credit_service("GET", f"/credits/{seller_id}")
-    seller_balance = _get_credit_balance(seller_credit) if not seller_err and seller_credit else 0.0
+    call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
+        "sellerOtpVerified":     True,
+        "buyerVerificationSid":  buyer_otp["sid"],
+        "status":                "pending_buyer_otp",
+    })
 
-    try:
-        _execute_saga(
-            transfer_id=transfer_id,
-            buyer_id=buyer_id,
-            seller_id=seller_id,
-            credit_amount=credit_amount,
-            ticket_id=ticket_id,
-            listing_id=transfer["listingId"],
-            buyer_balance=buyer_balance,
-            seller_balance=seller_balance,
-        )
-
-        completed_transfer = {
-            "transferId": transfer_id,
-            "listingId": transfer["listingId"],
-            "buyerId": buyer_id,
-            "sellerId": seller_id,
-            "ticketId": ticket_id,
-            "status": "completed",
-        }
-
-        transfer_payload = _build_transfer_notification_payload("transfer_completed", completed_transfer)
-        _broadcast_notification("transfer_update", transfer_payload)
-
-        ticket_payload = {
-            "eventType": "ticket_transferred",
-            "ticketId": ticket_id,
-            "ownerId": buyer_id,
-            "previousOwnerId": seller_id,
-            "transferId": transfer_id,
-            "event": transfer_payload.get("event"),
-            "eventName": transfer_payload.get("eventName"),
-        }
-        _broadcast_notification(
-            "ticket_update",
-            {key: value for key, value in ticket_payload.items() if value is not None},
-        )
-    except Exception:
-        return _error("INTERNAL_ERROR", "Transfer failed — no credits were charged.", 500)
+    _broadcast_transfer_notification("seller_verified", {
+        "transferId": transfer_id,
+        "buyerId": transfer["buyerId"],
+        "sellerId": seller_id,
+        "status": "pending_buyer_otp",
+    })
 
     return jsonify({"data": {
-        "transferId":  transfer_id,
-        "status":      "completed",
-        "completedAt": datetime.now(timezone.utc).isoformat(),
-        "ticket": {"ticketId": ticket_id, "newOwnerId": buyer_id, "status": "active"},
+        "transferId": transfer_id,
+        "status":     "pending_buyer_otp",
+        "message":    "Seller verified. OTP sent to buyer.",
     }}), 200
 
 
