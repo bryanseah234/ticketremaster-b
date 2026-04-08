@@ -24,47 +24,6 @@ param(
 $ErrorActionPreference = "Stop"
 $Tag = "local-k8s-20260329"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-
-# ── Auto-rebuild if source files have changed since last build ───────────────
-function Get-SourceHash {
-    # Hash the contents of all service/orchestrator source files
-    $paths = @("services", "orchestrators") | ForEach-Object { Join-Path $repoRoot $_ }
-    $files = $paths | ForEach-Object {
-        Get-ChildItem -Path $_ -Recurse -File -Include "*.py","*.txt","Dockerfile" -ErrorAction SilentlyContinue
-    } | Sort-Object FullName
-    $combined = ($files | ForEach-Object { "$($_.FullName):$($_.LastWriteTimeUtc.Ticks)" }) -join "|"
-    return ([System.Security.Cryptography.MD5]::Create().ComputeHash(
-        [System.Text.Encoding]::UTF8.GetBytes($combined)
-    ) | ForEach-Object { $_.ToString("x2") }) -join ''
-}
-
-$hashFile = Join-Path $repoRoot ".build-hash"
-$currentHash = Get-SourceHash
-
-$needsRebuild = $true
-if (Test-Path $hashFile) {
-    $lastHash = Get-Content $hashFile -Raw
-    if ($lastHash.Trim() -eq $currentHash) {
-        $needsRebuild = $false
-    }
-}
-
-if ($needsRebuild -and -not $SkipImageLoad) {
-    Write-Step "Source changes detected - rebuilding Docker images"
-    & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag
-    if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
-    # Reload all images into minikube
-    $desiredImages = Get-DesiredImages
-    foreach ($image in $desiredImages) {
-        Write-Host "    Loading $image"
-        & minikube image load $image
-    }
-    $currentHash | Set-Content $hashFile
-    Write-OK "Rebuild complete"
-} elseif (-not $needsRebuild) {
-    Write-OK "No source changes detected - skipping rebuild"
-}
-# ─────────────────────────────────────────────────────────────────────────────
 $script:LocalGatewayPort = 8000
 $script:LocalGatewayUrl = "http://localhost:8000"
 
@@ -117,6 +76,17 @@ function Get-DesiredImages {
         "ticketremaster/transfer-orchestrator:$Tag",
         "ticketremaster/ticket-verification-orchestrator:$Tag"
     )
+}
+
+function Get-SourceHash {
+    $paths = @("services", "orchestrators") | ForEach-Object { Join-Path $repoRoot $_ }
+    $files = $paths | ForEach-Object {
+        Get-ChildItem -Path $_ -Recurse -File -Include "*.py","*.txt","Dockerfile" -ErrorAction SilentlyContinue
+    } | Sort-Object FullName
+    $combined = ($files | ForEach-Object { "$($_.FullName):$($_.LastWriteTimeUtc.Ticks)" }) -join "|"
+    return ([System.Security.Cryptography.MD5]::Create().ComputeHash(
+        [System.Text.Encoding]::UTF8.GetBytes($combined)
+    ) | ForEach-Object { $_.ToString("x2") }) -join ''
 }
 
 function Ensure-ImagesLoaded {
@@ -368,6 +338,30 @@ function Ensure-PortForward {
 if ($PublicOnly -and -not $RunPublicTests) {
     throw "PublicOnly requires RunPublicTests."
 }
+
+# ── Auto-rebuild if source files have changed since last build ───────────────
+$hashFile = Join-Path $repoRoot ".build-hash"
+$currentHash = Get-SourceHash
+$needsRebuild = $true
+if (Test-Path $hashFile) {
+    $lastHash = Get-Content $hashFile -Raw
+    if ($lastHash.Trim() -eq $currentHash) { $needsRebuild = $false }
+}
+
+if ($needsRebuild -and -not $SkipImageLoad) {
+    Write-Step "Source changes detected - rebuilding Docker images"
+    & "$PSScriptRoot\build_k8s_images.ps1" -Tag $Tag
+    if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
+    foreach ($image in (Get-DesiredImages)) {
+        Write-Host "    Loading $image"
+        & minikube image load $image
+    }
+    $currentHash | Set-Content $hashFile
+    Write-OK "Rebuild complete"
+} elseif (-not $needsRebuild) {
+    Write-OK "No source changes detected - skipping rebuild"
+}
+# ─────────────────────────────────────────────────────────────────────────────
 
 Write-Step "Checking prerequisites"
 foreach ($cmd in @("docker", "kubectl", "minikube", "newman")) {
