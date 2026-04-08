@@ -3,13 +3,13 @@ Transfer Orchestrator routes.
 
 P2P transfer flow:
   POST /transfer/initiate            buyer initiates
-  POST /transfer/<id>/seller-accept  seller accepts → buyer OTP sent
-  POST /transfer/<id>/buyer-verify   buyer submits OTP → seller notified via queue
-  POST /transfer/<id>/seller-verify  seller submits OTP → saga executes
+  POST /transfer/<id>/seller-accept  seller accepts → seller OTP sent
+  POST /transfer/<id>/seller-verify  seller submits OTP → buyer OTP sent
+  POST /transfer/<id>/buyer-verify   buyer submits OTP → saga executes
   GET  /transfer/<id>                poll status (buyer or seller)
   POST /transfer/<id>/cancel         cancel in-progress transfer
 
-Saga on seller-verify:
+Saga on buyer-verify:
   1. Deduct buyer credits (OutSystems)     COMP: restore buyer
   2. Credit seller (OutSystems)            COMP: restore buyer + seller
   3. Log buyer credit txn
@@ -607,7 +607,7 @@ def buyer_verify(transfer_id):
               example: "123456"
     responses:
       200:
-        description: OTP verified — status moves to pending_seller_otp
+        description: Transfer completed — ticket ownership transferred
       400:
         description: Invalid OTP or wrong transfer status
       401:
@@ -626,7 +626,7 @@ def buyer_verify(transfer_id):
         return _error("TRANSFER_NOT_FOUND", "Transfer not found.", 404)
     if transfer["buyerId"] != buyer_id:
         return _error("AUTH_FORBIDDEN", "Access denied.", 403)
-    if transfer["status"] != "pending_buyer_otp":
+    if transfer["status"] != "pending_buyer_otp" or transfer.get("buyerOtpVerified"):
         return _error("VALIDATION_ERROR", "Transfer is not awaiting buyer OTP.", 400)
 
     verify, err = call_service("POST", f"{OTP_WRAPPER}/otp/verify", json={
@@ -636,34 +636,74 @@ def buyer_verify(transfer_id):
     if err or not verify.get("verified"):
         return _error("VALIDATION_ERROR", "OTP is incorrect or has expired.", 400)
 
-    # Send OTP to seller now
-    seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
-    if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not retrieve seller details.", 503)
-
-    seller_otp, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
-                                   json={"phoneNumber": seller["phoneNumber"]})
-    if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not send OTP to seller.", 503)
-
     call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
-        "buyerOtpVerified":      True,
-        "sellerVerificationSid": seller_otp["sid"],
-        "status":                "pending_seller_otp",
+        "buyerOtpVerified": True,
     })
-    
-    # Broadcast buyer verification
-    _broadcast_transfer_notification("buyer_verified", {
-        "transferId": transfer_id,
-        "buyerId": buyer_id,
-        "sellerId": transfer["sellerId"],
-        "status": "pending_seller_otp",
-    })
+
+    seller_id = transfer["sellerId"]
+    credit_amount = transfer["creditAmount"]
+
+    listing, _ = call_service("GET", f"{MARKETPLACE_SERVICE}/listings/{transfer['listingId']}")
+    ticket_id = listing["ticketId"] if listing else None
+
+    buyer_credit, err = call_credit_service("GET", f"/credits/{buyer_id}")
+    if err:
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
+        return _error("SERVICE_UNAVAILABLE", "Could not verify buyer balance.", 503)
+
+    buyer_balance = _get_credit_balance(buyer_credit)
+    if buyer_balance < credit_amount:
+        call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={"status": "failed"})
+        return _error("INSUFFICIENT_CREDITS", "Buyer no longer has sufficient credits.", 402)
+
+    seller_credit, seller_err = call_credit_service("GET", f"/credits/{seller_id}")
+    seller_balance = _get_credit_balance(seller_credit) if not seller_err and seller_credit else 0.0
+
+    try:
+        _execute_saga(
+            transfer_id=transfer_id,
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            credit_amount=credit_amount,
+            ticket_id=ticket_id,
+            listing_id=transfer["listingId"],
+            buyer_balance=buyer_balance,
+            seller_balance=seller_balance,
+        )
+
+        completed_transfer = {
+            "transferId": transfer_id,
+            "listingId": transfer["listingId"],
+            "buyerId": buyer_id,
+            "sellerId": seller_id,
+            "ticketId": ticket_id,
+            "status": "completed",
+        }
+
+        transfer_payload = _build_transfer_notification_payload("transfer_completed", completed_transfer)
+        _broadcast_notification("transfer_update", transfer_payload)
+
+        ticket_payload = {
+            "eventType": "ticket_transferred",
+            "ticketId": ticket_id,
+            "ownerId": buyer_id,
+            "previousOwnerId": seller_id,
+            "transferId": transfer_id,
+            "event": transfer_payload.get("event"),
+            "eventName": transfer_payload.get("eventName"),
+        }
+        _broadcast_notification(
+            "ticket_update",
+            {key: value for key, value in ticket_payload.items() if value is not None},
+        )
+    except Exception:
+        return _error("INTERNAL_ERROR", "Transfer failed — no credits were charged.", 500)
 
     return jsonify({"data": {
-        "transferId": transfer_id,
-        "status":     "pending_seller_otp",
-        "message":    "Your OTP verified. OTP sent to seller.",
+        "transferId":  transfer_id,
+        "status":      "completed",
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "ticket": {"ticketId": ticket_id, "newOwnerId": buyer_id, "status": "active"},
     }}), 200
 
 
@@ -673,7 +713,7 @@ def buyer_verify(transfer_id):
 @require_auth
 def seller_accept(transfer_id):
     """
-    Seller accepts the transfer request — OTP sent to buyer
+    Seller accepts the transfer request — OTP sent to seller
     ---
     tags:
       - Transfer
@@ -686,7 +726,7 @@ def seller_accept(transfer_id):
         type: string
     responses:
       200:
-        description: Accepted — status moves to pending_buyer_otp
+        description: Accepted — status moves to pending_seller_otp
       400:
         description: Wrong transfer status
       401:
@@ -704,19 +744,18 @@ def seller_accept(transfer_id):
     if transfer["status"] != "pending_seller_acceptance":
         return _error("VALIDATION_ERROR", "Transfer is not awaiting seller acceptance.", 400)
 
-    # Send OTP to buyer first
-    buyer, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['buyerId']}")
+    seller, err = call_service("GET", f"{USER_SERVICE}/users/{transfer['sellerId']}")
     if err:
-        return _error("SERVICE_UNAVAILABLE", "Could not retrieve buyer details.", 503)
+        return _error("SERVICE_UNAVAILABLE", "Could not retrieve seller details.", 503)
 
     otp_result, err = call_service("POST", f"{OTP_WRAPPER}/otp/send",
-                                   json={"phoneNumber": buyer["phoneNumber"]})
+                                   json={"phoneNumber": seller["phoneNumber"]})
     if err:
         return _error("SERVICE_UNAVAILABLE", "Could not send OTP.", 503)
 
     call_service("PATCH", f"{TRANSFER_SERVICE}/transfers/{transfer_id}", json={
-        "buyerVerificationSid": otp_result["sid"],
-        "status":               "pending_buyer_otp",
+        "sellerVerificationSid": otp_result["sid"],
+        "status":                "pending_seller_otp",
     })
     
     # Broadcast seller acceptance
@@ -724,13 +763,13 @@ def seller_accept(transfer_id):
         "transferId": transfer_id,
         "buyerId": transfer["buyerId"],
         "sellerId": seller_id,
-        "status": "pending_buyer_otp",
+        "status": "pending_seller_otp",
     })
 
     return jsonify({"data": {
         "transferId": transfer_id,
-        "status":     "pending_buyer_otp",
-        "message":    "Request accepted. OTP sent to buyer.",
+        "status":     "pending_seller_otp",
+        "message":    "Request accepted. OTP sent to seller.",
     }}), 200
 
 

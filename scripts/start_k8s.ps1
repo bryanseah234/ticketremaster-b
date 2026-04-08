@@ -27,6 +27,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $script:LocalGatewayStateFile = Join-Path $repoRoot ".local-gateway-url"
 $script:LocalGatewayPort = 8000
 $script:LocalGatewayUrl = "http://localhost:8000"
+$script:PublicGatewayUrl = "https://ticketremasterapi.hong-yi.me"
 
 function Write-Step($Message) {
     Write-Host "`n==> $Message" -ForegroundColor Cyan
@@ -347,14 +348,20 @@ function Try-WaitDeploymentReady {
         [int]$TimeoutSeconds = 300
     )
 
-    try {
-        Write-Host "    Waiting for deployment/$Name..."
-        Invoke-External -Command "kubectl" -Arguments @("rollout", "status", "deployment/$Name", "-n", $Namespace, "--timeout=${TimeoutSeconds}s") -ErrorMessage "Deployment $Name in $Namespace did not become ready."
+    Write-Host "    Waiting for deployment/$Name..."
+    $output = & kubectl rollout status "deployment/$Name" -n $Namespace "--timeout=${TimeoutSeconds}s" 2>&1
+
+    if ($LASTEXITCODE -eq 0) {
         return $true
-    } catch {
-        Write-Warn $_.Exception.Message
-        return $false
     }
+
+    $message = ($output | Out-String).Trim()
+    if (-not $message) {
+        $message = "Deployment $Name in $Namespace did not become ready."
+    }
+
+    Write-Warn $message
+    return $false
 }
 
 function Wait-JobsComplete {
@@ -634,34 +641,58 @@ $canRunPublicTests = $RunPublicTests
 if ($RunPublicTests) {
     Write-Step "Checking Cloudflare tunnel readiness"
 
-    # Pull the cloudflared image into minikube if not already present
-    $cfImage = "cloudflare/cloudflared"
-    $loadedImagesText = (& minikube image list 2>&1) | Out-String
-    if ($loadedImagesText -notmatch [regex]::Escape($cfImage)) {
-        Write-Host "    Pulling cloudflared image into Minikube (first run may take a minute)..."
-        & minikube image pull cloudflare/cloudflared:latest 2>&1 | Out-Null
+    # Probe outbound port 7844 before waiting on cloudflared - if blocked, skip immediately
+    # rather than hanging for 5+ minutes on a rollout that can never succeed.
+    $port7844Reachable = $false
+    Write-Host "    Probing outbound TCP 7844 to Cloudflare edge (198.41.200.63)..."
+    try {
+        $tcpClient = [System.Net.Sockets.TcpClient]::new()
+        $connectTask = $tcpClient.ConnectAsync("198.41.200.63", 7844)
+        if ($connectTask.Wait(5000) -and $tcpClient.Connected) {
+            $port7844Reachable = $true
+        }
+        $tcpClient.Close()
+    } catch { }
+
+    if (-not $port7844Reachable) {
+        Write-Warn "Outbound TCP 7844 is blocked on this network - Cloudflare Tunnel cannot connect."
+        Write-Warn "To fix: allow outbound TCP/UDP 7844 from this machine to 0.0.0.0/0 in your firewall/router."
+        Write-Warn "Skipping cloudflared rollout and public tests to avoid hanging."
+        $canRunPublicTests = $false
+    } else {
+        Write-OK "Port 7844 reachable - proceeding with cloudflared"
     }
 
-    $cloudflaredReady = Try-WaitDeploymentReady -Namespace "ticketremaster-edge" -Name "cloudflared" -TimeoutSeconds 300
-    if (-not $cloudflaredReady) {
-        Write-Warn "Cloudflared did not become ready. Restarting the deployment and retrying..."
-        & kubectl rollout restart deployment/cloudflared -n ticketremaster-edge | Out-Null
+    if ($canRunPublicTests) {
+        # Pull the cloudflared image into minikube if not already present
+        $cfImage = "cloudflare/cloudflared"
+        $loadedImagesText = (& minikube image list 2>&1) | Out-String
+        if ($loadedImagesText -notmatch [regex]::Escape($cfImage)) {
+            Write-Host "    Pulling cloudflared image into Minikube (first run may take a minute)..."
+            & minikube image pull cloudflare/cloudflared:latest 2>&1 | Out-Null
+        }
+
         $cloudflaredReady = Try-WaitDeploymentReady -Namespace "ticketremaster-edge" -Name "cloudflared" -TimeoutSeconds 300
         if (-not $cloudflaredReady) {
-            Write-Warn "Cloudflared rollout still not ready after restart. Checking the public URL directly."
+            Write-Warn "Cloudflared did not become ready. Restarting the deployment and retrying..."
+            & kubectl rollout restart deployment/cloudflared -n ticketremaster-edge | Out-Null
+            $cloudflaredReady = Try-WaitDeploymentReady -Namespace "ticketremaster-edge" -Name "cloudflared" -TimeoutSeconds 300
+            if (-not $cloudflaredReady) {
+                Write-Warn "Cloudflared rollout still not ready after restart. Checking the public URL directly."
+            }
         }
-    }
 
-    if ($cloudflaredReady) {
-        Write-OK "Cloudflared is ready"
-    }
+        if ($cloudflaredReady) {
+            Write-OK "Cloudflared is ready"
+        }
 
-    try {
-        Wait-HttpEndpoint -Name "Public gateway" -Url "https://ticketremasterapi.hong-yi.me/events" -ExpectedStatusCodes @(200) -TimeoutSeconds 240
-    } catch {
-        Write-Warn $_.Exception.Message
-        Write-Warn "Public URL is not reachable yet. Continuing with localhost only."
-        $canRunPublicTests = $false
+        try {
+            Wait-HttpEndpoint -Name "Public gateway" -Url "$script:PublicGatewayUrl/events" -ExpectedStatusCodes @(200) -TimeoutSeconds 240
+        } catch {
+            Write-Warn $_.Exception.Message
+            Write-Warn "Public URL is not reachable yet. Continuing with localhost only."
+            $canRunPublicTests = $false
+        }
     }
 }
 
@@ -688,6 +719,7 @@ if ($canRunPublicTests) {
         "run",
         "postman/TicketRemaster.gateway.postman_collection.json",
         "-e", "postman/TicketRemaster.gateway-public.postman_environment.json",
+        "--env-var", "gateway_url=$script:PublicGatewayUrl",
         "--reporters", "cli"
     ) -ErrorMessage "Public Newman smoke tests failed."
 } else {
@@ -699,7 +731,7 @@ if (-not $SkipPortForward -and -not $PublicOnly) {
     Write-Host "    Local gateway:  $script:LocalGatewayUrl" -ForegroundColor Green
 }
 if ($canRunPublicTests) {
-    Write-Host "    Public gateway: https://ticketremasterapi.hong-yi.me" -ForegroundColor Green
+    Write-Host "    Public gateway: $script:PublicGatewayUrl" -ForegroundColor Green
 } elseif ($RunPublicTests) {
     Write-Host "    Public gateway: not ready yet (cloudflared still reconnecting)" -ForegroundColor Yellow
 }
