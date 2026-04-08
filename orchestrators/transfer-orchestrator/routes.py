@@ -40,6 +40,7 @@ CREDIT_TXN_SERVICE  = os.environ.get("CREDIT_TRANSACTION_SERVICE_URL", "http://c
 TICKET_SERVICE      = os.environ.get("TICKET_SERVICE_URL",             "http://ticket-service:5000")
 USER_SERVICE        = os.environ.get("USER_SERVICE_URL",               "http://user-service:5000")
 EVENT_SERVICE       = os.environ.get("EVENT_SERVICE_URL",              "http://event-service:5000")
+VENUE_SERVICE       = os.environ.get("VENUE_SERVICE_URL",              "http://venue-service:5000")
 SEAT_INV_SERVICE    = os.environ.get("SEAT_INVENTORY_SERVICE_URL",     "http://seat-inventory-service:5000")
 SEAT_SERVICE        = os.environ.get("SEAT_SERVICE_URL",               "http://seat-service:5000")
 NOTIFICATION_SERVICE = os.environ.get("NOTIFICATION_SERVICE_URL",      "http://notification-service:8109")

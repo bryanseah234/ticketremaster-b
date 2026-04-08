@@ -334,11 +334,11 @@ def test_seller_verify_saga_compensation_on_failure(mock_svc, mock_credit, clien
 def test_get_transfer_buyer(mock_svc, client):
     mock_svc.side_effect = [
         (MOCK_TRANSFER, None),
-        ({}, None),
         (MOCK_LISTING, None),
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
+        ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
     ]
@@ -351,11 +351,11 @@ def test_get_transfer_buyer(mock_svc, client):
 def test_get_transfer_seller(mock_svc, client):
     mock_svc.side_effect = [
         (MOCK_TRANSFER, None),
-        ({}, None),
         (MOCK_LISTING, None),
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
+        ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
     ]
@@ -402,11 +402,11 @@ def test_get_pending_transfers_enriched(mock_svc, client):
     pending = [{**MOCK_TRANSFER, "status": "pending_seller_acceptance"}]
     mock_svc.side_effect = [
         ({"transfers": pending}, None),
-        ({}, None),
         (MOCK_LISTING, None),
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
+        ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
     ]
@@ -422,11 +422,11 @@ def test_get_my_pending_transfers_enriched(mock_svc, client):
     pending = [{**MOCK_TRANSFER, "status": "pending_buyer_otp"}]
     mock_svc.side_effect = [
         ({"transfers": pending}, None),
-        ({}, None),
         (MOCK_LISTING, None),
         (MOCK_TICKET, None),
         (MOCK_EVENT, None),
         (MOCK_VENUE, None),
+        ({}, None),
         (MOCK_INVENTORY, None),
         (MOCK_SEATS, None),
     ]
