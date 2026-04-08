@@ -40,3 +40,29 @@ function Test-DbSnapshotAvailable {
 
     return $false
 }
+
+function Invoke-DbPodSql {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Target,
+        [Parameter(Mandatory)]
+        [string]$Sql
+    )
+
+    $command = "export PGPASSWORD=`"`$POSTGRES_PASSWORD`"; psql -X -A -t -v ON_ERROR_STOP=1 -U `"`$POSTGRES_USER`" -d `"`$POSTGRES_DB`" -c '$Sql'"
+    $result = & kubectl exec -n $Target.Namespace $Target.Pod -c postgres -- sh -lc $command
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed SQL query against $($Target.Name)"
+    }
+
+    (($result | Out-String).Trim())
+}
+
+function Get-DbSnapshotTargetByName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    Get-DbSnapshotTargets | Where-Object { $_.Name -eq $Name } | Select-Object -First 1
+}

@@ -1,5 +1,6 @@
 param(
-    [string]$OutputPath
+    [string]$OutputPath,
+    [switch]$SkipIfTransientState
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,6 +9,21 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 
 if (-not $OutputPath) {
     $OutputPath = Get-DefaultSnapshotDirectory -RepoRoot $repoRoot
+}
+
+if ($SkipIfTransientState) {
+    $seatInventoryTarget = Get-DbSnapshotTargetByName -Name "seat-inventory-service-db"
+    $transferTarget = Get-DbSnapshotTargetByName -Name "transfer-service-db"
+
+    $activeSeatHolds = [int](Invoke-DbPodSql -Target $seatInventoryTarget -Sql 'SELECT COUNT(*) FROM seat_inventory WHERE status = ''held'';')
+    $activeTransfers = [int](Invoke-DbPodSql -Target $transferTarget -Sql 'SELECT COUNT(*) FROM transfers WHERE status IN (''pending_seller_acceptance'', ''pending_seller_otp'', ''pending_buyer_otp'') AND "expiresAt" > NOW();')
+
+    if ($activeSeatHolds -gt 0 -or $activeTransfers -gt 0) {
+        Write-Host "Skipping snapshot because transient workflow state is still active."
+        Write-Host "Active seat holds: $activeSeatHolds"
+        Write-Host "Active pending transfers: $activeTransfers"
+        exit 0
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null

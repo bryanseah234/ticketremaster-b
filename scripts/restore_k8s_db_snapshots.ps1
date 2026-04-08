@@ -45,6 +45,39 @@ foreach ($target in $targets) {
 Write-Host ""
 Write-Host "Restore complete. Restored $restoredCount database dump(s)."
 
+$seatInventoryTarget = Get-DbSnapshotTargetByName -Name "seat-inventory-service-db"
+$transferTarget = Get-DbSnapshotTargetByName -Name "transfer-service-db"
+
+$releasedHolds = Invoke-DbPodSql -Target $seatInventoryTarget -Sql @'
+WITH released AS (
+    UPDATE seat_inventory
+       SET status = 'available',
+           "heldByUserId" = NULL,
+           "holdToken" = NULL,
+           "heldUntil" = NULL,
+           "updatedAt" = NOW()
+     WHERE status = 'held'
+       AND ("heldUntil" IS NULL OR "heldUntil" <= NOW())
+ RETURNING 1
+)
+SELECT COUNT(*) FROM released;
+'@
+
+$expiredTransfers = Invoke-DbPodSql -Target $transferTarget -Sql @'
+WITH expired AS (
+    UPDATE transfers
+       SET status = 'expired'
+     WHERE status IN ('pending_seller_acceptance', 'pending_seller_otp', 'pending_buyer_otp')
+       AND "expiresAt" <= NOW()
+ RETURNING 1
+)
+SELECT COUNT(*) FROM expired;
+'@
+
+Write-Host "Expired transient state cleanup:"
+Write-Host "  Released expired seat holds: $releasedHolds"
+Write-Host "  Expired stale transfers: $expiredTransfers"
+
 if (-not $SkipSeedJobs) {
     Write-Host "Re-running seed jobs to backfill any baseline rows missing from the snapshot..."
     & (Join-Path $PSScriptRoot "rerun_k8s_seeds.ps1")
