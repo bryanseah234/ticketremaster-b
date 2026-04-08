@@ -386,6 +386,12 @@ Write-Step "Applying k8s manifests"
 Invoke-External -Command "kubectl" -Arguments @("apply", "-k", "k8s/base", "--request-timeout=30s") -ErrorMessage "kubectl apply failed."
 Write-OK "Manifests applied"
 
+Write-Step "Restarting all deployments"
+& kubectl rollout restart deployment -n ticketremaster-data 2>&1 | Out-Null
+& kubectl rollout restart deployment -n ticketremaster-core 2>&1 | Out-Null
+& kubectl rollout restart deployment -n ticketremaster-edge 2>&1 | Out-Null
+Write-OK "Restart triggered"
+
 Write-Step "Waiting for data plane statefulsets"
 Wait-StatefulSetsReady -Namespace "ticketremaster-data"
 Write-OK "Data plane ready"
