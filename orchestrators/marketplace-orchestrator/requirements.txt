@@ -6,5 +6,5 @@ gunicorn==22.0.0
 flasgger==0.9.7.1
 
 # Testing
-pytest==8.3.5
+pytest==9.0.3
 pytest-mock==3.14.0
